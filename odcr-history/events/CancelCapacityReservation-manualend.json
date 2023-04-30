@@ -1,0 +1,64 @@
+{  
+    "_comment": "--------------------- UNLIMITED Capacity Reservation Example (User Creates Reservation that has to be Manually Cancelled): -------------------------",
+
+    "version": "0",
+    "id": "bfaeac7f-a57f-ddc8-2058-2e2aa99fd13d",
+    "detail-type": "AWS API Call via CloudTrail",
+    "source": "aws.ec2",
+    "account": "123456789012",
+    "time": "2018-12-18T00:23:14Z",
+    "region": "us-east-1",
+    "resources": [],
+    "detail": {
+
+        
+        "eventVersion": "1.08",
+        "userIdentity": {
+            "type": "AssumedRole",
+            "principalId": "AROAYJS4TH7HKS36UETR4:kloucks",
+            "arn": "arn:aws:sts::570351108046:assumed-role/cloud303-rnd/kloucks",
+            "accountId": "570351108046",
+            "accessKeyId": "ASIAYJS4TH7HHM4XNGEY",
+            "sessionContext": {
+                "sessionIssuer": {
+                    "type": "Role",
+                    "principalId": "AROAYJS4TH7HKS36UETR4",
+                    "arn": "arn:aws:iam::570351108046:role/cloud303-rnd",
+                    "accountId": "570351108046",
+                    "userName": "cloud303-rnd"
+                },
+                "webIdFederationData": {},
+                "attributes": {
+                    "creationDate": "2023-01-29T00:49:58Z",
+                    "mfaAuthenticated": "false"
+                }
+            }
+        },
+        "eventTime": "2023-01-29T01:34:46Z",
+        "eventSource": "ec2.amazonaws.com",
+        "eventName": "CancelCapacityReservation",
+        "awsRegion": "us-west-2",
+        "sourceIPAddress": "50.39.190.67",
+        "userAgent": "AWS Internal",
+        "requestParameters": {
+            "CancelCapacityReservationRequest": {
+                "CapacityReservationId": "cr-0c1589281e48747cf"
+            }
+        },
+        "responseElements": {
+            "CancelCapacityReservationResponse": {
+                "xmlns": "http://ec2.amazonaws.com/doc/2016-11-15/",
+                "requestId": "4bf0bd60-4698-496c-b094-1ad135626fd9",
+                "return": true
+            }
+        },
+        "requestID": "4bf0bd60-4698-496c-b094-1ad135626fd9",
+        "eventID": "9fe59e92-977e-4276-93ec-22246f335190",
+        "readOnly": false,
+        "eventType": "AwsApiCall",
+        "managementEvent": true,
+        "recipientAccountId": "570351108046",
+        "eventCategory": "Management",
+        "sessionCredentialFromConsole": "true"
+    }
+}

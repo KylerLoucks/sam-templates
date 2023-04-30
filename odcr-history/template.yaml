@@ -1,0 +1,119 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  SAM Template for deploying an EventBridge rule to trigger Lambda to push ODCR updates to a DynamoDB Table
+
+# More info about Globals: https://github.com/awslabs/serverless-application-model/blob/master/docs/globals.rst
+Globals:
+  Function:
+    Timeout: 3
+    MemorySize: 128
+
+Resources:
+
+  # DynamoDB Table
+
+  dynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: !Sub odcr-history-${AWS::Region}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: capacityReservationId
+          AttributeType: S
+      KeySchema:
+        # Partition Key
+        - AttributeName: capacityReservationId
+          KeyType: HASH
+
+  # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+  odcrEventsDynamoFunction:
+    Type: AWS::Serverless::Function 
+    Properties:
+      CodeUri: odcrEventsToDynamoFunction/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Environment:
+        Variables:
+          dynamoTableName: !Ref dynamoDBTable
+      Architectures:
+        - x86_64
+      Policies:
+          # SAM Built-in Policy
+        - DynamoDBCrudPolicy:
+            TableName: !Ref dynamoDBTable
+      Events:
+        Trigger:
+          Type: CloudWatchEvent
+          Properties:
+            Pattern:
+              source:
+                - aws.ec2
+              detail-type:
+                - AWS API Call via CloudTrail
+              detail:
+                eventSource:
+                  - ec2.amazonaws.com
+                eventName:
+                  - CreateCapacityReservation
+                  - CancelCapacityReservation
+  
+
+  # Lambda Custom Resource
+  
+  cloudtrailDynamoFunction:
+    Type: AWS::Serverless::Function 
+    Properties:
+      Timeout: 15
+      CodeUri: cloudtrailToDynamoFunction/
+      Handler: app.lambda_handler
+      Runtime: python3.9
+      Architectures:
+        - x86_64
+      Policies:
+          # SAM Built-in Policy
+        - DynamoDBCrudPolicy:
+            TableName: !Ref dynamoDBTable
+        
+        - Version: 2012-10-17
+          Statement:
+            - Sid: CloudTrailReadOnly
+              Effect: Allow
+              Action: 
+                - cloudtrail:Get*
+                - cloudtrail:Describe*
+                - cloudtrail:List*
+                - cloudtrail:LookupEvents
+              Resource: "*"
+
+  lambdaCustomResource:
+    Type: Custom::CloudTrailLogsToDynamo
+    Properties:
+      ServiceToken: !GetAtt cloudtrailDynamoFunction.Arn
+
+      # Use event['ResourceProperties']['DynamoDBTableName'] to reference this in the Lambda
+      DynamoDBTableName: !Ref dynamoDBTable
+
+
+Outputs:
+  # Find out more about other implicit resources you can reference within SAM
+  # https://github.com/awslabs/serverless-application-model/blob/master/docs/internals/generated_resources.rst#api
+  odcrEventsDynamoFunction:
+    Description: DyanmoDB CRUD Lambda Function ARN
+    Value: !GetAtt odcrEventsDynamoFunction.Arn
+
+  odcrEventsDynamoFunctionIamRole:
+    Description: Implicit IAM Role created for DynamoDB CRUD Lambda function
+    Value: !GetAtt odcrEventsDynamoFunctionRole.Arn
+  
+  cloudtrailDynamoFunction:
+    Description: CloudTrail events to DynamoDB Lambda Function ARN
+    Value: !GetAtt cloudtrailDynamoFunction.Arn
+  
+  cloudtrailDynamoFunctionIamRole:
+    Description: Implicit IAM Role created for CloudTrail events to DynamoDB Lambda function
+    Value: !GetAtt cloudtrailDynamoFunctionRole.Arn
+ 
+  dynamoDBTable:
+    Description: DynamoDB table used to store data on when EC2 On Demand Capacity Reservations were Started/Cancelled
+    Value: !GetAtt dynamoDBTable.Arn

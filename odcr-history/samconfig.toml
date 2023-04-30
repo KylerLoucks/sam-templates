@@ -1,0 +1,13 @@
+version = 0.1
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "odcr-sam-template"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-8pr3aj9kgxd0"
+s3_prefix = "odcr-sam-template"
+region = "us-west-2"
+profile = "c303-rnd"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+image_repositories = []
+disable_rollback = true
