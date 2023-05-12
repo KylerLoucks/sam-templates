@@ -3,6 +3,8 @@
 
 exports.handler = async (event) => {
     
-    console.info(event)
-
+    console.log(event)
+    return {
+        statusCode: 200
+    };
 };
