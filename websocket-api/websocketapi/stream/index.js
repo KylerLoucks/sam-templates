@@ -17,11 +17,11 @@ exports.handler = async (event) => {
     // 	model: "nova",
     });
     
-    
+    deepgramLive.send(event.body.data)
     
     deepgramLive.addListener("open", () => {
     	console.log("opened connection with deepgram")
-    	deepgramLive.send(event.body.data)
+    	
     });
     
     deepgramLive.addListener('transcriptReceived', (data) => console.log("GOT TRANSCRIPTION: ", data))

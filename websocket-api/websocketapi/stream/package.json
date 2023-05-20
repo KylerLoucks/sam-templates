@@ -1,6 +1,10 @@
 {
     "name": "stream",
     "version": "1.0.0",
-    "description": "recieves audio stream and transcribes from deepgram"
+    "description": "recieves audio stream and transcribes from deepgram",
+    "dependencies": {
+      "@deepgram/sdk": "^1.21.0",
+      "aws-sdk": "^2.1379.0"
+    }
   }
   

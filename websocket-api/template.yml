@@ -119,8 +119,8 @@ Resources:
       Handler: index.handler
       Runtime: nodejs16.x
       CodeUri: websocketapi/stream
-      Layers:
-        - !Ref deepGramLayer
+      # Layers:
+      #   - !Ref deepGramLayer
       MemorySize: 256
       Timeout: 120
 
