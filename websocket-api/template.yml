@@ -69,6 +69,8 @@ Resources:
 
   onConnectLambdaPermission:
     Type: AWS::Lambda::Permission
+    DependsOn:
+      - webSocketApiGatewayApi
     Properties:
       FunctionName: !Ref onConnectLambda
       Action: lambda:InvokeFunction
@@ -107,6 +109,8 @@ Resources:
 
   streamLambdaPermission:
     Type: AWS::Lambda::Permission
+    DependsOn:
+      - webSocketApiGatewayApi
     Properties:
       FunctionName: !Ref streamLambda
       Action: lambda:InvokeFunction
@@ -119,10 +123,18 @@ Resources:
       Handler: index.handler
       Runtime: nodejs16.x
       CodeUri: websocketapi/stream
-      # Layers:
-      #   - !Ref deepGramLayer
+      Layers:
+        - !Ref deepGramLayer
       MemorySize: 256
       Timeout: 120
+      Policies:
+        # Required for sending data back to clients
+        - Statement:
+          - Effect: Allow
+            Action:
+              - execute-api:ManageConnections
+            Resource:
+              - !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${webSocketApiGatewayApi}/*
 
 
   # Store websocket connection session state
@@ -133,7 +145,7 @@ Resources:
     Properties:
       TableName:
         !Sub
-          - 'wss-session-state-${RandomGUID}'
+          - 'wsSessionState-${RandomGUID}'
           - { RandomGUID: !Select [0, !Split ["-", !Select [2, !Split ["/", !Ref AWS::StackId ]]]]}
       AttributeDefinitions:
       - AttributeName: connectionId
