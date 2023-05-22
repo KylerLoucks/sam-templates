@@ -36,6 +36,7 @@ Resources:
     DependsOn:
       - webSocketOnConnectRoute
       - webSocketStreamRoute
+      - wsDefaultRoute
     Properties:
       ApiId: !Ref webSocketApiGatewayApi
 
@@ -118,6 +119,55 @@ Resources:
       SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${webSocketApiGatewayApi}/*"
 
   streamLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Runtime: nodejs16.x
+      CodeUri: websocketapi/stream
+      Layers:
+        - !Ref deepGramLayer
+      MemorySize: 256
+      Timeout: 120
+      Policies:
+        # Required for sending data back to clients
+        - Statement:
+          - Effect: Allow
+            Action:
+              - execute-api:ManageConnections
+            Resource:
+              - !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${webSocketApiGatewayApi}/*
+
+  # Default Route:
+  wsDefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      RouteKey: $default
+      ApiId: !Ref webSocketApiGatewayApi
+      AuthorizationType: NONE
+      OperationName: Default
+      Target: !Sub integrations/${wsDefaultIntegration}
+  
+  wsDefaultIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref webSocketApiGatewayApi
+      Description: Default Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${defaultLambda.Arn}/invocations
+
+
+  defaultLambdaPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - webSocketApiGatewayApi
+    Properties:
+      FunctionName: !Ref defaultLambda
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${webSocketApiGatewayApi}/*"
+
+
+  defaultLambda:
     Type: AWS::Serverless::Function
     Properties:
       Handler: index.handler
