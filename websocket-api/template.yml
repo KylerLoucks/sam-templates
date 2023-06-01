@@ -4,14 +4,14 @@ Transform: 'AWS::Serverless-2016-10-31'
 
 Resources:
 
-  deepGramLayer:
+  lambdaLayer:
     Type: AWS::Serverless::LayerVersion
     Description: The AWS SDK with support for Deepgram.
     Metadata:
       BuildMethod: nodejs16.x
     Properties:
-      LayerName: aws-deepgram-sdk-layer
-      Description: Deepgram Layer
+      LayerName: aws-lambda-auth-layer
+      Description: Custom Authorizer Layer
       ContentUri: deepgrampackages/
       CompatibleRuntimes:
         - nodejs16.x
@@ -22,13 +22,6 @@ Resources:
       Name: !Sub ${AWS::StackName}
       ProtocolType: WEBSOCKET
       RouteSelectionExpression: "$request.body.action"
-      
-
-            # Auth:
-      #   Authorizers:
-      #     CognitoAuthorizer:
-      #       Type: COGNITO_USER_POOLS
-      #       UserPoolArn: !GetAtt UserPool.Arn
 
   # WebSocket API Stage deployment
   webSocketApiProdDeployment:
@@ -48,6 +41,38 @@ Resources:
       ApiId: !Ref webSocketApiGatewayApi
 
 
+  wsAuthorizer:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Properties:
+      Name: LambdaAuthorizer
+      ApiId: !Ref webSocketApiGatewayApi
+      AuthorizerType: REQUEST
+      IdentitySource: 
+        - route.request.querystring.Auth # Query String param to use to validate connection
+      AuthorizerUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${wsAuthorizerFunction.Arn}/invocations
+
+  wsAuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Layers:
+        - !Ref lambdaLayer
+      Runtime: nodejs16.x
+      CodeUri: websocketauthorizer/
+      Environment:
+        # Pass cognito userpool & client id to environment variables to use jwt verifier.
+        Variables:
+          USERPOOLID: !Ref UserPool
+          USERPOOLCLIENTID: !Ref UserPoolClient
+
+  wsAuthorizerPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - webSocketApiGatewayApi
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref wsAuthorizerFunction
+      Principal: apigateway.amazonaws.com
 
   # $connect route
   webSocketOnConnectRoute:
@@ -55,7 +80,9 @@ Resources:
     Properties:
       RouteKey: $connect
       ApiId: !Ref webSocketApiGatewayApi
-      AuthorizationType: NONE
+      # Apply ApiGateway Authorizer to the route request.
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref wsAuthorizer
       OperationName: OnConnectRoute
       Target: !Sub integrations/${webSocketOnConnectIntegration}
   
