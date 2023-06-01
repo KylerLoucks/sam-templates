@@ -7,8 +7,8 @@ exports.handler = async (event, context, callback) => {
 
     // A REQUEST authorizer that uses request 
     // parameters to allow or deny a request. In this case, a request is  
-    // authorized if the client-supplied Authorization header
-    // in the request context match a valid JSON web token provided by cognito.
+    // authorized if the client-supplied 'Auth' query string parameter
+    // in the request context match a valid JSON web token provided by Cognito.
 
     // Retrieve request parameters from the Lambda function input:
     const headers = event.headers
