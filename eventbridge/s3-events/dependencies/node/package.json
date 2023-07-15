@@ -1,0 +1,14 @@
+{
+    "name": "node-layer",
+    "version": "1.0",
+    "author": "Kyler Loucks",
+    "license": "MIT-0",
+    "dependencies": {
+      "aws-sdk": "^2.962.0",
+      "base64-js": "^1.5.1",
+      "cfn-response": "^1.0.1",
+      "uuid": "^8.3.2",
+      "aws-jwt-verify": "^4.0.0"
+    }
+  }
+  
