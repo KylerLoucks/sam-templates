@@ -1,0 +1,160 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+
+Resources:
+
+  # ===============================
+  # =========== LAYERS ============
+  # ===============================
+
+  # Optional Layer for AWS SDK for Node.Js
+  NodeLayer:
+    Type: AWS::Serverless::LayerVersion
+    Description: The AWS SDK.
+    Metadata:
+      BuildMethod: nodejs16.x
+    Properties:
+      LayerName: node-layer
+      Description: Node16 Layer
+      ContentUri: dependencies/node
+      CompatibleRuntimes:
+        - nodejs16.x
+
+  # Optional Layer for Python
+  PythonLayer:
+    Type: AWS::Serverless::LayerVersion
+    Description: Layer that can be used with all Python based Lambda functions
+    Metadata:
+      BuildMethod: python3.9
+    Properties:
+      LayerName: python-layer
+      Description: Layer that can be used with all Python based Lambda functions
+      ContentUri: dependencies/python
+      CompatibleRuntimes:
+        - python3.9
+
+
+  # ================================
+  # ========= API GATEWAY ==========
+  # ================================
+  ApiGatewayLogRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+
+
+  # Enable logs for the API:
+  ApiAccountLogRole:
+    Type: AWS::ApiGateway::Account
+    Properties:
+      CloudWatchRoleArn: !GetAtt ApiGatewayLogRole.Arn
+
+  ApiGatewayApi:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: prod
+      AccessLogSetting:
+        DestinationArn: !GetAtt AccessLogGroup.Arn
+        Format: '{ "requestId": "$context.requestId", "ip": "$context.identity.sourceIp", "caller": "$context.identity.caller", "requestTime": "$context.requestTimeEpoch", "httpMethod": "$context.httpMethod", "resourcePath": "$context.resourcePath", "status": "$context.status", "protocol": "$context.protocol", "responseLength": "$context.responseLength" }'
+      MethodSettings:
+        - HttpMethod: "*"
+          ResourcePath: /*
+          LoggingLevel: INFO
+      Cors:
+        AllowMethods: POST, OPTIONS, GET
+        AllowHeaders: Authorization
+        AllowOrigin: "*"
+        MaxAge: 600
+      Auth:
+        Authorizers:
+          CognitoAuthorizer:
+            Type: COGNITO_USER_POOLS
+            UserPoolArn: !GetAtt UserPool.Arn
+
+  AccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub /apigateway/${AWS::StackName}-access-loggroup
+      RetentionInDays: 30
+
+  # ================================
+  # ========= LAMBDA PROXY =========
+  # ================================
+  ApiFunction: # Adds a POST api endpoint at "/function" to the ApiGatewayApi via an Api event
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: nodejs16.x
+      Handler: index.handler
+      CodeUri: function/
+      Layers:
+        - !Ref NodeChimeLayer
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /function
+            Method: POST
+            RestApiId:
+              Ref: ApiGatewayApi
+      Environment:
+        Variables:
+          MY_ENV: Hello World
+      ReservedConcurrentExecutions: 30
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: LambdaLogPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Effect: Allow
+                Resource: "*"
+        - PolicyName: S3Policy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:*
+                Resource: "*"
+          
+
+
+Outputs:
+
+  # WebSocketURL:
+  #   Description: "WSS Protocol URL to connect to"
+  #   Value: !Sub wss://${webSocketApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/${webSocketApiProdStage}
+  
+      
