@@ -185,7 +185,7 @@ Resources:
       Environment:
         Variables:
           ACCOUNT_ID: !Sub ${AWS::AccountId}
-          SLACK_WEBHOOK_URL: ""
+          SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/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"
       Timeout: 240
 
                       
@@ -243,14 +243,14 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
       Policies:
-        - PolicyName: S3Access
+        - PolicyName: GetPipelineExecution
           PolicyDocument:
             Version: 2012-10-17
             Statement:
               - Effect: Allow
                 Action:
-                  - s3:*
-                Resource: "*"
+                  - codepipeline:GetPipelineExecution
+                Resource: !Sub "arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${codePipeline}"
 
   lambdaLogGroup:
     Type: AWS::Logs::LogGroup

@@ -17,58 +17,85 @@ def handler(event, context):
     pipeline_name = event['detail']['pipeline']
     category = event['detail']['type']['category']
     state = event['detail']['state']
+    stage = event['detail']['stage']
+    action = event['detail']['action']
+
+
 
     response = client.get_pipeline_execution(
         pipelineName=pipeline_name,
         pipelineExecutionId=execution_id
     )
 
+    print(f"Pipeline Execution {json.dumps(response)}")
+
+    commit_message = None
+    commit_id = None
+    commit_url = None
+
+
+    # Revision summary isn't included until the Source stage Succeeds
     artifact_revisions = response['pipelineExecution']['artifactRevisions']
-    commit_id = artifact_revisions['revisionId']
-    commit_url = artifact_revisions['revisionUrl']
+    if len(artifact_revisions) > 0:
+        revision_summary_str = artifact_revisions[0]['revisionSummary']
+        revision_summary = json.loads(revision_summary_str)
+        commit_message = revision_summary['CommitMessage']
+        commit_id = artifact_revisions[0]['revisionId']
+        commit_url = artifact_revisions[0]['revisionUrl']
 
 
     slack = SlackNotifier(
         REGION,
         pipeline_name,
-        execution_id
+        execution_id,
+        commit_url,
+        commit_message,
+        commit_id,
+        stage,
+        action,
+        state,
+        category
     )
-
-
-
-
-
-
 
     
     if category == "Source":
         if state == "SUCCEEDED":
-            pass
-            # slack.send_started()
+            slack.send_message(status_icon=":loading:", color="#34bb13")
         elif state == "FAILED":
-            pass
-            # slack.send_failed()
+            slack.execution_summary = event['detail']['execution-result']['external-execution-summary']
+            slack.error_code = event['detail']['execution-result']['error-code']
+            
+            slack.send_failed_message(status_icon=":x:", color="#D00000")
 
-    # if category == "Approval":
-    #     if state == "STARTED":
-    #         send_approval_needed()
-    #     elif state == "SUCCEEDED":
-    #         send_approved()
-    #     elif state == "FAILED":
-    #         send_approval_reject()
+
+    if category == "Approval":
+        if state == "STARTED":
+            slack.send_message(status_icon=":spiral_note_pad:", color="#34bb13")
+        elif state == "SUCCEEDED":
+            slack.send_message(status_icon=":spiral_note_pad:", color="#34bb13")
+        elif state == "FAILED":
+            slack.execution_summary = event['detail']['execution-result']['external-execution-summary']
+            slack.error_code = event['detail']['execution-result']['error-code']
+            slack.send_failed_message(status_icon=":x:", color="#D00000")
     
-    # if category == "Build":
-    #     if state == "STARTED"
-    #         send_build_started()
-    #     elif state == "SUCCEEDED":
-    #         send_build_success()
-    #     elif state == "FAILED":
-    #         send_build_failed()
+    if category == "Build":
+        if state == "STARTED":
+            slack.send_message(status_icon=":hammer_and_wrench:", color="#34bb13")
+        elif state == "SUCCEEDED":
+            slack.send_message(status_icon=":hammer_and_wrench:", color="#34bb13")
+        elif state == "FAILED":
+            slack.execution_summary = event['detail']['execution-result']['external-execution-summary']
+            slack.error_code = event['detail']['execution-result']['error-code']
+            
+            slack.send_failed_message(status_icon=":x:", color="#D00000")
     
-    # if category == "Deploy":
-    #     if state == "STARTED":
-    #         send_deploy_started()
-    #     elif state == "SUCCEEDED":
-    #         send_deploy_success()
-    #     elif state == "FAILED":
-    #         send_deploy_failed()
+    if category == "Deploy":
+        if state == "STARTED":
+            slack.send_message(status_icon=":rocket:", color="#34bb13")
+        elif state == "SUCCEEDED":
+            slack.send_message(status_icon=":rocket:", color="#34bb13")
+        elif state == "FAILED":
+            slack.execution_summary = event['detail']['execution-result']['external-execution-summary']
+            slack.error_code = event['detail']['execution-result']['error-code']
+            
+            slack.send_failed_message(status_icon=":x:", color="#D00000")

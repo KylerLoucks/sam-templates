@@ -6,5 +6,5 @@ s3_prefix = "kloucks-cicd-notifier"
 region = "us-west-2"
 confirm_changeset = true
 capabilities = "CAPABILITY_NAMED_IAM"
-parameter_overrides = "pBucketName=\"test-kloucks-us-west-2\" pRepoName=\"eb-flaskapp\" pBranchName=\"master\" pCodeStarConnection=\"arn:aws:codestar-connections:us-west-2:570351108046:connection/ab6e9367-d76a-4fbf-a330-71419c18cf07\" pRepoOwner=\"cloud303-kloucks\" pStageNamePrefix=\"PROD\""
+parameter_overrides = "pBucketName=\"test-kloucks-us-west-2\" pRepoName=\"eb-flaskapp\" pBranchName=\"master\" pCodeStarConnection=\"arn:aws:codestar-connections:us-west-2:570351108046:connection/ddbe70cd-0f16-4c3b-8e7d-35148304e708\" pRepoOwner=\"cloud303-kloucks\" pStageNamePrefix=\"PROD\""
 image_repositories = []
