@@ -185,7 +185,7 @@ Resources:
       Environment:
         Variables:
           ACCOUNT_ID: !Sub ${AWS::AccountId}
-          SLACK_WEBHOOK_URL: "https://hooks.slack.com/services/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"
+          SLACK_WEBHOOK_URL: ""
       Timeout: 240
 
                       

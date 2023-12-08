@@ -51,6 +51,9 @@ class SlackNotifier():
         if self.commit_id is not None:
             commit_id_short = self.commit_id[:7]
 
+        if len(commit_message) > 120:
+            commit_message = f"{commit_message[:119]}..."
+
         message = {
             "channel": "webhooks", # Override channel to send messages to
             "username": "CI Helper", # Override display name
@@ -94,6 +97,10 @@ class SlackNotifier():
         commit_id_short = None
         if self.commit_id is not None:
             commit_id_short = self.commit_id[:7]
+
+
+        if len(commit_message) > 120:
+            commit_message = f"{commit_message[:119]}..."
         
         message = {
             "channel": "webhooks", # Override channel to send messages to
