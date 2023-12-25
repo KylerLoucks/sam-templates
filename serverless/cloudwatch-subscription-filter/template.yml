@@ -1,0 +1,109 @@
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+
+Parameters:
+  pAlertsEmail:
+    Type: String
+    Default: kloucks@cloud303.io
+    Description: Email to send error alerts to
+
+
+Resources:
+
+
+  subscriptionFilter:
+    DependsOn: notificationLambdaPermission
+    Type: AWS::Logs::SubscriptionFilter
+    Properties:
+      FilterPattern: "ERROR"
+      DestinationArn: !GetAtt notificationLambda.Arn
+      LogGroupName: !Ref errorLambdaLogGroup
+
+  # Permission for error lambda log group to invoke notifier lambda
+  notificationLambdaPermission:
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: !Ref notificationLambda
+      Action: lambda:InvokeFunction
+      Principal: logs.amazonaws.com
+      SourceArn: !GetAtt errorLambdaLogGroup.Arn
+
+  # Lambda that listens to Subscription Filter
+  notificationLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt lambdaRole.Arn
+      Timeout: 120
+      Environment:
+        Variables:
+          ALERTS_TOPIC_ARN: !GetAtt alertSns.TopicArn
+      Runtime: python3.10
+      Architectures:
+        - x86_64
+      Handler: app.lambda_handler
+      CodeUri: notifierlambda/
+
+  notificationLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${notificationLambda}
+      RetentionInDays: 90
+
+  # Lambda that prints an Error/Exception
+  errorLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt lambdaRole.Arn
+      Timeout: 120
+      Environment:
+        Variables:
+          DATA_BUCKET: !Ref dataBucket
+          DATASET_INFO_TABLE: !Ref datasetInfoTable
+      Runtime: python3.10
+      Architectures:
+        - x86_64
+      Handler: app.lambda_handler
+      CodeUri: errorlambda/
+  
+  errorLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${errorLambda}
+      RetentionInDays: 90
+
+
+
+
+  alertSns:
+    Type: AWS::SNS::Topic
+    Properties: 
+      Subscription:
+        - Endpoint: !Ref pAlertsEmail
+          Protocol: email
+
+  alertSnsPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Sid: TrustAccountToPublishToTopic
+            Effect: Allow
+            Principal:
+              AWS: "*"
+            Action:
+              - SNS:GetTopicAttributes
+              - SNS:SetTopicAttributes
+              - SNS:AddPermission
+              - SNS:RemovePermission
+              - SNS:DeleteTopic
+              - SNS:Subscribe
+              - SNS:ListSubscriptionsByTopic
+              - SNS:Publish
+              - SNS:Receive
+            Resource: "*"
+            Condition:
+              StringEquals:
+                AWS:SourceOwner: !Ref AWS::AccountId
+      Topics:
+        - Ref: alertSns
