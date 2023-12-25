@@ -69,6 +69,7 @@ Resources:
             Parameters:
                Input.$: "$" # Pass entire input as a param
                TaskContext.$: "$$" # State machine metadata
+              #  Payload.$: "$"
             End: true
       Role: !GetAtt stateMachineExecutionRole.Arn
       Events:
