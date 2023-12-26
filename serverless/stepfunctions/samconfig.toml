@@ -10,7 +10,7 @@ force_image_build = true
 
 
 [kyler.deploy.parameters]
-stack_name = "fwa-etl-backend"
+stack_name = "stepfunctions"
 resolve_s3 = true
 resolve_image_repos = true
 s3_prefix = "fwa-backend"

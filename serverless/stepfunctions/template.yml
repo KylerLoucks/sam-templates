@@ -9,6 +9,61 @@ Parameters:
     Description: Email to send error alerts to
 
 Resources:
+
+  lambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+
+  # Permissions for Lambda Functions
+  LambdaRolePolicy:
+    # DependsOn: lambdaRole  # Add DependsOn attribute
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: StateMachinePolicy
+      Roles:
+        - !Ref lambdaRole
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: AllowCWLogs
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: "*"
+          - Sid: AllowS3
+            Effect: Allow
+            Action:
+              - s3:*
+            Resource: "*"
+          - Sid: DescribeStateMachines
+            Effect: Allow
+            Action:
+              - states:DescribeStateMachine
+            Resource: 
+              - !GetAtt stateMachine.Arn
+          - Sid: SnsPublish
+            Effect: Allow
+            Action:
+              - sns:Publish
+            Resource: 
+              - !Ref alertSns
+
+
+                
+
   startLambda:
     Type: AWS::Serverless::Function
     Properties:
@@ -17,7 +72,7 @@ Resources:
       Environment:
         Variables:
           ALERTS_TOPIC_ARN: !GetAtt alertSns.TopicArn
-      Runtime: python3.10
+      Runtime: python3.9
       Architectures:
         - x86_64
       Handler: app.lambda_handler
@@ -30,7 +85,8 @@ Resources:
       RetentionInDays: 90
 
 
-  notifyLambda:
+  # Error Notifications for when the state machine fails
+  eventLambda:
     Type: AWS::Serverless::Function
     Properties:
       Role: !GetAtt lambdaRole.Arn
@@ -38,16 +94,32 @@ Resources:
       Environment:
         Variables:
           ALERTS_TOPIC_ARN: !GetAtt alertSns.TopicArn
-      Runtime: python3.10
+          AWS_ACCOUNT_ID: !Ref AWS::AccountId
+      Runtime: python3.9
       Architectures:
         - x86_64
       Handler: app.lambda_handler
-      CodeUri: notifierlambda/
+      CodeUri: eventlambda/
+      Events:
+        Trigger:
+            Type: CloudWatchEvent
+            Properties:
+              Pattern:
+                source:
+                  - "aws.states"
+                detail-type:
+                  - "Step Functions Execution Status Change"
+                detail:
+                  status:
+                    - "FAILED"
+                  stateMachineArn:
+                    - !GetAtt stateMachine.Arn
 
-  notifyLogGroup:
+
+  eventLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub /aws/lambda/${notifyLambda}
+      LogGroupName: !Sub /aws/lambda/${eventLambda}
       RetentionInDays: 90
 
   stateMachine:
@@ -59,24 +131,13 @@ Resources:
           RunLambdaFunction:
             Type: Task
             Resource: !GetAtt startLambda.Arn
-            Catch:
-              - ErrorEquals: ["States.TaskFailed"]
-                ResultPath: "$.error"
-                Next: Notify
-          Notify:
-            Type: Task
-            Resource: !GetAtt notifyLambda.Arn
-            Parameters:
-               Input.$: "$" # Pass entire input as a param
-               TaskContext.$: "$$" # State machine metadata
-              #  Payload.$: "$"
             End: true
       Role: !GetAtt stateMachineExecutionRole.Arn
       Events:
         CronSchedule:
           Type: Schedule
           Properties:
-            Schedule: cron(0 8 ? * SAT *)  # Every Saturday @ 8 AM UTC. Unsure when data updates
+            Schedule: cron(0 8 ? * SAT *)  # Every Saturday @ 8 AM UTC.
             Enabled: False
 
   stateMachineExecutionRole:
@@ -98,28 +159,6 @@ Resources:
                 Action:
                   - lambda:InvokeFunction
                 Resource: "*"
-
-  # Lambda that prints an Error/Exception
-  errorLambda:
-    Type: AWS::Serverless::Function
-    Properties:
-      Role: !GetAtt lambdaRole.Arn
-      Timeout: 120
-      Environment:
-        Variables:
-          DATA_BUCKET: !Ref dataBucket
-          DATASET_INFO_TABLE: !Ref datasetInfoTable
-      Runtime: python3.10
-      Architectures:
-        - x86_64
-      Handler: app.lambda_handler
-      CodeUri: errorlambda/
-  
-  errorLambdaLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub /aws/lambda/${errorLambda}
-      RetentionInDays: 90
 
 
 

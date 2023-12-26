@@ -1,0 +1,34 @@
+{
+    "version": "0",
+    "id": "0f2d38ba-1b9f-721d-28c8-2a3d569c7acd",
+    "detail-type": "Step Functions Execution Status Change",
+    "source": "aws.states",
+    "account": "770085715007",
+    "time": "2023-12-25T09:19:01Z",
+    "region": "us-east-1",
+    "resources": [
+        "arn:aws:states:us-east-1:770085715007:execution:stateMachine-D1B4isTQ7Gen:90c1377c-9b24-4647-93f3-31fa5449f16c"
+    ],
+    "detail": {
+        "executionArn": "arn:aws:states:us-east-1:770085715007:execution:stateMachine-D1B4isTQ7Gen:90c1377c-9b24-4647-93f3-31fa5449f16c",
+        "stateMachineArn": "arn:aws:states:us-east-1:770085715007:stateMachine:stateMachine-D1B4isTQ7Gen",
+        "name": "90c1377c-9b24-4647-93f3-31fa5449f16c",
+        "status": "FAILED",
+        "startDate": 1703495940468,
+        "stopDate": 1703495940966,
+        "input": "{\n  \"Comment\": \"Insert your JSON here\"\n}",
+        "output": null,
+        "stateMachineVersionArn": null,
+        "stateMachineAliasArn": null,
+        "redriveCount": 0,
+        "redriveDate": null,
+        "redriveStatus": "REDRIVABLE",
+        "redriveStatusReason": null,
+        "inputDetails": {
+            "included": true
+        },
+        "outputDetails": null,
+        "error": "Exception",
+        "cause": "{\"errorMessage\": \"Error test occurred!\", \"errorType\": \"Exception\", \"requestId\": \"62df5169-6eba-40e9-85d4-458625e1c9a7\", \"stackTrace\": [\"  File \\\"/var/task/app.py\\\", line 7, in lambda_handler\\n    raise Exception(\\\"Error test occurred!\\\")\\n\"]}"
+    }
+}
