@@ -25,9 +25,7 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
 
-  # Permissions for Lambda Functions
-  LambdaRolePolicy:
-    # DependsOn: lambdaRole  # Add DependsOn attribute
+  lambdaRolePolicy:
     Type: AWS::IAM::Policy
     Properties:
       PolicyName: StateMachinePolicy
