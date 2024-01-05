@@ -1,0 +1,1148 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "slack-notifications:codePipelineServiceRole",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/cicd/slack-notifications/template.yml",
+                "logicalId": "codePipelineServiceRole"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "slack-notifications:codePipeline",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/cicd/slack-notifications/template.yml",
+                "logicalId": "codePipeline"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "slack-notifications:s3ArtifactBucketCodePipeline",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/cicd/slack-notifications/template.yml",
+                "logicalId": "s3ArtifactBucketCodePipeline"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "slack-notifications:lambdaFunction (python3.10)",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/cicd/slack-notifications/template.yml",
+                "logicalId": "lambdaFunction"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "slack-notifications:permissionForEventsToInvokeLambda",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/cicd/slack-notifications/template.yml",
+                "logicalId": "permissionForEventsToInvokeLambda"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "slack-notifications:eventBridgeRule",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/cicd/slack-notifications/template.yml",
+                "logicalId": "eventBridgeRule"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "slack-notifications:lambdaRole",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/cicd/slack-notifications/template.yml",
+                "logicalId": "lambdaRole"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "slack-notifications:lambdaLogGroup",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/cicd/slack-notifications/template.yml",
+                "logicalId": "lambdaLogGroup"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "odcr-history:dynamoDBTable",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/odcr-history/template.yaml",
+                "logicalId": "dynamoDBTable"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "odcr-history:odcrEventsDynamoFunction (python3.9)",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/odcr-history/template.yaml",
+                "logicalId": "odcrEventsDynamoFunction"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "odcr-history:cloudtrailDynamoFunction (python3.9)",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/odcr-history/template.yaml",
+                "logicalId": "cloudtrailDynamoFunction"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "odcr-history:lambdaCustomResource",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/odcr-history/template.yaml",
+                "logicalId": "lambdaCustomResource"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "custom-docker:caliMedicalBoardLambda",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/lambda/custom-docker/template.yml",
+                "logicalId": "caliMedicalBoardLambda"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "custom-docker:caliMedicalBoardLambdaLogGroup",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/lambda/custom-docker/template.yml",
+                "logicalId": "caliMedicalBoardLambdaLogGroup"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "custom-docker:lambdaRole",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/lambda/custom-docker/template.yml",
+                "logicalId": "lambdaRole"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "cw-subscription-filter:subscriptionFilter",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/lambda/cw-subscription-filter/template.yml",
+                "logicalId": "subscriptionFilter"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "cw-subscription-filter:notificationLambdaPermission",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/lambda/cw-subscription-filter/template.yml",
+                "logicalId": "notificationLambdaPermission"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "cw-subscription-filter:notificationLambda (python3.10)",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/lambda/cw-subscription-filter/template.yml",
+                "logicalId": "notificationLambda"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "cw-subscription-filter:notificationLogGroup",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/lambda/cw-subscription-filter/template.yml",
+                "logicalId": "notificationLogGroup"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "cw-subscription-filter:errorLambda (python3.10)",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/lambda/cw-subscription-filter/template.yml",
+                "logicalId": "errorLambda"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "cw-subscription-filter:errorLambdaLogGroup",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/lambda/cw-subscription-filter/template.yml",
+                "logicalId": "errorLambdaLogGroup"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "cw-subscription-filter:alertSns",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/lambda/cw-subscription-filter/template.yml",
+                "logicalId": "alertSns"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "cw-subscription-filter:alertSnsPolicy",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/lambda/cw-subscription-filter/template.yml",
+                "logicalId": "alertSnsPolicy"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "glue-workflow:dataBucket",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/stepfunctions/glue-workflow/template.yml",
+                "logicalId": "dataBucket"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "glue-workflow:processedDataBucket",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/stepfunctions/glue-workflow/template.yml",
+                "logicalId": "processedDataBucket"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "glue-workflow:datasetInfoTable",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/stepfunctions/glue-workflow/template.yml",
+                "logicalId": "datasetInfoTable"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "glue-workflow:fargateCluster",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/stepfunctions/glue-workflow/template.yml",
+                "logicalId": "fargateCluster"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "glue-workflow:taskExecutionRole",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/stepfunctions/glue-workflow/template.yml",
+                "logicalId": "taskExecutionRole"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "glue-workflow:taskRole",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/stepfunctions/glue-workflow/template.yml",
+                "logicalId": "taskRole"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "glue-workflow:openPaymentsLogGroup",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/stepfunctions/glue-workflow/template.yml",
+                "logicalId": "openPaymentsLogGroup"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "glue-workflow:taskDefinition",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/stepfunctions/glue-workflow/template.yml",
+                "logicalId": "taskDefinition"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "glue-workflow:glueServiceRole",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/stepfunctions/glue-workflow/template.yml",
+                "logicalId": "glueServiceRole"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "glue-workflow:athenaDatabase",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/stepfunctions/glue-workflow/template.yml",
+                "logicalId": "athenaDatabase"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "glue-workflow:openPaymentsMergeEtl",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/stepfunctions/glue-workflow/template.yml",
+                "logicalId": "openPaymentsMergeEtl"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "glue-workflow:openPaymentsCrawler",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/stepfunctions/glue-workflow/template.yml",
+                "logicalId": "openPaymentsCrawler"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "glue-workflow:openPaymentsStateMachine",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/stepfunctions/glue-workflow/template.yml",
+                "logicalId": "openPaymentsStateMachine"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "glue-workflow:stateMachineExecutionRole",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/stepfunctions/glue-workflow/template.yml",
+                "logicalId": "stateMachineExecutionRole"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "s3-events:NodeLayer (python3.9)",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/eventbridge/s3-events/template.yml",
+                "logicalId": "NodeLayer"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "s3-events:PythonChimeLayer (python3.9)",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/eventbridge/s3-events/template.yml",
+                "logicalId": "PythonChimeLayer"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "s3-events:lambdaRole (python3.9)",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/eventbridge/s3-events/template.yml",
+                "logicalId": "lambdaRole"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "s3-events:mp4EventBridgeLambda (python3.9)",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/eventbridge/s3-events/template.yml",
+                "logicalId": "mp4EventBridgeLambda"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "s3-events:bucketEventsLambda (nodejs16.x)",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/eventbridge/s3-events/template.yml",
+                "logicalId": "bucketEventsLambda"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "websocket-api:lambdaLayer",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/websocket-api/template.yml",
+                "logicalId": "lambdaLayer"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "websocket-api:webSocketApiGatewayApi",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/websocket-api/template.yml",
+                "logicalId": "webSocketApiGatewayApi"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "websocket-api:webSocketApiProdDeployment",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/websocket-api/template.yml",
+                "logicalId": "webSocketApiProdDeployment"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "websocket-api:webSocketApiProdStage",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/websocket-api/template.yml",
+                "logicalId": "webSocketApiProdStage"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "websocket-api:wsAuthorizer",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/websocket-api/template.yml",
+                "logicalId": "wsAuthorizer"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "websocket-api:wsAuthorizerFunction (nodejs16.x)",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/websocket-api/template.yml",
+                "logicalId": "wsAuthorizerFunction"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "websocket-api:wsAuthorizerPermission",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/websocket-api/template.yml",
+                "logicalId": "wsAuthorizerPermission"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "websocket-api:webSocketOnConnectRoute",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/websocket-api/template.yml",
+                "logicalId": "webSocketOnConnectRoute"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "websocket-api:webSocketOnConnectIntegration",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/websocket-api/template.yml",
+                "logicalId": "webSocketOnConnectIntegration"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "websocket-api:onConnectLambdaPermission",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/websocket-api/template.yml",
+                "logicalId": "onConnectLambdaPermission"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "websocket-api:onConnectLambda (nodejs16.x)",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/websocket-api/template.yml",
+                "logicalId": "onConnectLambda"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "websocket-api:webSocketStreamRoute",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/websocket-api/template.yml",
+                "logicalId": "webSocketStreamRoute"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "websocket-api:webSocketStreamIntegration",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/websocket-api/template.yml",
+                "logicalId": "webSocketStreamIntegration"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "websocket-api:streamLambdaPermission",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/websocket-api/template.yml",
+                "logicalId": "streamLambdaPermission"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "websocket-api:streamLambda (nodejs16.x)",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/websocket-api/template.yml",
+                "logicalId": "streamLambda"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "websocket-api:wsDefaultRoute",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/websocket-api/template.yml",
+                "logicalId": "wsDefaultRoute"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "websocket-api:wsDefaultIntegration",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/websocket-api/template.yml",
+                "logicalId": "wsDefaultIntegration"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "websocket-api:defaultLambdaPermission",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/websocket-api/template.yml",
+                "logicalId": "defaultLambdaPermission"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "websocket-api:defaultLambda (nodejs16.x)",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/websocket-api/template.yml",
+                "logicalId": "defaultLambda"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "websocket-api:sessionStateTable",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/websocket-api/template.yml",
+                "logicalId": "sessionStateTable"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "error-notifications:lambdaRole",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/stepfunctions/error-notifications/template.yml",
+                "logicalId": "lambdaRole"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "error-notifications:lambdaRolePolicy",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/stepfunctions/error-notifications/template.yml",
+                "logicalId": "lambdaRolePolicy"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "error-notifications:startLambda (python3.9)",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/stepfunctions/error-notifications/template.yml",
+                "logicalId": "startLambda"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "error-notifications:startLogGroup",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/stepfunctions/error-notifications/template.yml",
+                "logicalId": "startLogGroup"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "error-notifications:eventLambda (python3.9)",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/stepfunctions/error-notifications/template.yml",
+                "logicalId": "eventLambda"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "error-notifications:eventLogGroup",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/stepfunctions/error-notifications/template.yml",
+                "logicalId": "eventLogGroup"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "error-notifications:stateMachine",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/stepfunctions/error-notifications/template.yml",
+                "logicalId": "stateMachine"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "error-notifications:stateMachineExecutionRole",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/stepfunctions/error-notifications/template.yml",
+                "logicalId": "stateMachineExecutionRole"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "error-notifications:alertSns",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/stepfunctions/error-notifications/template.yml",
+                "logicalId": "alertSns"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "error-notifications:alertSnsPolicy",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/serverless/stepfunctions/error-notifications/template.yml",
+                "logicalId": "alertSnsPolicy"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "rest-api:NodeLayer",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/rest-api/template.yml",
+                "logicalId": "NodeLayer"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "rest-api:PythonLayer",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/rest-api/template.yml",
+                "logicalId": "PythonLayer"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "rest-api:ApiGatewayLogRole",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/rest-api/template.yml",
+                "logicalId": "ApiGatewayLogRole"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "rest-api:ApiAccountLogRole",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/rest-api/template.yml",
+                "logicalId": "ApiAccountLogRole"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "rest-api:ApiGatewayApi",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/rest-api/template.yml",
+                "logicalId": "ApiGatewayApi"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "rest-api:AccessLogGroup",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/rest-api/template.yml",
+                "logicalId": "AccessLogGroup"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "rest-api:ApiFunction (nodejs16.x)",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/rest-api/template.yml",
+                "logicalId": "ApiFunction"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "API rest-api:ApiFunction (nodejs16.x)",
+            "invokeTarget": {
+                "target": "api",
+                "templatePath": "${workspaceFolder}/rest-api/template.yml",
+                "logicalId": "ApiFunction"
+            },
+            "api": {
+                "path": "/function",
+                "httpMethod": "POST",
+                "payload": {
+                    "json": {}
+                }
+            },
+            "lambda": {
+                "runtime": "nodejs16.x"
+            }
+        },
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "rest-api:LambdaRole",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/rest-api/template.yml",
+                "logicalId": "LambdaRole"
+            },
+            "lambda": {
+                "payload": {},
+                "environmentVariables": {}
+            }
+        }
+    ]
+}
