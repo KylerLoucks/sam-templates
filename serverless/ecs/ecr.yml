@@ -1,0 +1,19 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  pAppName:
+    Type: String
+    Default: pr1
+    Description: Application Name
+ 
+Resources:
+  ecrBackendRepo:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${pAppName}-backend
+
+  ecrFrontendRepo:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub ${pAppName}-frontend
