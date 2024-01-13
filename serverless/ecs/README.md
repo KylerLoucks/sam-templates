@@ -48,5 +48,5 @@ aws ecs update-service --cluster pr1-cluster --service pr1-frontend --force-new-
 
 ### Cleanup
 ```bash
-sam delete --stack-name pr1-ephemeral
+sam delete --stack-name pr1-ephemeral --no-prompts
 ```
