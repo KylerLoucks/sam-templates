@@ -211,17 +211,17 @@ Resources:
   ecsTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties: 
-      HealthCheckIntervalSeconds: 30
+      HealthCheckIntervalSeconds: 10
       HealthCheckPath: /
       HealthCheckProtocol: HTTP
       HealthCheckTimeoutSeconds: 5
-      HealthyThresholdCount: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
       Name: !Sub ${pAppName}-http
       Port: 80
       Protocol: HTTP
       ProtocolVersion: HTTP1
       TargetType: ip
-      UnhealthyThresholdCount: 2
       VpcId: !Ref pVpcId
 
  
@@ -258,6 +258,11 @@ Resources:
       EnableECSManagedTags: true
       EnableExecuteCommand: true
       LaunchType: FARGATE
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      # Adjust if container takes a while to start up
+      HealthCheckGracePeriodSeconds: 30
       LoadBalancers: 
         - ContainerName: frontend
           ContainerPort: 80
@@ -317,4 +322,3 @@ Outputs:
   endpointUrl:
     Description: DNS Endpoint for the ECS ALB
     Value: !GetAtt ecsLoadBalancer.DNSName
-  
