@@ -1,0 +1,56 @@
+name: PR Deployment Workflow 
+
+ 
+
+# Using paths to prevent PRs from triggering this workflow if changes were made to the copilot config 
+on: 
+  pull_request: 
+    types: [opened, synchronize, reopened]
+    branches:
+      - 'c303/**'
+    paths: 
+      - '!copilot/**' 
+      - '!**/*.md'
+
+jobs: 
+  deploy: 
+    runs-on: ubuntu-latest 
+    #These permissions are needed to interact with GitHub's OIDC Token endpoint. 
+    permissions: 
+      id-token: write 
+      contents: read
+
+    steps:
+      - name: Checkout code 
+        uses: actions/checkout@v3 
+
+      - name: Configure AWS credentials from Dev account 
+        uses: aws-actions/configure-aws-credentials@v4 
+        with: 
+          role-to-assume: arn:aws:iam::174743933558:role/madisonreed-mr-github-oidc-Role-wu9FArTEn7O1
+          aws-region: us-east-1
+
+      - name: List S3 buckets
+        run: |
+          echo listing s3 buckets on PR number: ${{github.event.pull_request.number}}
+          aws s3 ls
+ 
+      # - name: Install AWS Copilot 
+      #   run: | 
+      #     curl -Lo copilot https://github.com/aws/copilot-cli/releases/latest/download/copilot-linux && \ 
+      #     chmod +x copilot && \ 
+      #     sudo mv copilot /usr/local/bin 
+
+      # - name: Deploy with Copilot 
+
+      #   run: | 
+
+      #     if [ "${{ github.event.action }}" != "closed" ]; then 
+
+      #       ./deploy_script.sh --pr-id ${{ github.event.pull_request.number }} 
+
+      #     else 
+
+      #       ./cleanup_script.sh --pr-id ${{ github.event.pull_request.number }} 
+
+      #     Fi 
