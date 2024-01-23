@@ -629,7 +629,8 @@ Resources:
       Conditions:
         - Field: host-header
           HostHeaderConfig:
-            Values: !Sub [api-${pAppName}.dev.mdsnrdfd.com]
+            Values: 
+              - !Sub api-${pAppName}.dev.mdsnrdfd.com
       ListenerArn: !Ref httpsListener
       Priority: 7
 
@@ -643,7 +644,8 @@ Resources:
       Conditions:
         - Field: host-header
           HostHeaderConfig:
-            Values: !Sub [tophat-${pAppName}.dev.mdsnrdfd.com]
+            Values: 
+              - !Sub tophat-${pAppName}.dev.mdsnrdfd.com
         - Field: path-pattern
           PathPatternConfig:
             Values: [/socket.io/*]
@@ -660,7 +662,8 @@ Resources:
       Conditions:
         - Field: host-header
           HostHeaderConfig:
-            Values: !Sub [tophat-${pAppName}.dev.mdsnrdfd.com]
+            Values: 
+              - !Sub tophat-${pAppName}.dev.mdsnrdfd.com
       ListenerArn: !Ref httpsListener
       Priority: 12
 
@@ -674,7 +677,8 @@ Resources:
       Conditions:
         - Field: host-header
           HostHeaderConfig:
-            Values: !Sub [${pAppName}.dev.mdsnrdfd.com]
+            Values: 
+              - !Sub ${pAppName}.dev.mdsnrdfd.com
       ListenerArn: !Ref httpsListener
       Priority: 18
 
@@ -688,7 +692,8 @@ Resources:
       Conditions:
         - Field: host-header
           HostHeaderConfig:
-            Values: !Sub [redis-${pAppName}.dev.mdsnrdfd.com]
+            Values: 
+              - !Sub redis-${pAppName}.dev.mdsnrdfd.com
       ListenerArn: !Ref httpsListener
       Priority: 20
 
@@ -702,7 +707,8 @@ Resources:
       Conditions:
         - Field: host-header
           HostHeaderConfig:
-            Values: !Sub [mongo-${pAppName}.dev.mdsnrdfd.com]
+            Values: 
+              - !Sub mongo-${pAppName}.dev.mdsnrdfd.com
       ListenerArn: !Ref httpsListener
       Priority: 22
 

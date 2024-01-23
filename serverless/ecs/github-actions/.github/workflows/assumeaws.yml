@@ -5,7 +5,7 @@ name: PR Deployment Workflow
 # Using paths to prevent PRs from triggering this workflow if changes were made to the copilot config 
 on: 
   pull_request: 
-    types: [opened, synchronize, reopened]
+    types: [opened, synchronize, reopened, closed]
     branches:
       - 'c303/**'
     paths: 
@@ -30,9 +30,29 @@ jobs:
           role-to-assume: arn:aws:iam::174743933558:role/madisonreed-mr-github-oidc-Role-wu9FArTEn7O1
           aws-region: us-east-1
 
+
+      - name: Set up Python
+        uses: actions/setup-python@v3
+        with:
+          python-version: '3.10'
+
+      - name: Install AWS SAM CLI
+        run: |
+          pip install aws-sam-cli
+
+
+      - name: Build SAM application
+        run: |
+          sam --version
+          ls
+          cd ephemeralenv/
+          sam build -t ephemeral.yml
+          ls -la
+
       - name: List S3 buckets
         run: |
           echo listing s3 buckets on PR number: ${{github.event.pull_request.number}}
+          echo PR action: ${{github.event.action}}
           aws s3 ls
  
       # - name: Install AWS Copilot 
@@ -44,7 +64,7 @@ jobs:
       # - name: Deploy with Copilot 
 
       #   run: | 
-
+            # If the PR wasn't closed manually or merged into the head branch
       #     if [ "${{ github.event.action }}" != "closed" ]; then 
 
       #       ./deploy_script.sh --pr-id ${{ github.event.pull_request.number }} 
