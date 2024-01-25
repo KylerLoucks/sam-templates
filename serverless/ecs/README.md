@@ -8,7 +8,7 @@ sam build -t ecr.yml
 
 
 ```bash
-sam deploy -t ecr.yml --config-env ecr --parameter-overrides "pAppName=pr1" --stack-name pr1-ecr --no-confirm-changeset
+sam deploy -t ecr.yml --config-env ecr --parameter-overrides "pAppName=pr1" --stack-name pr1-ecr --tags CleanupDate=$(date -u -d "+10 days" '+%Y-%m-%dT%H:%M:%SZ') --no-confirm-changeset
 ```
 
 
@@ -35,7 +35,7 @@ sam build -t template.yml
 
 
 ```bash
-sam deploy -t template.yml --config-env ephemeral --parameter-overrides "pAppName=pr1 pVpcId=vpc-094590ab31d2c639f pPrivateSubnetIds=subnet-050fa317f4ea060dd,subnet-08c6fecb378269d0b" --stack-name pr1-ephemeral --no-confirm-changeset
+sam deploy -t template.yml --config-env ephemeral --parameter-overrides "pAppName=pr1 pVpcId=vpc-094590ab31d2c639f pPrivateSubnetIds=subnet-050fa317f4ea060dd,subnet-08c6fecb378269d0b" --stack-name pr1-ephemeral --tags CleanupDate=$(date -u -d "+10 days" '+%Y-%m-%dT%H:%M:%SZ') --no-confirm-changeset
 ```
 
 
@@ -49,4 +49,12 @@ aws ecs update-service --cluster pr1-cluster --service pr1-frontend --force-new-
 ### Cleanup
 ```bash
 sam delete --stack-name pr1-ephemeral --no-prompts
+sam delete --stack-name pr1-ecr --no-prompts
+```
+
+
+# Start Codepipeline, passing variables from Github Actions:
+```bash
+aws codepipeline start-pipeline-execution --name ephemeral-pipeline --variables name=PR_ID,value=123 name=COMMIT_ID,value=idefg name=PR_EVENT,value=opened
+
 ```
