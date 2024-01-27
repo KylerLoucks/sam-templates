@@ -8,12 +8,12 @@ Parameters:
     Description: Application Name
  
 Resources:
-  ecrBackendRepo:
-    Type: AWS::ECR::Repository
-    Properties:
-      RepositoryName: !Sub ${pAppName}-backend
+  # ecrBackendRepo:
+  #   Type: AWS::ECR::Repository
+  #   Properties:
+  #     RepositoryName: !Sub ${pAppName}-backend
 
-  ecrFrontendRepo:
+  ecrWebsiteRepo:
     Type: AWS::ECR::Repository
     Properties:
-      RepositoryName: !Sub ${pAppName}-frontend
+      RepositoryName: !Sub website-${pAppName}

@@ -53,6 +53,7 @@ jobs:
         run: |
           echo listing s3 buckets on PR number: ${{github.event.pull_request.number}}
           echo PR action: ${{github.event.action}}
+          echo Branch Name: $GITHUB_HEAD_REF
           aws s3 ls
  
       # - name: Install AWS Copilot 

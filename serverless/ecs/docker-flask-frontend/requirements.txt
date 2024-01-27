@@ -1,0 +1,6 @@
+flask
+gunicorn
+psycopg2-binary
+mysql-connector-python
+redis
+pymongo
