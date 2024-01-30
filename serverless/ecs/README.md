@@ -67,5 +67,4 @@ sam delete --stack-name pr1-ecr --no-prompts
 # Start Codepipeline, passing variables from Github Actions:
 ```bash
 aws codepipeline start-pipeline-execution --name ephemeral-pipeline --variables name=PR_ID,value=123 name=COMMIT_ID,value=idefg name=PR_EVENT,value=opened
-
 ```

@@ -2,7 +2,7 @@ const AWS = require('aws-sdk');
 
 exports.handler = async (event) => {
     console.info(JSON.stringify(event));
-    const res = {"hello": "world"};
+    const res = {"hello": "world v2"};
     return {
         statusCode: 200,
         body: JSON.stringify(res),

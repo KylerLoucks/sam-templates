@@ -1,0 +1,198 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+
+
+Parameters:
+  pAppName:
+    Type: String
+    Default: pr1
+    Description: Application Name
+  pACMCertificateArn:
+    Type: String
+    Description: ACM cert ARN for API Domain Name
+
+
+
+Resources:
+
+  # lambdaLayer:
+  #   Type: AWS::Serverless::LayerVersion
+  #   Description: The AWS SDK with support for Deepgram.
+  #   Metadata:
+  #     BuildMethod: nodejs16.x
+  #   Properties:
+  #     LayerName: aws-lambda-auth-layer
+  #     Description: Custom Authorizer Layer
+  #     ContentUri: deepgrampackages/
+  #     CompatibleRuntimes:
+  #       - nodejs16.x
+
+  # Have to use RestAPI instead of Serverless::Api resource to be able to create multiple domains and stages
+  ApiGatewayApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: !Sub ${pAppName}-API
+      Description: Ephemeral REST API
+
+
+  ApiGatewayDomain:
+    Type: AWS::ApiGateway::DomainName
+    # TODO: Change the DomainName accordingly
+    Properties:
+      DomainName: !Sub ${pAppName}-coloradvisor.dev.mdsnrdfd.com 
+      CertificateArn: !Ref pACMCertificateArn
+
+  # API Gateway Resource
+  ApiGatewayProxyResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayApi
+      ParentId: !GetAtt ApiGatewayApi.RootResourceId
+      PathPart: "{proxy+}"
+
+
+
+
+  ApiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId: !Ref ApiGatewayApi
+
+  ApiGatewayStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      RestApiId: !Ref ApiGatewayApi
+      StageName: !Sub ${pAppName}
+      # AccessLogSetting: 
+      #   AccessLogSetting
+      DeploymentId: !GetAtt ApiGatewayDeployment.DeploymentId
+      Variables:
+        lambdaAlias: !Ref pAppName
+
+
+
+  # API Gateway POST Method
+  ApiGatewayProxyMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayApi
+      ResourceId: !Ref ApiGatewayProxyResource
+      HttpMethod: OPTIONS
+      AuthorizationType: NONE
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Join
+            - ''
+            - - 'arn:aws:apigateway:'
+              - !Ref "AWS::Region"
+              - ':lambda:path/2015-03-31/functions/'
+              - !GetAtt ApiFunction.Arn
+              - ':${stageVariables.lambdaAlias}/invocations'
+        
+  # API Gateway Resource
+  ApiGatewayResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref ApiGatewayApi
+      ParentId: !GetAtt ApiGatewayApi.RootResourceId
+      PathPart: !Sub ${pAppName}
+
+
+
+
+
+
+  # API Gateway POST Method
+  ApiGatewayMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayApi
+      ResourceId: !Ref ApiGatewayResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Join
+            - ''
+            - - 'arn:aws:apigateway:'
+              - !Ref "AWS::Region"
+              - ':lambda:path/2015-03-31/functions/'
+              - !GetAtt ApiFunction.Arn
+              - ':${stageVariables.lambdaAlias}/invocations'
+
+        
+#Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${stageVariables.LambdaAliasArn}/invocations
+
+
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt LambdaRole.Arn
+      Runtime: nodejs16.x
+      Handler: index.handler
+      CodeUri: function/
+      AutoPublishAlias: prod
+      Environment:
+        Variables:
+          MY_ENV: Hello World
+      # ReservedConcurrentExecutions: 30
+
+  # Lambda Permission for API Gateway
+  LambdaPermissionForApiGateway:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref ApiFunction
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayApi}/*/*
+
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: LambdaLogPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Effect: Allow
+                Resource: "*"
+
+
+  # LambdaIntegration:
+  #   Type: AWS::ApiGatewayV2::Integration
+  #   Properties:
+  #     ApiId: !Ref ApiGatewayApi
+  #     Description: Dev Integration
+  #     IntegrationType: AWS_PROXY
+  #     IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${onConnectLambda.Arn}/invocations
+
+
+
+
+
+# Outputs:
+
+#   WebSocketURL:
+#     Description: "WSS Protocol URL to connect to"
+#     Value: !Sub wss://${webSocketApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/${webSocketApiProdStage}
+  
+      
