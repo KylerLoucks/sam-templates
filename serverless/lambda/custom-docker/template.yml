@@ -1,23 +1,18 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: 'AWS::Serverless-2016-10-31'
 Description: AWS CloudFormation stack to set up custom docker image that includes 'mdbtools' software tool.
-Parameters:
-
-  pMBCECR:
-    Type: String
-    Description: ECR Repo containing the container image for the California Medical Board scheduled data crawler.
-
-
-
 
 Resources:
      
 
   caliMedicalBoardLambda:
     Type: AWS::Serverless::Function
+    Metadata:
+      Dockerfile: Dockerfile
+      DockerContext: ./ca_medicalboard_scheduler
+      DockerTag: latest
     Properties:
       PackageType: Image
-      ImageUri: !Ref pMBCECR
       Role: !GetAtt lambdaRole.Arn
       Timeout: 600
       Environment:
