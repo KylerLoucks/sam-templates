@@ -10,20 +10,30 @@ Parameters:
   pVpcId:
     Type: AWS::EC2::VPC::Id
     Description: ID of the Virtual Private Network (VPC)
-  pPrivateSubnetIds:
-    Type: List<AWS::EC2::Subnet::Id>
-    Description:
-      List of Private SubnetIds in the Virtual Private Cloud (VPC). Used for private ECS services
-  pPublicSubnetIds:
-    Type: List<AWS::EC2::Subnet::Id>
-    Description:
-      List of Public SubnetIds in the Virtual Private Cloud (VPC). Used for Internet Facing Load Balancer
+  # pPrivateSubnetIds:
+  #   Type: List<AWS::EC2::Subnet::Id>
+  #   Description:
+  #     List of Private SubnetIds in the Virtual Private Cloud (VPC). Used for private ECS services
+  # pPublicSubnetIds:
+  #   Type: List<AWS::EC2::Subnet::Id>
+  #   Description:
+  #     List of Public SubnetIds in the Virtual Private Cloud (VPC). Used for Internet Facing Load Balancer
+  pPrivateSubnetId1:
+    Type: String
+  pPrivateSubnetId2:
+    Type: String
+  pPublicSubnetId1:
+    Type: String
+  pPublicSubnetId2:
+    Type: String
   pACMCertificateArn:
     Type: String
     Description: ACM cert ARN for ECS services ALB
   pR53HostedZoneId:
     Type: String
     Description: Route 53 hosted zone
+  pColorAdvisorApiUrl:
+    Type: String
   # Container Ports
   pWebsitePort:
     Type: Number
@@ -200,6 +210,8 @@ Resources:
               Value: localhost #!Sub redis-${pAppName}.dev.mdsnrdfd.com
             - Name: REDIS_PORT
               Value: !Ref pRedisPort
+            - Name: COLOR_ADVISOR_URL
+              Value: !Ref pColorAdvisorApiUrl
 
             # MYSQL
             - Name: MYSQL_HOST
@@ -386,7 +398,9 @@ Resources:
       Scheme: internet-facing
       SecurityGroups:
         - !GetAtt albSecurityGroup.GroupId
-      Subnets: !Ref pPublicSubnetIds
+      Subnets: #!Ref pPublicSubnetIds
+        - !Ref pPublicSubnetId1
+        - !Ref pPublicSubnetId2
       Type: application
 
   ecsWebsiteService:
@@ -417,7 +431,9 @@ Resources:
           AssignPublicIp: DISABLED
           SecurityGroups:
             - !GetAtt serviceSecurityGroup.GroupId
-          Subnets: !Ref pPrivateSubnetIds
+          Subnets: #!Ref pPrivateSubnetIds
+            - !Ref pPrivateSubnetId1
+            - !Ref pPrivateSubnetId2
       PlatformVersion: LATEST
       PropagateTags: SERVICE
       # ServiceConnectConfiguration: # Allows using Cloud Map to connect services between clusters

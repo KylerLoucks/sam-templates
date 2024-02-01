@@ -15,7 +15,7 @@ resolve_s3 = true
 resolve_image_repos = true
 s3_prefix = "ephemeral/"
 region = "us-east-1"
-capabilities = "CAPABILITY_NAMED_IAM"
+capabilities = ["CAPABILITY_NAMED_IAM", "CAPABILITY_AUTO_EXPAND"]
 parameter_overrides = [
     "pVpcId=vpc-094590ab31d2c639f",
     "pPrivateSubnetIds=subnet-050fa317f4ea060dd,subnet-08c6fecb378269d0b"
@@ -28,6 +28,19 @@ stack_name = "ecr-repos"
 resolve_s3 = true
 resolve_image_repos = true
 s3_prefix = "ephemeral/ecr/"
+region = "us-east-1"
+capabilities = "CAPABILITY_NAMED_IAM"
+parameter_overrides = [
+    "pAppName=pr1"
+]
+confirm_changeset = true
+
+
+[pipeline.deploy.parameters]
+stack_name = "pipeline"
+resolve_s3 = true
+resolve_image_repos = true
+s3_prefix = "ephemeral/pipeline/"
 region = "us-east-1"
 capabilities = "CAPABILITY_NAMED_IAM"
 parameter_overrides = [

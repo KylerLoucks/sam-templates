@@ -26,6 +26,7 @@ def status():
             "status": _status(mongodb.is_mongodb_accessible()),
         },
     ]
+    
 
     return render_template("status.html", results=status_data)
 

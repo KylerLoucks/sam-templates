@@ -8,10 +8,6 @@ Parameters:
     Description: Application Name
  
 Resources:
-  # ecrBackendRepo:
-  #   Type: AWS::ECR::Repository
-  #   Properties:
-  #     RepositoryName: !Sub ${pAppName}-backend
 
   ecrWebsiteRepo:
     Type: AWS::ECR::Repository

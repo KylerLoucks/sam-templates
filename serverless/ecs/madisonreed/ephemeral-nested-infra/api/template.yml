@@ -1,0 +1,339 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Color Advisor API
+
+
+# Globals:
+#   Function:
+#     Timeout: 90
+#     Runtime: nodejs16.x
+#     Environment:
+#       Variables:
+#         NODE_ENV: !Ref NodeEnv
+#         EPSAGON_METADATA: False
+#         EPSAGON_TOKEN: !Ref EpsagonToken
+#     Layers:
+#       - !Ref AdvisorNodeModulesLayer
+#       # - !Ref MRModulesLayer
+#       - arn:aws:lambda:us-east-1:222286259312:layer:mr-modules:129
+#       - !Ref ColorAdvisorLayer
+#       - arn:aws:lambda:us-east-1:066549572091:layer:epsagon-node-layer:315
+#     VpcConfig:
+#       SecurityGroupIds:
+#         - !Ref MSSecGroupA
+#         - !Ref MSSecGroupB
+#       SubnetIds:
+#         - !Ref MSSubnet
+#     Handler: /opt/nodejs/node_modules/epsagon.wrapper
+
+
+Parameters:
+
+  pAppName:
+    Type: String
+    Default: pr1
+    Description: Application Name
+  pACMCertificateArn:
+    Type: String
+    Description: ACM cert ARN for ECS services ALB
+  pR53HostedZoneId:
+    Type: String
+    Description: Route 53 hosted zone
+  # NodeEnv:
+  #   Description: "Required. Set Node Environment Variable"
+  #   Type: "String"
+  # EpsagonToken:
+  #   Description: "Required. Epsagon token"
+  #   Type: "String"
+  # MSSubnet:
+  #   Description: "Required. Subnet"
+  #   Type: "String"
+  # MSSecGroupA:
+  #   Description: "Required. Primary Security Group"
+  #   Type: "String"
+  # MSSecGroupB:
+  #   Description: "Required. Secondary Security Group"
+  #   Type: "String"
+
+
+
+Resources:
+  ColorAdvisorAPI:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: base
+      Name: !Ref pAppName
+      AlwaysDeploy: true
+
+
+  # # Swagger
+  # SwaggerFunction:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     Role: arn:aws:iam::222286259312:role/ConsumerLambdaRole
+  #     CodeUri: .build/api/swagger/
+  #     Environment:
+  #       Variables:
+  #         EPSAGON_HANDLER: index.handler
+  #     Events:
+  #       HttpEvent:
+  #         Type: Api
+  #         Properties:
+  #           Path: /docs
+  #           Method: ANY
+  #           RestApiId: !Ref ColorAdvisorAPI
+  #       WarmingSchedule:
+  #         Type: Schedule
+  #         Properties:
+  #           Schedule: rate(5 minutes)
+  #           Input: '{ "warmer":true,"concurrency":8 }'
+  # # Options
+  # OptionsFunction:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     Role: arn:aws:iam::222286259312:role/ConsumerLambdaRole
+  #     CodeUri: .build/api
+  #     Environment:
+  #       Variables:
+  #         EPSAGON_HANDLER: options.handler
+  #     Timeout: 90
+  #     Events:
+  #       ColorAdvisorAPI:
+  #         Type: Api
+  #         Properties:
+  #           Path: /{proxy+}
+  #           Method: OPTIONS
+  #           RestApiId: !Ref ColorAdvisorAPI
+  #       WarmingSchedule:
+  #         Type: Schedule
+  #         Properties:
+  #           Schedule: rate(5 minutes)
+  #           Input: '{ "warmer":true,"concurrency":8 }'
+  # # RuleSets
+  # RuleSetFunction:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     Role: arn:aws:iam::222286259312:role/ConsumerLambdaRole
+  #     CodeUri: .build/api/ruleSet/
+  #     Environment:
+  #       Variables:
+  #         EPSAGON_HANDLER: index.handler
+  #     Timeout: 90
+  #     Events:
+  #       RootPath:
+  #         Type: Api
+  #         Properties:
+  #           Path: /ruleSet
+  #           Method: ANY
+  #           RestApiId: !Ref ColorAdvisorAPI
+  #       WithParams:
+  #         Type: Api
+  #         Properties:
+  #           Path: /ruleSet/{id}
+  #           Method: ANY
+  #           RestApiId: !Ref ColorAdvisorAPI
+  #       WarmingSchedule:
+  #         Type: Schedule
+  #         Properties:
+  #           Schedule: rate(5 minutes)
+  #           Input: '{ "warmer":true,"concurrency":8 }'
+  # # RecommendationSets
+  # RecommendationSetFunction:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     Role: arn:aws:iam::222286259312:role/ConsumerLambdaRole
+  #     CodeUri: .build/api/recommendationSet/
+  #     Environment:
+  #       Variables:
+  #         EPSAGON_HANDLER: index.handler
+  #     Timeout: 90
+  #     Events:
+  #       RootPath:
+  #         Type: Api
+  #         Properties:
+  #           Path: /recommendationSet
+  #           Method: ANY
+  #           RestApiId: !Ref ColorAdvisorAPI
+  #       WithParams:
+  #         Type: Api
+  #         Properties:
+  #           Path: /recommendationSet/{id}
+  #           Method: ANY
+  #           RestApiId: !Ref ColorAdvisorAPI
+  #       WarmingSchedule:
+  #         Type: Schedule
+  #         Properties:
+  #           Schedule: rate(5 minutes)
+  #           Input: '{ "warmer":true,"concurrency":8 }'
+  # # Recommendations
+  # RecommendationFunction:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     Role: arn:aws:iam::222286259312:role/ConsumerLambdaRole
+  #     CodeUri: .build/api/recommendation/
+  #     Environment:
+  #       Variables:
+  #         EPSAGON_HANDLER: index.handler
+  #     Timeout: 90
+  #     Events:
+  #       RootPath:
+  #         Type: Api
+  #         Properties:
+  #           Path: /recommendation
+  #           Method: ANY
+  #           RestApiId: !Ref ColorAdvisorAPI
+  #       WithParams:
+  #         Type: Api
+  #         Properties:
+  #           Path: /recommendation/{id}
+  #           Method: ANY
+  #           RestApiId: !Ref ColorAdvisorAPI
+  #       WarmingSchedule:
+  #         Type: Schedule
+  #         Properties:
+  #           Schedule: rate(5 minutes)
+  #           Input: '{ "warmer":true,"concurrency":8 }'
+  # # Shades
+  # ShadeFunction:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     Role: arn:aws:iam::222286259312:role/ConsumerLambdaRole
+  #     CodeUri: .build/api/shade/
+  #     Environment:
+  #       Variables:
+  #         EPSAGON_HANDLER: index.handler
+  #     Timeout: 90
+  #     Events:
+  #       RootPath:
+  #         Type: Api
+  #         Properties:
+  #           Path: /shade
+  #           Method: ANY
+  #           RestApiId: !Ref ColorAdvisorAPI
+  #       WithParams:
+  #         Type: Api
+  #         Properties:
+  #           Path: /shade/{id}
+  #           Method: ANY
+  #           RestApiId: !Ref ColorAdvisorAPI
+  #       WarmingSchedule:
+  #         Type: Schedule
+  #         Properties:
+  #           Schedule: rate(5 minutes)
+  #           Input: '{ "warmer":true,"concurrency":8 }'
+  # # Rules Engine
+  # EngineFunction:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     Role: arn:aws:iam::222286259312:role/ConsumerLambdaRole
+  #     CodeUri: .build/api/rulesEngine/
+  #     Environment:
+  #       Variables:
+  #         EPSAGON_HANDLER: index.handler
+  #     Timeout: 90
+  #     Events:
+  #       TargetLevel:
+  #         Type: Api
+  #         Properties:
+  #           Path: /rulesEngine/level/{id}
+  #           Method: POST
+  #           RestApiId: !Ref ColorAdvisorAPI
+  #       HairToneOptions:
+  #         Type: Api
+  #         Properties:
+  #           Path: /rulesEngine/tones
+  #           Method: POST
+  #           RestApiId: !Ref ColorAdvisorAPI
+  #       Recommendations:
+  #         Type: Api
+  #         Properties:
+  #           Path: /rulesEngine/recommendations
+  #           Method: POST
+  #           RestApiId: !Ref ColorAdvisorAPI
+  #       ClearCache:
+  #         Type: Api
+  #         Properties:
+  #           Path: /rulesEngine/clearCache
+  #           Method: POST
+  #           RestApiId: !Ref ColorAdvisorAPI
+  #       WarmingSchedule:
+  #         Type: Schedule
+  #         Properties:
+  #           Schedule: rate(5 minutes)
+  #           Input: '{ "warmer":true,"concurrency":8 }'
+  # # Layer definitions
+  # AdvisorNodeModulesLayer:
+  #   Type: AWS::Serverless::LayerVersion
+  #   Properties:
+  #     LayerName: advisor-node-modules
+  #     Description: Node Modules for the Color Advisor
+  #     ContentUri: lib/node_modules/
+  #     CompatibleRuntimes:
+  #       - nodejs10.x
+  #       - nodejs12.x
+  #     LicenseInfo: "MIT"
+  #     RetentionPolicy: Retain
+
+  # ColorAdvisorLayer:
+  #   Type: AWS::Serverless::LayerVersion
+  #   Properties:
+  #     LayerName: !Sub ${pAppName}-color-advisor
+  #     Description: Color Advisor
+  #     ContentUri: layers/color-advisor-layer/
+  #     CompatibleRuntimes:
+  #       - nodejs10.x
+  #       - nodejs12.x
+  #     LicenseInfo: "MIT"
+  #     RetentionPolicy: Retain
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: nodejs16.x
+      Handler: index.handler
+      CodeUri: function/
+      AutoPublishAlias: base
+      Environment:
+        Variables:
+          MY_ENV: Hello World
+      Events:
+        Test:
+          Type: Api
+          Properties:
+            Path: /rulesEngine
+            Method: GET
+            RestApiId: !Ref ColorAdvisorAPI
+
+  ApiGatewayDomain:
+    Type: AWS::ApiGateway::DomainName
+    # TODO: Change the DomainName accordingly
+    Properties:
+      DomainName: !Sub ${pAppName}-coloradvisor.dev.mdsnrdfd.com 
+      CertificateArn: !Ref pACMCertificateArn
+
+  # Maps a deployed Stage to a domain
+  ApiGatewayBasePathMapping:
+    Type: AWS::ApiGateway::BasePathMapping
+    Properties:
+      DomainName: !Ref ApiGatewayDomain
+      RestApiId: !Ref ColorAdvisorAPI
+      Stage: base
+      BasePath: coloradvisor
+
+  # ROUTE53 Records
+  route53Records:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneId: !Ref pR53HostedZoneId # Id of the Hosted Zone created during domain registration
+      RecordSets:
+        # Website
+        - Name: !Sub ${pAppName}-coloradvisor.dev.mdsnrdfd.com
+          Type: A
+          AliasTarget:
+            HostedZoneId: Z2FDTNDATAQYW2 # Fixed AWS HostedZoneId for Edge Optimized APIs
+            DNSName: !GetAtt ApiGatewayDomain.DistributionDomainName
+
+Outputs:
+  ColorAdvisorApiUrl:
+    Description: DNS Endpoint for API GW
+    Value: !Ref ApiGatewayDomain

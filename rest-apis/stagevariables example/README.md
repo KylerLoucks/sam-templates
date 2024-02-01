@@ -1,6 +1,6 @@
 # Multi-Domain REST API
 
-Creates an API gateway REST API that has multiple domain names mapping to a different Stage (deployment) of the API
+Creates an API gateway REST API that uses stage variables to deploy a certain lambda alias a Stage (deployment) of the API
 
 
 

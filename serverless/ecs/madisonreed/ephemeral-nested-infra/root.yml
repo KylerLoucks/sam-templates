@@ -1,0 +1,74 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Root Application to deploy nested stacks
+
+Parameters:
+  pAppName:
+    Type: String
+    Default: pr1
+    Description: Application Name
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the Virtual Private Network (VPC)
+  pPrivateSubnetId1:
+    Type: String
+  pPrivateSubnetId2:
+    Type: String
+  pPublicSubnetId1:
+    Type: String
+  pPublicSubnetId2:
+    Type: String
+  pACMCertificateArn:
+    Type: String
+    Description: ACM cert ARN for ECS services ALB
+  pR53HostedZoneId:
+    Type: String
+    Description: Route 53 hosted zone
+  # Container Ports
+  pWebsitePort:
+    Type: Number
+    Default: 80
+  pMongoPort:
+    Type: Number
+    Default: 27017
+  pRedisPort:
+    Type: Number
+    Default: 6379
+  pMySQLPort:
+    Type: Number
+    Default: 3306
+  pPostgresPort:
+    Type: Number
+    Default: 5432
+
+
+
+
+Resources:
+
+
+  Api:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location: api/template.yml
+      Parameters:
+        pAppName: !Ref pAppName
+        pR53HostedZoneId: !Ref pR53HostedZoneId
+        pACMCertificateArn: !Ref pACMCertificateArn
+
+
+  Ecs:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location: ecs/madisonreed-ecs-tester.yml
+      Parameters:
+        pAppName: !Ref pAppName
+        pR53HostedZoneId: !Ref pR53HostedZoneId
+        pACMCertificateArn: !Ref pACMCertificateArn
+        pVpcId: !Ref pVpcId
+        pPrivateSubnetId1: !Ref pPrivateSubnetId1
+        pPrivateSubnetId2: !Ref pPrivateSubnetId2
+        pPublicSubnetId1: !Ref pPublicSubnetId1
+        pPublicSubnetId2: !Ref pPublicSubnetId2
+        pColorAdvisorApiUrl: !GetAtt Api.Outputs.ColorAdvisorApiUrl
