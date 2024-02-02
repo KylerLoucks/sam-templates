@@ -465,6 +465,11 @@ Resources:
 
 
 Outputs:
-  endpointUrl:
+  albEndpointUrl:
     Description: DNS Endpoint for the ECS ALB
     Value: !GetAtt ecsLoadBalancer.DNSName
+
+  websiteUrl:
+    Description: Application URL endpoint
+    Value: !Sub https://${pAppName}.dev.mdsnrdfd.com
+  

@@ -72,3 +72,12 @@ Resources:
         pPublicSubnetId1: !Ref pPublicSubnetId1
         pPublicSubnetId2: !Ref pPublicSubnetId2
         pColorAdvisorApiUrl: !GetAtt Api.Outputs.ColorAdvisorApiUrl
+
+Outputs:
+  AppUrl:
+    Description: Application URL endpoint
+    Value: !GetAtt Ecs.Outputs.websiteUrl
+
+  ColorAdvisorApiEndpoint:
+    Description: ColorAdvisor API endpoint
+    Value: !Sub ${Api.Outputs.ColorAdvisorApiUrl}/coloradvisor

@@ -227,24 +227,20 @@ Resources:
           - Name: PULL_REQUEST_ID
             Value: "#{variables.PR_ID}"
             Type: PLAINTEXT
-          - Name: COMMIT_ID
-            Value: "#{variables.COMMIT_ID}"
-            Type: PLAINTEXT
           - Name: PR_EVENT
             Value: "#{variables.PR_EVENT}"
             Type: PLAINTEXT
-          - Name: ACCOUNT_ID
-            Value: !Ref "AWS::AccountId"
+          - Name: ACCOUNT_ID 
+            Value: !Ref AWS::AccountId 
             Type: PLAINTEXT
-          # - Name: CONTAINER_NAME
-          #   Value: !Ref pContainerName
-          #   Type: PLAINTEXT
-          # - Name: BASE_IMAGE_REPO_NAME  
-          #   Value: !Ref pBaseEcrRepo  
-          #   Type: PLAINTEXT 
-          # - Name: BASE_IMAGE_TAG 
-          #   Value: !Ref pBaseImageTag 
-          #   Type: PLAINTEXT
+
+          - Name: BASE_IMAGE_REPO_NAME  
+            Value: base-image
+            Type: PLAINTEXT 
+          - Name: APP_NAME 
+            Value: !Ref pAppName 
+            Type: PLAINTEXT
+
       ServiceRole: !GetAtt codeBuildServiceRole.Arn
       Source:
         Type: CODEPIPELINE
@@ -340,6 +336,102 @@ Resources:
         - Key: environment
           Value: !Ref pEnvironmentTag
 
+  # Artifact bucket cleanup
+  DeleteObjectStorage:
+    Type: Custom::S3DeleteObjectsLambda
+    Properties:
+      ServiceToken: !GetAtt DeleteS3ObjectsFunction.Arn
+      Bucket: !Ref artifactBucket
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        -
+          PolicyName: S3Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Sid: AllowLogging
+                Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+              -
+                Sid: DeleteBucketObjects
+                Effect: Allow
+                Action:
+                  - "s3:ListBucket"
+                  - "s3:ListBucketVersions"
+                  - "s3:GetObject"
+                  - "s3:DeleteObject"
+                  - "s3:DeleteObjectVersion"
+                Resource:
+                  - !Sub "arn:aws:s3:::${artifactBucket}"
+                  - !Sub "arn:aws:s3:::${artifactBucket}/*"
+
+  DeleteS3ObjectsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Deletes objects from buckets provisioned by CloudFormation
+      Handler: index.handler
+      Runtime: python3.9
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: 120
+      Code:
+        ZipFile: |
+          import os 
+          import json
+          import cfnresponse
+          import boto3
+          import logging
+
+          from botocore.exceptions import ClientError
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          s3 = boto3.resource('s3')
+
+          def handler(event, context):
+            logger.info("Received event: %s" % json.dumps(event))
+            bucket = s3.Bucket(event['ResourceProperties']['Bucket'])
+
+            result = cfnresponse.SUCCESS
+
+            try:
+              if event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
+                result = cfnresponse.SUCCESS
+              elif event['RequestType'] == 'Delete':
+                result = delete_objects(bucket)
+            except ClientError as e:
+              logger.error('Error: %s', e)
+              result = cfnresponse.FAILED
+
+            cfnresponse.send(event, context, result, {})
+
+          def delete_objects(bucket):        
+            bucket.object_versions.delete()
+            bucket.objects.all().delete()
+            return cfnresponse.SUCCESS
+            
+  cleanupLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${DeleteS3ObjectsFunction}
+      RetentionInDays: 7
+
   codePipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
@@ -353,8 +445,6 @@ Resources:
       Variables:
         - Name: PR_ID
           Description: Pull Request ID
-        - Name: COMMIT_ID
-          Description: Commit Hash
         - Name: PR_EVENT
           Description: 'Type of PR event. Valid values: [opened, synchronize, reopened, closed]'
       Stages:
