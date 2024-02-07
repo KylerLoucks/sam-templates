@@ -1,13 +1,16 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  Root Application to deploy nested stacks
+  Root Application to deploy nested API and ECS stacks
 
 Parameters:
+
   pAppName:
     Type: String
     Default: pr1
     Description: Application Name
+  
+  # Networking
   pVpcId:
     Type: AWS::EC2::VPC::Id
     Description: ID of the Virtual Private Network (VPC)
@@ -21,11 +24,12 @@ Parameters:
     Type: String
   pACMCertificateArn:
     Type: String
-    Description: ACM cert ARN for ECS services ALB
+    Description: ACM cert ARN for ECS ALB and API Domain
   pR53HostedZoneId:
     Type: String
     Description: Route 53 hosted zone
-  # Container Ports
+
+  # ECS Container Ports
   pWebsitePort:
     Type: Number
     Default: 80
@@ -42,29 +46,28 @@ Parameters:
     Type: Number
     Default: 5432
 
-  # Api Variables
-  pNodeEnv:
-    Description: "Required. Set Node Environment Variable"
-    Type: "String"
-  pEpsagonToken:
-    Description: "Required. Epsagon token"
-    Type: "String"
-  # pMSSubnet:
-  #   Description: "Required. Subnet"
-  #   Type: "String"
-  # pMSSecGroupA:
-  #   Description: "Required. Primary Security Group"
-  #   Type: "String"
-  # pMSSecGroupB:
-  #   Description: "Required. Secondary Security Group"
-  #   Type: "String"
-
-  # ECS app variables
+  # ECS Container Images
   pWebsiteEcrImageUri:
     Type: String
     Description: > 
       URI of the ECR image used for Website Task Definition. 
       e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
+
+  # Api Variables
+  pNodeEnv:
+    Description: "Required. Set Node Environment Variable"
+    Type: String
+  pEpsagonToken:
+    Description: "Required. Epsagon token"
+    Type: String
+  pMSSecGroupA:
+    Description: "Required. Primary Security Group"
+    Type: String
+    Default: sg-0a34349137fd5086d
+  pMSSecGroupB:
+    Description: "Required. Secondary Security Group"
+    Type: String
+    Default: sg-0a1053b02521d09b3
 
 
 Resources:
@@ -82,8 +85,8 @@ Resources:
         NodeEnv: !Ref pNodeEnv
         EpsagonToken: !Ref pEpsagonToken
         MSSubnet: !Ref pPublicSubnetId1
-        MSSecGroupA: sg-0a34349137fd5086d
-        MSSecGroupB: sg-0a1053b02521d09b3
+        MSSecGroupA: !Ref pMSSecGroupA
+        MSSecGroupB: !Ref pMSSecGroupB
 
 
   Ecs:
@@ -101,6 +104,11 @@ Resources:
         pPublicSubnetId2: !Ref pPublicSubnetId2
         pColorAdvisorApiUrl: !GetAtt Api.Outputs.ColorAdvisorApiUrl
         pWebsiteEcrImageUri: !Ref pWebsiteEcrImageUri
+        pWebsitePort: !Ref pWebsitePort
+        pMongoPort: !Ref pMongoPort
+        pRedisPort: !Ref pRedisPort
+        pMySQLPort: !Ref pMySQLPort
+        pPostgresPort: !Ref pPostgresPort
 
 Outputs:
   AppUrl:
