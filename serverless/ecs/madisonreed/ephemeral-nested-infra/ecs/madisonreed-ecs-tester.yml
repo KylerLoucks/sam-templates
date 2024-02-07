@@ -51,6 +51,13 @@ Parameters:
     Type: Number
     Default: 5432
 
+  # ECR repos
+  pWebsiteEcrImageUri:
+    Type: String
+    Description: > 
+      URI of the ECR image used for Website Task Definition. 
+      e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
+
 
 Resources:
 
@@ -202,7 +209,8 @@ Resources:
         
       ContainerDefinitions:
         - Name: website
-          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/website-${pAppName}:latest
+          # changes to the Image will cause a new deployment to the ECS service, replacing the old deployment.
+          Image: !Ref pWebsiteEcrImageUri # 174743933558.dkr.ecr.us-east-1.amazonaws.com/websitetest-pr16692:latest
           PortMappings:
               - ContainerPort: !Ref pWebsitePort
           Environment:
@@ -398,7 +406,7 @@ Resources:
       Scheme: internet-facing
       SecurityGroups:
         - !GetAtt albSecurityGroup.GroupId
-      Subnets: #!Ref pPublicSubnetIds
+      Subnets:
         - !Ref pPublicSubnetId1
         - !Ref pPublicSubnetId2
       Type: application
@@ -431,7 +439,7 @@ Resources:
           AssignPublicIp: DISABLED
           SecurityGroups:
             - !GetAtt serviceSecurityGroup.GroupId
-          Subnets: #!Ref pPrivateSubnetIds
+          Subnets: 
             - !Ref pPrivateSubnetId1
             - !Ref pPrivateSubnetId2
       PlatformVersion: LATEST

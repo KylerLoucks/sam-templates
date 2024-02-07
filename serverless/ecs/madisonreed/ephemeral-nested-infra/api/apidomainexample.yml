@@ -1,0 +1,55 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: Color Advisor API
+
+
+Parameters:
+  pAppName:
+    Type: String
+    Default: pr1
+    Description: Application Name
+  pACMCertificateArn:
+    Type: String
+    Description: ACM cert ARN for ECS services ALB
+    Default: arn:aws:acm:us-east-1:174743933558:certificate/07f48ca4-3dcf-4ed7-b4df-147b3412be62
+  pR53HostedZoneId:
+    Type: String
+    Description: Route 53 hosted zone
+    Default: Z0323068C9DQS081P13G
+
+Resources:
+  ColorAdvisorAPI:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: base
+      Name: !Sub ${pAppName}-coloradvisor
+      AlwaysDeploy: true
+      EndpointConfiguration:
+        Type: REGIONAL
+      Domain: 
+        DomainName: !Sub ${pAppName}-coloradvisor.dev.mdsnrdfd.com
+        CertificateArn: !Ref pACMCertificateArn
+        EndpointConfiguration: REGIONAL
+        Route53:
+          HostedZoneId: !Ref pR53HostedZoneId
+        BasePath:
+          - coloradvisor
+
+
+
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Runtime: nodejs16.x
+      Handler: index.handler
+      CodeUri: function/
+      Environment:
+        Variables:
+          MY_ENV: Hello World
+      Events:
+        Test:
+          Type: Api
+          Properties:
+            Path: /test
+            Method: GET
+            RestApiId: !Ref ColorAdvisorAPI

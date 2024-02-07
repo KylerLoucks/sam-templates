@@ -35,18 +35,24 @@ sam build -t madisonreed-ephemeral-tester.yml
 
 
 ```bash
-sam deploy -t madisonreed-ephemeral-tester.yml \
-  --config-env ephemeral \
+sam deploy -t ecs/madisonreed-ecs-tester.yml \
+  --resolve-s3 \
+  --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides \
     "pAppName=pr1 \
      pVpcId=vpc-09ef4a53e9290ca17 \
-     pPrivateSubnetIds=subnet-01086857935bfcf34,subnet-056e57e04fea05dd5 \
-     pPublicSubnetIds=subnet-0598f465e77230bd5,subnet-0d650820a97fa5ba3 \
+     pPrivateSubnetId1=subnet-01086857935bfcf34 \ 
+     pPrivateSubnetId2=subnet-056e57e04fea05dd5 \
+     pPublicSubnetId1=subnet-0598f465e77230bd5 \
+     pPublicSubnetId2=subnet-0d650820a97fa5ba3 \
      pR53HostedZoneId=Z0323068C9DQS081P13G \
+     pWebsiteEcrImageUri=174743933558.dkr.ecr.us-east-1.amazonaws.com/websitetest-pr16692@sha256:d4583ba1ae7255ec693640b787819710a10297730517c0edfacba43a94e70def \
      pACMCertificateArn=arn:aws:acm:us-east-1:174743933558:certificate/07f48ca4-3dcf-4ed7-b4df-147b3412be62" \
+     pColorAdvisorApiUrl=test \
   --stack-name pr1-ephemeral \
   --tags CleanupDate=$(date -u -d "+10 days" '+%Y-%m-%dT%H:%M:%SZ') \
-  --no-confirm-changeset
+  --no-confirm-changeset \
+  --on-failure DELETE
 ```
 
 
@@ -59,8 +65,12 @@ aws ecs update-service --cluster pr1-cluster --service pr1-frontend --force-new-
 
 ### Cleanup
 ```bash
+# Sam delete waits until the stack is fully deleted before moving to the next line. To use async deletion, try cloudformation
 sam delete --stack-name pr1-ephemeral --no-prompts
 sam delete --stack-name pr1-ecr --no-prompts
+
+
+aws cloudformation delete-stack --stack-name pr1-ephemeral
 ```
 
 
@@ -86,13 +96,13 @@ sam deploy -t pipeline.yml --config-env pipeline --parameter-overrides "pAppName
 
 ###  Start Codepipeline, passing variables from Github Actions:
 ```bash
-aws codepipeline start-pipeline-execution --name ${PR_ID}-pipeline --variables name=PR_ID,value=123 name=COMMIT_ID,value=idefg name=PR_EVENT,value=opened
+aws codepipeline start-pipeline-execution --name ${PR_ID}-pipeline --variables name=PR_ID,value=123 name=PR_EVENT,value=closed
 ```
 
 
 
 
-# TESET
+# Deploy nested stacks
 sam deploy -t root.yml \
   --config-env ephemeral \
   --parameter-overrides \

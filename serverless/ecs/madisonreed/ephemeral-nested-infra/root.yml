@@ -42,7 +42,29 @@ Parameters:
     Type: Number
     Default: 5432
 
+  # Api Variables
+  pNodeEnv:
+    Description: "Required. Set Node Environment Variable"
+    Type: "String"
+  pEpsagonToken:
+    Description: "Required. Epsagon token"
+    Type: "String"
+  # pMSSubnet:
+  #   Description: "Required. Subnet"
+  #   Type: "String"
+  # pMSSecGroupA:
+  #   Description: "Required. Primary Security Group"
+  #   Type: "String"
+  # pMSSecGroupB:
+  #   Description: "Required. Secondary Security Group"
+  #   Type: "String"
 
+  # ECS app variables
+  pWebsiteEcrImageUri:
+    Type: String
+    Description: > 
+      URI of the ECR image used for Website Task Definition. 
+      e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
 
 
 Resources:
@@ -56,6 +78,12 @@ Resources:
         pAppName: !Ref pAppName
         pR53HostedZoneId: !Ref pR53HostedZoneId
         pACMCertificateArn: !Ref pACMCertificateArn
+
+        NodeEnv: !Ref pNodeEnv
+        EpsagonToken: !Ref pEpsagonToken
+        MSSubnet: !Ref pPublicSubnetId1
+        MSSecGroupA: sg-0a34349137fd5086d
+        MSSecGroupB: sg-0a1053b02521d09b3
 
 
   Ecs:
@@ -72,6 +100,7 @@ Resources:
         pPublicSubnetId1: !Ref pPublicSubnetId1
         pPublicSubnetId2: !Ref pPublicSubnetId2
         pColorAdvisorApiUrl: !GetAtt Api.Outputs.ColorAdvisorApiUrl
+        pWebsiteEcrImageUri: !Ref pWebsiteEcrImageUri
 
 Outputs:
   AppUrl:
@@ -80,4 +109,4 @@ Outputs:
 
   ColorAdvisorApiEndpoint:
     Description: ColorAdvisor API endpoint
-    Value: !Sub ${Api.Outputs.ColorAdvisorApiUrl}/coloradvisor
+    Value: !GetAtt Api.Outputs.ColorAdvisorApiUrl

@@ -1,4 +1,4 @@
-name: PR Deployment Workflow 
+name: PR Ephemeral Deployment Workflow 
 
  
 
@@ -6,14 +6,19 @@ name: PR Deployment Workflow
 on: 
   pull_request: 
     types: [opened, synchronize, reopened, closed]
-    branches:
-      - 'c303/**'
-    paths: 
-      - '!copilot/**' 
-      - '!**/*.md'
+
+    # filter for the feature branch. Workflow will trigger only if the feature branch name matches
+    # branches:
+    #   - 'c303/ephemeral/pr'
+
+    # Workflow will only trigger when the PR includes changes to files specified here.
+    # paths:
+    #   '**.js' 
 
 jobs: 
   deploy: 
+    # Only trigger workflow when target branch matches criteria
+    if: startsWith(github.head_ref, 'c303') || startsWith(github.head_ref, 'mr-c303')
     runs-on: ubuntu-latest 
     #These permissions are needed to interact with GitHub's OIDC Token endpoint. 
     permissions: 
@@ -30,48 +35,60 @@ jobs:
           role-to-assume: arn:aws:iam::174743933558:role/madisonreed-mr-github-oidc-Role-wu9FArTEn7O1
           aws-region: us-east-1
 
-
-      - name: Set up Python
+      - name: Setup Python
         uses: actions/setup-python@v3
         with:
           python-version: '3.10'
 
+      # Used for conditionally deploying the Pipeline stack only if the stack doesn't already exist.
+      - name: Check Pipeline Stack Exists
+        id: check_stack
+        run: |
+          if aws cloudformation describe-stacks --stack-name pr${{github.event.pull_request.number}}-pipeline; then
+            echo "Pipeline Stack exists."
+            echo "stack_exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "Pipeline Stack does not exist."
+            echo "stack_exists=false" >> "$GITHUB_OUTPUT"
+          fi
+          
       - name: Install AWS SAM CLI
+        if: steps.check_stack.outputs.stack_exists == 'false'
         run: |
           pip install aws-sam-cli
 
-
-      - name: Build SAM application
+      - name: Deploy Pipeline Stack
+        if: steps.check_stack.outputs.stack_exists == 'false'
         run: |
           sam --version
-          ls
-          cd ephemeralenv/
-          sam build -t ephemeral.yml
           ls -la
+          sam build -t ephemeralenv/pipeline.yml
 
-      - name: List S3 buckets
+          sam deploy -t ephemeralenv/pipeline.yml \
+          --config-env pipeline \
+          --parameter-overrides \
+            "pAppName=pr${{github.event.pull_request.number}} \
+            pTriggerBranch=${GITHUB_HEAD_REF} \
+            pCodestarConnectionArn=arn:aws:codestar-connections:us-east-1:174743933558:connection/d27c0b2b-88c2-45ac-b8f4-89b0e04af6fd" \
+            pBuildSpecPath=ephemeralenv/buildspec.yml \
+          --stack-name pr${{github.event.pull_request.number}}-pipeline \
+          --tags CleanupDate=$(date -u -d "+10 days" '+%Y-%m-%dT%H:%M:%SZ') \
+          --no-confirm-changeset \
+          --on-failure DELETE
+          
+      - name: Start Pipeline Execution
+        if: github.event.action != 'closed'
         run: |
-          echo listing s3 buckets on PR number: ${{github.event.pull_request.number}}
-          echo PR action: ${{github.event.action}}
-          echo Branch Name: $GITHUB_HEAD_REF
-          aws s3 ls
- 
-      # - name: Install AWS Copilot 
-      #   run: | 
-      #     curl -Lo copilot https://github.com/aws/copilot-cli/releases/latest/download/copilot-linux && \ 
-      #     chmod +x copilot && \ 
-      #     sudo mv copilot /usr/local/bin 
-
-      # - name: Deploy with Copilot 
-
-      #   run: | 
-            # If the PR wasn't closed manually or merged into the head branch
-      #     if [ "${{ github.event.action }}" != "closed" ]; then 
-
-      #       ./deploy_script.sh --pr-id ${{ github.event.pull_request.number }} 
-
-      #     else 
-
-      #       ./cleanup_script.sh --pr-id ${{ github.event.pull_request.number }} 
-
-      #     Fi 
+          aws codepipeline start-pipeline-execution \
+          --name pr${{github.event.pull_request.number}}-pipeline \
+          --variables \
+            name=PR_ID,value=${{github.event.pull_request.number}} \
+            name=PR_EVENT,value=${{github.event.action}}
+      
+      # Cleanup Ephemeral Environment when the PR is merged/closed
+      - name: Cleanup
+        if: github.event.action == 'closed'
+        run: |
+          echo "PR was closed, cleaning up resources..."
+          aws cloudformation delete-stack --stack-name pr${{github.event.pull_request.number}}-ephemeral --output text
+          aws cloudformation delete-stack --stack-name pr${{github.event.pull_request.number}}-pipeline --output text

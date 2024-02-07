@@ -48,13 +48,12 @@ Parameters:
   pCodeBuildImage:
     Type: String
     Description: Base image used by CodeBuild
-    Default: aws/codebuild/amazonlinux2-x86_64-standard:3.0
+    Default: aws/codebuild/amazonlinux2-x86_64-standard:4.0 # 4.0 for Node 16
 
   pBuildSpecPath:
     Type: String
     Description: Path and name for the Buildspec in repo
     Default: buildspec.yml
-
 
 
   # Tagging
@@ -120,6 +119,13 @@ Metadata:
 
 Resources:
 
+
+  ecrWebsiteRepo:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub website-${pAppName}
+      EmptyOnDelete: true
+
   # IAM Role - CodeBuild
 
   codeBuildServiceRole:
@@ -169,38 +175,38 @@ Resources:
                   - codestar-connections:UseConnection
                 Resource: 
                   - !Ref pCodestarConnectionArn
-        # - PolicyName: ECR
-        #   PolicyDocument:
-        #     Version: 2012-10-17
-        #     Statement:
-        #       - Effect: Allow
-        #         Action:
-        #           - ecr:PutLifecyclePolicy
-        #           - ecr:PutImageTagMutability
-        #           - ecr:PutImageScanningConfiguration
-        #           - ecr:BatchGetImage
-        #           - ecr:CompleteLayerUpload
-        #           - ecr:DescribeImages
-        #           - ecr:TagResource
-        #           - ecr:ListTagsForResource
-        #           - ecr:UploadLayerPart
-        #           - ecr:InitiateLayerUpload
-        #           - ecr:BatchCheckLayerAvailability
-        #           - ecr:PutImage
-        #         Resource:
-        #           - !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${pEcrRepo}
-        # - PolicyName: BASE-ECR  
-        #   PolicyDocument: 
-        #     Version: 2012-10-17 
-        #     Statement:  
-        #       - Effect: Allow 
-        #         Action: 
-        #           - ecr:BatchGetImage 
-        #           - ecr:DescribeImages  
-        #           - ecr:ListTagsForResource 
-        #           - ecr:GetDownloadUrlForLayer
-        #         Resource: 
-        #           - !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/${pBaseEcrRepo}
+        - PolicyName: ECR
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:PutLifecyclePolicy
+                  - ecr:PutImageTagMutability
+                  - ecr:PutImageScanningConfiguration
+                  - ecr:BatchGetImage
+                  - ecr:CompleteLayerUpload
+                  - ecr:DescribeImages
+                  - ecr:TagResource
+                  - ecr:ListTagsForResource
+                  - ecr:UploadLayerPart
+                  - ecr:InitiateLayerUpload
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:PutImage
+                Resource:
+                  - !GetAtt ecrWebsiteRepo.Arn
+        - PolicyName: BASE-ECR
+          PolicyDocument: 
+            Version: 2012-10-17 
+            Statement:  
+              - Effect: Allow 
+                Action: 
+                  - ecr:BatchGetImage 
+                  - ecr:DescribeImages  
+                  - ecr:ListTagsForResource 
+                  - ecr:GetDownloadUrlForLayer
+                Resource: 
+                  - !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/base-image
         - PolicyName: ECR-Token
           PolicyDocument:
             Version: 2012-10-17
@@ -209,7 +215,51 @@ Resources:
                 Action:
                   - ecr:GetAuthorizationToken
                 Resource: "*"
-
+        - PolicyName: ParamStoreSSHKey
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameters
+                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/GITHUB/SSH_KEY"
+        - PolicyName: SAM-Deploy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - 
+                Sid: PutObjectSAMBucket
+                Effect: Allow
+                Action:
+                  - s3:*
+                Resource: 
+                  - "arn:aws:s3:::aws-sam-cli-managed-default-*/*"
+              - 
+                Sid: IAMRoles
+                Effect: Allow
+                Action:
+                  - iam:*
+                Resource: arn:aws:iam::*:role/*
+              - 
+                Sid: Cloudformation
+                Effect: Allow
+                Action:
+                  - cloudformation:*
+                Resource: "*"
+              -
+                Sid: AllowResourceCreation
+                Effect: Allow
+                Action:
+                  - route53:*
+                  - ecs:*
+                  - ec2:*
+                  - elasticloadbalancing:*
+                  - apigateway:*
+                  - logs:*
+                  - cloudwatch:*
+                  - lambda:*
+                  - events:*
+                Resource: "*"
 
   codeBuildProject:
     Type: AWS::CodeBuild::Project
@@ -240,6 +290,11 @@ Resources:
           - Name: APP_NAME 
             Value: !Ref pAppName 
             Type: PLAINTEXT
+          - Name: SSH_KEY_FOR_SUBMODULE
+            Value: /GITHUB/SSH_KEY
+            Type: PARAMETER_STORE
+          - Name: WEBSITE_REPOSITORY_URI
+            Value: !GetAtt ecrWebsiteRepo.RepositoryUri
 
       ServiceRole: !GetAtt codeBuildServiceRole.Arn
       Source:

@@ -1,41 +1,40 @@
 version: 0.2
 env:
   git-credential-helper: yes
+  exported-variables:
+    - IMAGE_TAG
 
 phases:
   install:
     runtime-versions:
-      docker: 18
-      # nodejs: 16
+      nodejs: 16
     commands:
       - pip3 install --upgrade aws-sam-cli
+
+      # color advisor build
+      # clone the main branch of color advisor repo and build 
+      # (this works as long as the codestar connection has access to this repo)
+      - git clone https://github.com/MadisonReed/color-advisor-microservice.git
+      - cd color-advisor-microservice
+      - echo listing color advisor microservice files...
+      - ls -ltra
+      - mkdir -p ~/.ssh && echo "$SSH_KEY_FOR_SUBMODULE" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa
+      - npm run init-submodules
+      - npm run update-submodules
+      - npm i
+      - npm run build
+      - cd ../
   pre_build:
     commands:
+      - echo Logging into ECR...
+      - $(aws ecr get-login --no-include-email --region $AWS_DEFAULT_REGION)
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - IMAGE_TAG=${COMMIT_HASH:-latest}
 
-      # - | 
-      #   if [ "$PR_EVENT" == "closed" ]; then
-      #     echo "PR was closed, cleaning up resources...";
-      #     aws cloudformation delete-stack --stack-name ${APP_NAME}-ephemeral --output text || echo "Stack ${APP_NAME}-ephemeral deletion failed (stack may not exist), continuing...";
-      #     aws cloudformation delete-stack --stack-name ${APP_NAME}-ecr --output text || echo "Stack ${APP_NAME}-ecr deletion failed (stack may not exist), continuing...";
-      #     aws cloudformation delete-stack --stack-name ${APP_NAME}-pipeline --output text || echo "Stack ${APP_NAME}-ephemeral deletion failed (stack may not exist), continuing...";
-      #     echo "Exiting build process to prevent further execution.";
-      #     exit 0;
-      #   fi
-
-
-      - echo $CODEBUILD_RESOLVED_SOURCE_VERSION
       # - GLOBAL_TZ='PDT\|PST'
-      # - echo Logging in to Amazon ECR...
-      # - $(aws ecr get-login --no-include-email --region $AWS_DEFAULT_REGION)
-      # - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
-      # - IMAGE_TAG=${COMMIT_HASH:-latest}
-
-      - WEBSITE_REPOSITORY_URI=$ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/website-$APP_NAME
-      - TOPHAT_REPOSITORY_URI=$ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/tophat-$APP_NAME
-      - API_SERVER_REPOSITORY_URI=$ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/apiserver-$APP_NAME
-
       # - NODE_PATH=$(pwd)/mr_modules
-      - NODE_ENV=ecs
+      # - NODE_ENV=ecs
+
 
 
 
@@ -45,34 +44,9 @@ phases:
       - ls -ltra
 
 
-
-      # - echo Checking out to default 'HEAD' branch
-      # - git checkout $(git symbolic-ref refs/remotes/origin/HEAD | sed 's,refs/remotes/origin/,,1')  
-      # - echo Listing master branch Source Files...
-
-      # This will clone the main branch of color advisor (this works as long as the codestar connection has access to this repo)
-      - git clone https://github.com/MadisonReed/color-advisor-microservice.git
-      - cd color-advisor-microservice
-      - echo listing color advisor microservice files...
-      - ls -ltra
-      - cd ../
-
-
   build:
     commands:
       - echo Build started on `date`
-
-        # Deploy ECR repos
-      - sam build -t ecr.yml
-      - |
-        sam deploy -t ecr.yml \
-          --config-env ecr \
-          --parameter-overrides \
-            "pAppName=${APP_NAME}" \
-          --stack-name ${APP_NAME}-ecr \
-          --tags CleanupDate=$(date -u -d "+10 days" '+%Y-%m-%dT%H:%M:%SZ') \
-          --no-confirm-changeset
-          --on-failure DELETE
 
       # - echo node $(node -v) \(npm $(npm -v)\)
       # - bin/prod-node-modules.sh -t build
@@ -92,6 +66,11 @@ phases:
 
       # build TOPHAT, WEBSITE, API SERVER images
       - echo Building Website...
+
+      # ecs tester dockerfile
+      - docker build -f ephemeralenv/docker-flask-frontend/Dockerfile -t $WEBSITE_REPOSITORY_URI:$IMAGE_TAG ephemeralenv/docker-flask-frontend/  
+
+
       # # WEBSITE
       # - |
       #   docker build -f docker/website/Dockerfile -t $WEBSITE_REPOSITORY_URI:$IMAGE_TAG . \
@@ -120,35 +99,41 @@ phases:
       #     --build-arg NODE_ENV=$NODE_ENV \
 
       # prepare nested stack
-      # - sam build -t root.yml
+      - echo Building Nested API/ECS Stack...
+      - sam build -t ephemeralenv/root.yml
 
-  # post_build:
-  #   commands:
-  #     - echo Build completed on `date`
-  #     - echo Pushing Website Docker image...
-  #     - docker push $ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$WEBSITE_REPOSITORY_URI:$IMAGE_TAG
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing Website Docker image...
 
-  #     - echo Pushing Tophat Docker image...
-  #     - docker push $ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$TOPHAT_REPOSITORY_URI:$IMAGE_TAG
+      - docker push $WEBSITE_REPOSITORY_URI:$IMAGE_TAG
 
-  #     - echo Pushing API Server Docker image...
-      # - docker push $ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$API_SERVER_REPOSITORY_URI:$IMAGE_TAG
+      - echo Pushing Tophat Docker image...
+      # - docker push $TOPHAT_REPOSITORY_URI:$IMAGE_TAG
+
+      - echo Pushing API Server Docker image...
+      # - docker push $API_SERVER_REPOSITORY_URI:$IMAGE_TAG
 
       # Deploy ECS and API
-      # - |
-      #   sam deploy -t root.yml \
-      #     --config-env ephemeral \
-      #     --parameter-overrides \
-      #       "pAppName=${APP_NAME} \
-      #       pVpcId=vpc-09ef4a53e9290ca17 \
-      #       pPrivateSubnetId1=subnet-01086857935bfcf34 \ 
-      #       pPrivateSubnetId2=subnet-056e57e04fea05dd5 \
-      #       pPublicSubnetId1=subnet-0598f465e77230bd5 \
-      #       pPublicSubnetId2=subnet-0d650820a97fa5ba3 \
-      #       pR53HostedZoneId=Z0323068C9DQS081P13G, \
-      #       pACMCertificateArn=arn:aws:acm:us-east-1:174743933558:certificate/07f48ca4-3dcf-4ed7-b4df-147b3412be62" \
-      #     --stack-name ${APP_NAME}-ephemeral \
-      #     --tags CleanupDate=$(date -u -d "+10 days" '+%Y-%m-%dT%H:%M:%SZ') \
-      #     --on-failure DELETE
+      - |
+        sam deploy -t ephemeralenv/root.yml \
+          --config-env ephemeral \
+          --parameter-overrides \
+            "pAppName=${APP_NAME} \
+            pVpcId=vpc-09ef4a53e9290ca17 \
+            pPrivateSubnetId1=subnet-01086857935bfcf34 \ 
+            pPrivateSubnetId2=subnet-056e57e04fea05dd5 \
+            pPublicSubnetId1=subnet-0598f465e77230bd5 \
+            pPublicSubnetId2=subnet-0d650820a97fa5ba3 \
+            pR53HostedZoneId=Z0323068C9DQS081P13G \
+            pWebsiteEcrImageUri=${WEBSITE_REPOSITORY_URI}:${IMAGE_TAG} \
+            pACMCertificateArn=arn:aws:acm:us-east-1:174743933558:certificate/07f48ca4-3dcf-4ed7-b4df-147b3412be62" \
+            pNodeEnv=development \
+            pEpsagonToken="-" \
+          --stack-name ${APP_NAME}-ephemeral \
+          --tags CleanupDate=$(date -u -d "+10 days" '+%Y-%m-%dT%H:%M:%SZ') \
+          --no-confirm-changeset \
+          --on-failure DELETE
 
  
