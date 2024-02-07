@@ -110,8 +110,6 @@ Metadata:
           - pCodeBuildComputeType
           - pCodeBuildImage
           - pBuildSpecPath
-          # - pBaseEcrRepo  
-          # - pBaseImageTag
       - Label:
           default: Tagging
         Parameters:
@@ -223,12 +221,12 @@ Resources:
                 Action:
                   - ssm:GetParameters
                 Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/GITHUB/SSH_KEY"
-        - PolicyName: SAM-Deploy
+        - PolicyName: SAMDeploy
           PolicyDocument:
             Version: 2012-10-17
             Statement:
               - 
-                Sid: PutObjectSAMBucket
+                Sid: AllowSAMBucketAccess
                 Effect: Allow
                 Action:
                   - s3:*
@@ -551,4 +549,4 @@ Outputs:
 
   Version:
     Description: Template Version
-    Value: pipeline-build-ecs-0.1
+    Value: ephemeral-pipeline-build-ecs-0.1
