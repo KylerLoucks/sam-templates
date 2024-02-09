@@ -116,3 +116,16 @@ sam deploy -t root.yml \
      pACMCertificateArn=arn:aws:acm:us-east-1:174743933558:certificate/07f48ca4-3dcf-4ed7-b4df-147b3412be62" \
   --stack-name pr1-ephemeral \
   --tags CleanupDate=$(date -u -d "+10 days" '+%Y-%m-%dT%H:%M:%SZ')
+
+
+
+
+# INFORMATIONAL
+#### Notable files to be aware of:
+* **.github/workflows/ephemeral-envs.yml** - Github Action for deploying CodePipeline ephemeral deployment pipeline.
+* **ephemeralenv/** - contains IaC and buildspec code for Ephemeral environments.
+* **ephemeralenv/pipeline.yml** - Github Action uses SAM CLI to deploy this stack when a PR is made into a branch that contains the `ephemeral-envs.yml` github action config and the branch matches the criteria needed to trigger the workflow.
+
+* **ephemeralenv/root.yml** - Nested Stack template used to link dependency of API and ECS child stacks, while also improving maintainability for the SAM Application.
+* **ephemeralenv/ecs/** - Contains child template configuration for CodeBuild to deploy ECS components.
+* **ephemeralenv/api/** - Contains child template configuration for CodeBuild to deploy Color Advisor API components.
