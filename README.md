@@ -25,11 +25,12 @@ Edit `.vscode/launch.json` config file to look like the following (Replacing the
                 "logicalId": "myLambda" // <- Replace with the resource id in the "Resources" block of the template file.
             },
             "lambda": {
+                "runtime": "python3.10", // Replace runtime accordingly
                 "payload": {
                     "json": {
                         "Records": [
                             {
-                                "body": {}
+                                "body": {} // Replace body/Records blocks accordingly
                             }
                         ]
                     }
