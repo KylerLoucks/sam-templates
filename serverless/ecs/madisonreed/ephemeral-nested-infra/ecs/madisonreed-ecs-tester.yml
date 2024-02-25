@@ -381,21 +381,6 @@ Resources:
       ListenerArn: !Ref httpsListener
       Priority: 18
 
-  # # POSTGRES
-  # postgresRule:
-  #   Type: AWS::ElasticLoadBalancingV2::ListenerRule
-  #   Properties:
-  #     Actions:
-  #       - Type: forward
-  #         TargetGroupArn: !Ref postgresTg
-  #     Conditions:
-  #       - Field: host-header
-  #         HostHeaderConfig:
-  #           Values: 
-  #             - !Sub postgres-${pAppName}.dev.mdsnrdfd.com
-  #     ListenerArn: !Ref httpsListener
-  #     Priority: 24
-
 
 
   
