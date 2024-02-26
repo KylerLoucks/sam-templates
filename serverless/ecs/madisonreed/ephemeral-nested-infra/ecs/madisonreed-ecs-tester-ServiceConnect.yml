@@ -124,6 +124,16 @@ Resources:
       ToPort: -1
       SourceSecurityGroupId: !GetAtt serviceSecurityGroup.GroupId
 
+  serviceVpcIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt serviceSecurityGroup.GroupId
+      IpProtocol: -1  # Allows all protocols
+      FromPort: -1    # Allows all ports
+      ToPort: -1      # Allows all ports
+      CidrIp: 10.20.0.0/16  # Allow traffic from VPC
+
+
   # ALLOW EVERYTHING FROM ALB SG
   serviceFrontendIngress:
     Type: AWS::EC2::SecurityGroupIngress
@@ -245,7 +255,7 @@ Resources:
             - Name: website
               ContainerPort: !Ref pWebsitePort
               Protocol: tcp # tcp | udp
-              # AppProtocol: http
+              AppProtocol: http
           Environment:
             - Name: REDIS_HOST
               Value: !Sub redis.${pAppName}.cloudmap.internal # Reference R53Hosted Zone created by Cloud Map Namespace
@@ -460,8 +470,6 @@ Resources:
   #         - Type: A
   #           TTL: 30
   #     NamespaceId: !GetAtt serviceDiscoveryNameSpace.Id
-  #     HealthCheckCustomConfig:
-  #       FailureThreshold: 1
 
   # # Redis
   # redisServiceDiscoveryService:
@@ -474,9 +482,22 @@ Resources:
   #         - Type: A
   #           TTL: 30
   #     NamespaceId: !GetAtt serviceDiscoveryNameSpace.Id
-  #     HealthCheckCustomConfig:
-  #       FailureThreshold: 1
 
+  # Website
+  # Used to be able to connect via VPN and DNS route to the Web UI (DNS record could be stale)
+  websiteServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: madisonreed # Name must be unique from what is given for ECS service 'ServiceConnectConfiguration.PortName'. 
+      Description: Service discovery for website service
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 60
+          - Type: SRV
+            TTL: 60
+        RoutingPolicy: MULTIVALUE
+      NamespaceId: !GetAtt serviceDiscoveryNameSpace.Id
 
   fargateCluster:
     Type: AWS::ECS::Cluster
@@ -500,94 +521,93 @@ Resources:
 
 
 
+  # =========================================================
+  # ================= ALB & LISTENERS/RULES =================
+  # =========================================================
+  
+  # # Listener to redirect HTTP traffic to HTTPS
+  # redirectListener:
+  #   Type: AWS::ElasticLoadBalancingV2::Listener
+  #   Properties: 
+  #     DefaultActions: 
+  #       - Type: "redirect"
+  #         RedirectConfig: 
+  #           Port: 443
+  #           Protocol: "HTTPS"
+  #           StatusCode: "HTTP_301"
+  #     LoadBalancerArn: !Ref ecsLoadBalancer
+  #     Port: 80
+  #     Protocol: "HTTP"
+
+  # httpsListener:
+  #   Type: AWS::ElasticLoadBalancingV2::Listener
+  #   Properties: 
+  #     Certificates: 
+  #       - CertificateArn: !Ref pACMCertificateArn
+  #     DefaultActions: 
+  #       - Type: "fixed-response"
+  #         FixedResponseConfig:
+  #           StatusCode: "503"
+  #           ContentType: "text/plain"
+  #           MessageBody: "You have reached an invalid domain."
+  #     LoadBalancerArn: !Ref ecsLoadBalancer
+  #     Port: 443
+  #     Protocol: HTTPS
+  #     SslPolicy: "ELBSecurityPolicy-2016-08"
+
+  # # WEBSITE
+  # websiteRule:
+  #   Type: AWS::ElasticLoadBalancingV2::ListenerRule
+  #   Properties:
+  #     Actions:
+  #       - Type: forward
+  #         TargetGroupArn: !Ref websiteTg
+  #     Conditions:
+  #       - Field: host-header
+  #         HostHeaderConfig:
+  #           Values: 
+  #             - !Sub ${pAppName}.dev.mdsnrdfd.com
+  #     ListenerArn: !Ref httpsListener
+  #     Priority: 18
+
+
   # =================================================
   # ================= TARGET GROUPS =================
   # =================================================
 
 
-  # WEBSITE
-  websiteTg:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    Properties: 
-      Name: !Sub website-${pAppName}
+  # # WEBSITE
+  # websiteTg:
+  #   Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  #   Properties: 
+  #     Name: !Sub website-${pAppName}
 
-      HealthCheckPath: /
-      HealthCheckProtocol: HTTP
-      HealthCheckTimeoutSeconds: 120
-      HealthCheckIntervalSeconds: 150
-      HealthyThresholdCount: 2
-      UnhealthyThresholdCount: 2
-      Port: !Ref pWebsitePort
-      Protocol: HTTP
-      ProtocolVersion: HTTP1
-      Matcher:
-        HttpCode: 200-499
-      TargetType: ip
-      VpcId: !Ref pVpcId
-
-  # =========================================================
-  # ================= ALB & LISTENERS/RULES =================
-  # =========================================================
-  
-  # Listener to redirect HTTP traffic to HTTPS
-  redirectListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties: 
-      DefaultActions: 
-        - Type: "redirect"
-          RedirectConfig: 
-            Port: 443
-            Protocol: "HTTPS"
-            StatusCode: "HTTP_301"
-      LoadBalancerArn: !Ref ecsLoadBalancer
-      Port: 80
-      Protocol: "HTTP"
-
-  httpsListener:
-    Type: AWS::ElasticLoadBalancingV2::Listener
-    Properties: 
-      Certificates: 
-        - CertificateArn: !Ref pACMCertificateArn
-      DefaultActions: 
-        - Type: "fixed-response"
-          FixedResponseConfig:
-            StatusCode: "503"
-            ContentType: "text/plain"
-            MessageBody: "You have reached an invalid domain."
-      LoadBalancerArn: !Ref ecsLoadBalancer
-      Port: 443
-      Protocol: HTTPS
-      SslPolicy: "ELBSecurityPolicy-2016-08"
-
-  # WEBSITE
-  websiteRule:
-    Type: AWS::ElasticLoadBalancingV2::ListenerRule
-    Properties:
-      Actions:
-        - Type: forward
-          TargetGroupArn: !Ref websiteTg
-      Conditions:
-        - Field: host-header
-          HostHeaderConfig:
-            Values: 
-              - !Sub ${pAppName}.dev.mdsnrdfd.com
-      ListenerArn: !Ref httpsListener
-      Priority: 18
-
-
+  #     HealthCheckPath: /
+  #     HealthCheckProtocol: HTTP
+  #     HealthCheckTimeoutSeconds: 120
+  #     HealthCheckIntervalSeconds: 150
+  #     HealthyThresholdCount: 2
+  #     UnhealthyThresholdCount: 2
+  #     Port: !Ref pWebsitePort
+  #     Protocol: HTTP
+  #     ProtocolVersion: HTTP1
+  #     Matcher:
+  #       HttpCode: 200-499
+  #     TargetType: ip
+  #     VpcId: !Ref pVpcId
 
   
-  ecsLoadBalancer:
-    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-    Properties:
-      IpAddressType: ipv4
-      Scheme: internet-facing
-      SecurityGroups:
-        - !GetAtt albSecurityGroup.GroupId
-      Subnets:
-        - !Ref pPublicSubnetId1
-        - !Ref pPublicSubnetId2
-      Type: application
+  # ecsLoadBalancer:
+  #   Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+  #   Properties:
+  #     IpAddressType: ipv4
+  #     Scheme: internet-facing
+  #     SecurityGroups:
+  #       - !GetAtt albSecurityGroup.GroupId
+  #     Subnets:
+  #       - !Ref pPublicSubnetId1
+  #       - !Ref pPublicSubnetId2
+  #     Type: application
 
 
 
@@ -596,9 +616,12 @@ Resources:
   # ================================================
 
   ecsWebsiteService:
+    # Dependency is required due to the fact that we must deploy backwards 
+    # from a traditional deployment (database > API > Web UI)
     DependsOn:
-      - websiteRule
+      # - websiteRule
       - redisService
+      - mysqlService
     Type: AWS::ECS::Service
     Properties:
       Cluster: !Ref fargateCluster
@@ -615,11 +638,11 @@ Resources:
         MinimumHealthyPercent: 100
         MaximumPercent: 200
       # Adjust if container takes a while to start up
-      HealthCheckGracePeriodSeconds: 30
-      LoadBalancers: 
-        - ContainerName: website
-          ContainerPort: !Ref pWebsitePort
-          TargetGroupArn: !Ref websiteTg
+      # HealthCheckGracePeriodSeconds: 30
+      # LoadBalancers: 
+      #   - ContainerName: website
+      #     ContainerPort: !Ref pWebsitePort
+      #     TargetGroupArn: !Ref websiteTg
       NetworkConfiguration: 
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
@@ -645,8 +668,10 @@ Resources:
             awslogs-group: !Ref websiteLogGroup
             awslogs-region: !Sub ${AWS::Region}
             awslogs-stream-prefix: service-connect-agent
-      # ServiceRegistries: 
-      #   - ServiceRegistry
+      # Used to connect via Route53 record for Private DNS (VPN only)
+      ServiceRegistries: 
+        - RegistryArn: !GetAtt websiteServiceDiscoveryService.Arn
+          Port: !Ref pWebsitePort
       TaskDefinition: !Ref websiteTaskDefinition
       Tags: 
         - Key: managed-by
@@ -846,28 +871,29 @@ Resources:
   #         Value: SAM
 
   # ROUTE53 Records
-  route53Records:
-    Type: AWS::Route53::RecordSetGroup
-    Properties:
-      HostedZoneId: !Ref pR53HostedZoneId # Id of the Hosted Zone created during domain registration
-      RecordSets:
-        # Website
-        - Name: !Sub ${pAppName}.dev.mdsnrdfd.com
-          Type: A
-          AliasTarget:
-            HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID # Loadbalancer Id
-            DNSName: !GetAtt ecsLoadBalancer.DNSName
+  # route53Records:
+  #   Type: AWS::Route53::RecordSetGroup
+  #   Properties:
+  #     HostedZoneId: !Ref pR53HostedZoneId # Id of the Hosted Zone created during domain registration
+  #     RecordSets:
+  #       # Website
+  #       - Name: !Sub ${pAppName}.dev.mdsnrdfd.com
+  #         Type: A
+  #         AliasTarget:
+  #           HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID # Loadbalancer Id
+  #           DNSName: !GetAtt ecsLoadBalancer.DNSName
 
 
 
 
 
 Outputs:
-  albEndpointUrl:
-    Description: DNS Endpoint for the ECS ALB
-    Value: !GetAtt ecsLoadBalancer.DNSName
+  # albEndpointUrl:
+  #   Description: DNS Endpoint for the ECS ALB
+  #   Value: !GetAtt ecsLoadBalancer.DNSName
 
   websiteUrl:
     Description: Application URL endpoint
-    Value: !Sub https://${pAppName}.dev.mdsnrdfd.com
+    Value: !Sub http://madisonreed.${pAppName}.cloudmap.internal  # !Sub https://${pAppName}.dev.mdsnrdfd.com
+
   
