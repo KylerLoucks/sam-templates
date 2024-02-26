@@ -10,14 +10,6 @@ Parameters:
   pVpcId:
     Type: AWS::EC2::VPC::Id
     Description: ID of the Virtual Private Network (VPC)
-  # pPrivateSubnetIds:
-  #   Type: List<AWS::EC2::Subnet::Id>
-  #   Description:
-  #     List of Private SubnetIds in the Virtual Private Cloud (VPC). Used for private ECS services
-  # pPublicSubnetIds:
-  #   Type: List<AWS::EC2::Subnet::Id>
-  #   Description:
-  #     List of Public SubnetIds in the Virtual Private Cloud (VPC). Used for Internet Facing Load Balancer
   pPrivateSubnetId1:
     Type: String
   pPrivateSubnetId2:

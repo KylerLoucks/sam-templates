@@ -46,7 +46,7 @@ sam deploy -t ecs/madisonreed-ecs-tester.yml \
      pPublicSubnetId1=subnet-0598f465e77230bd5 \
      pPublicSubnetId2=subnet-0d650820a97fa5ba3 \
      pR53HostedZoneId=Z0323068C9DQS081P13G \
-     pWebsiteEcrImageUri=174743933558.dkr.ecr.us-east-1.amazonaws.com/websitetest-pr16692@sha256:d4583ba1ae7255ec693640b787819710a10297730517c0edfacba43a94e70def \
+     pWebsiteEcrImageUri=174743933558.dkr.ecr.us-east-1.amazonaws.com/connectiontest:latest \
      pACMCertificateArn=arn:aws:acm:us-east-1:174743933558:certificate/07f48ca4-3dcf-4ed7-b4df-147b3412be62" \
      pColorAdvisorApiUrl=test \
   --stack-name pr1-ephemeral \
@@ -106,7 +106,7 @@ aws codepipeline start-pipeline-execution --name ${PR_ID}-pipeline --variables n
 sam deploy -t root.yml \
   --config-env ephemeral \
   --parameter-overrides \
-    "pAppName=pr1 \
+    "pAppName=pr1test \
      pVpcId=vpc-09ef4a53e9290ca17 \
      pPrivateSubnetId1=subnet-01086857935bfcf34 \ 
      pPrivateSubnetId2=subnet-056e57e04fea05dd5 \
@@ -114,7 +114,10 @@ sam deploy -t root.yml \
      pPublicSubnetId2=subnet-0d650820a97fa5ba3 \
      pR53HostedZoneId=Z0323068C9DQS081P13G, \
      pACMCertificateArn=arn:aws:acm:us-east-1:174743933558:certificate/07f48ca4-3dcf-4ed7-b4df-147b3412be62" \
-  --stack-name pr1-ephemeral \
+     pWebsiteEcrImageUri=174743933558.dkr.ecr.us-east-1.amazonaws.com/connectiontest:latest \
+     pNodeEnv=development \
+     pEpsagonToken="-" \
+  --stack-name pr1test-ephemeral \
   --tags CleanupDate=$(date -u -d "+10 days" '+%Y-%m-%dT%H:%M:%SZ')
 
 
