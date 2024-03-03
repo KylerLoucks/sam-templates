@@ -9,12 +9,17 @@ Prerequisites
 
 # Best Practices
 
-* Use [aws-lambda-powertools](https://docs.powertools.aws.dev/lambda/python/latest/) package (pip install aws-lambda-powertools)
+## Use [aws-lambda-powertools](https://docs.powertools.aws.dev/lambda/python/latest/)
+
+Powertools can be installed using the following command:
+```bash
+pip install aws-lambda-powertools
+```
 
 
 1. Add the `@logger.inject_lambda_context(log_event=True)` decorator for your lambda handler to include the event in the function logs without having to explicitly define a log entry in the code.
 
-2. Add the `@tracer.capture_lambda_handler` decorator to capture any X-Ray traces to other AWS services. This allows seeing latency between services like S3.
+2. Add the `@tracer.capture_lambda_handler` decorator to be able to capture and send data to X-Ray like latency between services like S3, and troubleshoot potential bottlenecks in your code.
 
 ```py
 from aws_lambda_powertools import Tracer, Logger
@@ -43,13 +48,10 @@ logger = Logger(service="MyModuleServiceName")
 This name can help differentiate logs coming from different parts of the application or different microservices in a larger architecture.
 
 
+## Use Lambda Layers to enforce DRY code standards
+1. Create layer(s) for code that is used frequently between lambda functions
 
-
-
-* Use Lambda Layers to enforce DRY code standards
-1. Create commoncode layer for code that is used frequently between lambda functions
-
-Folder structure example:
+### Layer folder structure example:
 ```
 template.yml
 layers
@@ -59,7 +61,7 @@ layers
     ├── requirements.txt # <- use for additional dependencies
 
 ```
-template.yml:
+### Template.yml:
 ```yml
 Resources:
   # Layer for the Python based lambdas
@@ -71,7 +73,7 @@ Resources:
     Properties:
       LayerName: common-code-layer
       Description: DRY code Layer used across Lambda functions
-      ContentUri: layers/commoncode
+      ContentUri: layers/commoncode # See folder structure above
       CompatibleArchitectures:
         - x86_64
       CompatibleRuntimes:
@@ -91,15 +93,11 @@ To verify, start typing your python module followed by `Ctrl+Space` to see a lis
 
 
 
-* Update `.vscode/launch.json` for ease of debugging locally with `AWS Toolkit VSCode extension` and `Docker` (Both Required)
-
-
-### launch.json
+## Configure `.vscode/launch.json` for ease of debugging locally with `AWS Toolkit VSCode extension` and `Docker` (Both Required)
 
 Edit `.vscode/launch.json` config file to look like the following (Replacing the `body` json block with the payload you want to pass to your lambda function):
 
 ```json
-
 {
     "version": "0.2.0",
     "configurations": [
@@ -126,16 +124,26 @@ Edit `.vscode/launch.json` config file to look like the following (Replacing the
                 "environmentVariables": { "ENV_KEY": "value"}
             }
         },
-
     ]
-
 }
 ```
-### Running the code
+
+### Running the code locally
 1. Open VsCode, Select `Run and Debug (Ctrl + Shift + D)`
 2. Select the `RUN AND DEBUG` dropdown and select the config name e.g. `myLambdaFunctionInvoke`
 3. Place debug breakpoints in the respective function
 4. Run the debugger by selecting the green arrow or by pressing `[F5]`
+
+## Cost Optimization
+You can run [AWS Lambda Power Tuning](https://docs.aws.amazon.com/lambda/latest/operatorguide/profile-functions.html) against your lambda functions to determine which `MemorySize` and `Architecture` configuration will provide the optimal cost/performance ratio.
+
+>Instructions on deploying and testing this can be found [here](https://github.com/alexcasalboni/aws-lambda-power-tuning)
+
+For Memory intensive Lambdas, it is most cost effective to use x86_64 architecture.
+For CPU intensive workloads, ARM64 provides the quickest execution times and most cost savings over x86_64.
+
+> More details on this topic are explained in [this post](https://aws.amazon.com/blogs/apn/comparing-aws-lambda-arm-vs-x86-performance-cost-and-analysis-2/)
+
 
 
 
