@@ -1,3 +1,7 @@
+version = 0.1
+
+[default]
+[default.deploy]
 [prod.deploy.parameters]
 stack_name = "lambda-dry-microservice"
 resolve_s3 = true
@@ -5,9 +9,5 @@ s3_prefix = "lambda-dry-microservice"
 region = "us-east-1"
 confirm_changeset = true
 capabilities = "CAPABILITY_IAM"
-parameter_overrides = [
-    "pVpcId=vpc-0c8bfffb4dfe4786a",
-    "pPrivateSubnetId1=subnet-03c1e03930be30bd9",
-    "pPrivateSubnetId2=subnet-0287a6fb3bf90155f"
-]
+parameter_overrides = []
 image_repositories = []

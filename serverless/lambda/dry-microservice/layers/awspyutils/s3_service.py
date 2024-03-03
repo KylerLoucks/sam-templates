@@ -7,6 +7,7 @@ class S3Service:
 
     def __init__(self):
         self.s3_client = boto3.client('s3')
+        logger.info("Successfully initialized S3Service")
 
     def read_binary(self, bucket, key):
         logger.debug(f"About to read binary for key: [{key}] in bucket: [{bucket}]")

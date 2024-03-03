@@ -56,6 +56,7 @@ layers
 └── commoncode
     ├── __init__.py
     ├── util.py
+    ├── requirements.txt # <- use for additional dependencies
 
 ```
 template.yml:

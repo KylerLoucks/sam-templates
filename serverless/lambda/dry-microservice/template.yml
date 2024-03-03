@@ -56,9 +56,9 @@ Resources:
     Properties:
       LayerName: common-code-layer
       Description: DRY code Layer used across Lambda functions
-      ContentUri: layers/commoncode
+      ContentUri: layers/awspyutils
       CompatibleArchitectures:
-        - x86_64
+        - x86_64 # arm64
       CompatibleRuntimes:
         - python3.10
         - python3.9
@@ -70,6 +70,8 @@ Resources:
       Handler: app.lambda_handler
       Runtime: python3.10
       Role: !GetAtt LambdaRole.Arn
+      Layers:
+        - !Ref PythonLayer
       Environment: 
         Variables:
           MY_ENV: Hello World
@@ -79,19 +81,45 @@ Resources:
       #     - !Ref pPrivateSubnetId2
       #   SecurityGroupIds:
       #     - !Ref LambdaVpcSecurityGroup
-      # Events:
-      #   SQSEvent:
-      #     Type: SQS
-      #     Properties:
-      #       Enabled: true # set to true when ready to trigger from events
-      #       Queue: !GetAtt SQSQueue.Arn
-      #       BatchSize: 1
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Enabled: true # set to true when ready to trigger from events
+            Queue: !GetAtt SQSQueue.Arn
+            BatchSize: 1
+
+
+
 
   LambdaLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub /aws/lambda/${LambdaFunction}
       RetentionInDays: 90
+
+
+  SQSQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${AWS::StackName}-queue
+      VisibilityTimeout: 900
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DLQueue.Arn
+        maxReceiveCount: 2
+      Tags:
+        - Key: controlled-by
+          Value: !Sub SAM-${AWS::StackName}
+
+  DLQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${AWS::StackName}-dlq
+      VisibilityTimeout: 900
+      Tags:
+        - Key: controlled-by
+          Value: !Sub SAM-${AWS::StackName}
+
 
 
 
@@ -116,8 +144,8 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - 'xray:PutTraceSegments'
-                  - 'xray:PutTelemetryRecords'
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
                 Resource: '*'
         - PolicyName: DynamoDBAccess
           PolicyDocument:
@@ -158,7 +186,15 @@ Resources:
             Statement:
               - Effect: Allow
                 Action:
-                  - SNS:Publish
+                  - sns:Publish
+                Resource: '*'
+        - PolicyName: SQS
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:*
                 Resource: '*'
         - PolicyName: SSMAccess
           PolicyDocument:
