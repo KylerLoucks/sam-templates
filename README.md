@@ -139,10 +139,24 @@ You can run [AWS Lambda Power Tuning](https://docs.aws.amazon.com/lambda/latest/
 
 >Instructions on deploying and testing this can be found [here](https://github.com/alexcasalboni/aws-lambda-power-tuning)
 
+### x86_64:
 For Memory intensive Lambdas, it is most cost effective to use x86_64 architecture.
 For CPU intensive workloads, ARM64 provides the quickest execution times and most cost savings over x86_64.
 
-> More details on this topic are explained in [this post](https://aws.amazon.com/blogs/apn/comparing-aws-lambda-arm-vs-x86-performance-cost-and-analysis-2/)
+### arm64:
+To build Lambda functions using `arm64` architecture on Linux and Windows, use the following command:
+```bash
+sam build -u
+```
+> The `-u` or `--use-container` flag will tell SAM to build the function inside a docker container using an image appropriate for the architecture the lambda runs on.
+
+If the build process hangs, enable the `multiarchitecture` setting for docker by running this command:
+```docker
+docker run --rm --privileged multiarch/qemu-user-static --reset -p yes
+```
+
+
+> More details on arm64 vs x86_64 pros/cons are explained in [this post](https://aws.amazon.com/blogs/apn/comparing-aws-lambda-arm-vs-x86-performance-cost-and-analysis-2/)
 
 
 

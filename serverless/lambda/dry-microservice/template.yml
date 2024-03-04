@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: '2010-09-09'
 Transform: 'AWS::Serverless-2016-10-31'
-Description: AWS CloudFormation stack to set up custom docker image that includes 'mdbtools' software tool.
+Description: AWS CloudFormation stack deminstrating DRY code standards with AWS Lambda
 
 
 Globals:
@@ -52,13 +52,13 @@ Resources:
     Description: Layer that can be used with all Python based Lambda functions
     Metadata:
       BuildMethod: python3.10
-      BuildArchitecture: x86_64
+      BuildArchitecture: arm64 # arm64 | x86_64
     Properties:
       LayerName: common-code-layer
       Description: DRY code Layer used across Lambda functions
       ContentUri: layers/awspyutils
       CompatibleArchitectures:
-        - x86_64 # arm64
+        - arm64 # arm64 | x86_64
       CompatibleRuntimes:
         - python3.10
         - python3.9
@@ -70,6 +70,8 @@ Resources:
       Handler: app.lambda_handler
       Runtime: python3.10
       Role: !GetAtt LambdaRole.Arn
+      Architectures: 
+        - arm64 # arm64 | x86_64
       Layers:
         - !Ref PythonLayer
       Environment: 
