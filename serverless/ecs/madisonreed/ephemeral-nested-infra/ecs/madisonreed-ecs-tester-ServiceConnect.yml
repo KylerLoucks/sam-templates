@@ -349,20 +349,21 @@ Resources:
       RuntimePlatform:
         CpuArchitecture: X86_64
         OperatingSystemFamily: LINUX
-      # EphemeralStorage:
-      #   SizeInGiB: 20
+      EphemeralStorage:
+        SizeInGiB: 200
         
       ContainerDefinitions:
         - Name: mysql
           # changes to the Image will cause a new deployment to the ECS service, replacing the old deployment.
-          Image: mysql:latest
+          Image: 174743933558.dkr.ecr.us-east-1.amazonaws.com/mysql-ephemeral  # mysql:latest
           PortMappings:
             - Name: mysql
               ContainerPort: !Ref pMySQLPort
               Protocol: tcp # tcp | udp
           Environment:
-            - Name: MYSQL_DATABASE
-              Value: mysql
+            # Commented out when using a docker image that has a database already defined
+            # - Name: MYSQL_DATABASE
+            #   Value: mysql
             - Name: MYSQL_ROOT_PASSWORD
               Value: root
           LogConfiguration:
