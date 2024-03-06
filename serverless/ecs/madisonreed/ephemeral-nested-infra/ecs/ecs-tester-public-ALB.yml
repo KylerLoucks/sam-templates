@@ -86,7 +86,7 @@ Resources:
       ToPort: -1
       SourceSecurityGroupId: !GetAtt serviceSecurityGroup.GroupId
 
-  # ALLOW EVERYTHING FROM ALB SG
+  # Allow everything from ALB SG
   serviceFrontendIngress:
     Type: AWS::EC2::SecurityGroupIngress
     Properties:
@@ -96,7 +96,7 @@ Resources:
       ToPort: -1
       SourceSecurityGroupId: !Ref albSecurityGroup
 
-  # FRONTEND SG
+  # FRONTEND ALB SG
   albSecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
@@ -143,23 +143,6 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/*:*"
-        - PolicyName: S3Access
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject*
-                  - s3:GetBucket*
-                  - s3:List*
-                  - s3:DeleteObject*
-                  - s3:PutObject
-                  - s3:PutObjectLegalHold
-                  - s3:PutObjectRetention
-                  - s3:PutObjectTagging
-                  - s3:PutObjectVersionTagging
-                  - s3:Abort*
-                Resource: "*"
         
   taskExecutionRole:
     Type: AWS::IAM::Role
@@ -173,7 +156,7 @@ Resources:
               Service:
                 - ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
-      # Allows pulling ECR image and pushing logs to CW
+      # Allows pulling ECR images and pushing logs to CW
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
@@ -202,7 +185,7 @@ Resources:
       ContainerDefinitions:
         - Name: website
           # changes to the Image will cause a new deployment to the ECS service, replacing the old deployment.
-          Image: !Ref pWebsiteEcrImageUri # 174743933558.dkr.ecr.us-east-1.amazonaws.com/websitetest-pr16692:latest
+          Image: !Ref pWebsiteEcrImageUri
           PortMappings:
               - ContainerPort: !Ref pWebsitePort
           Environment:
@@ -351,8 +334,6 @@ Resources:
             StatusCode: "503"
             ContentType: "text/plain"
             MessageBody: "You have reached an invalid domain."
-        # - TargetGroupArn: !Ref websiteTg
-        #   Type: forward
       LoadBalancerArn: !Ref ecsLoadBalancer
       Port: 443
       Protocol: HTTPS
@@ -371,10 +352,7 @@ Resources:
             Values: 
               - !Sub ${pAppName}.dev.mdsnrdfd.com
       ListenerArn: !Ref httpsListener
-      Priority: 18
-
-
-
+      Priority: 1
   
   ecsLoadBalancer:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer

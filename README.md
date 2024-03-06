@@ -139,6 +139,14 @@ You can run [AWS Lambda Power Tuning](https://docs.aws.amazon.com/lambda/latest/
 
 >Instructions on deploying and testing this can be found [here](https://github.com/alexcasalboni/aws-lambda-power-tuning)
 
+
+### Migrating x86 Lambda functions to arm64
+Many Lambda functions may only need a configuration change to take advantage of the price/performance of Graviton2. Other functions may require repackaging the Lambda function using Arm-specific dependencies, or rebuilding the function binary or container image.
+
+You may not require an Arm processor on your development machine to create Arm-based functions. You can build, test, package, compile, and deploy Arm Lambda functions on x86 machines using `AWS SAM` and `Docker Desktop`. If you have an Arm-based system, such as an `Apple M1 Mac`, you can natively compile binaries.
+> More information can be found in [this post](https://aws.amazon.com/blogs/compute/migrating-aws-lambda-functions-to-arm-based-aws-graviton2-processors/)
+
+
 ### x86_64:
 For Memory intensive Lambdas, it is most cost effective to use x86_64 architecture.
 For CPU intensive workloads, ARM64 provides the quickest execution times and most cost savings over x86_64.
