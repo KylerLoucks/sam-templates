@@ -332,7 +332,7 @@ Resources:
                   - Name: OpenPayments # Replace with the name of the container in the task definition
                     Environment:
                       - Name: TASK_TOKEN
-                        Value: "$$.Task.Token"
+                        'Value.$': "$$.Task.Token"
                       - Name: OPENPAYMENTS_URL
                         Value: https://download.cms.gov/openpayments/PGYR18_P063023.ZIP
                       - Name: DATA_BUCKET
