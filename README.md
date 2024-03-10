@@ -1,5 +1,30 @@
 # HUB for everything SAM
-Prerequisites
+
+<!-- TABLE OF CONTENTS -->
+<details>
+  <summary>Table of Contents</summary>
+  <ol>
+    <li>
+      <a href="#getting-started">Getting Started</a>
+      <ul>
+        <li><a href="#prerequisites">Prerequisites</a></li>
+      </ul>
+    </li>
+    <li>
+      <a href="#best-practices">Best Practices</a>
+      <ul>
+        <li><a href="#use-aws-lambda-powertools">Use aws-lambda-powertools</a></li>
+        <li><a href="#use-lambda-layers-to-enforce-dry-code-standards">Use Lambda Layers to enforce DRY code standardss</a></li>
+        <li><a href="#configure-vscodelaunchjson-for-debugging-locally">Configure .vscode/launch.json for debugging locally</a></li>
+        <li><a href="#cost-optimization">Cost Optimization</a></li>
+      </ul>
+    <li><a href="#deploying">Deploying</a></li>
+    </li>
+  </ol>
+</details>
+
+# Getting Started
+## Prerequisites
 * [SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/install-sam-cli.html)
 * [VSCode](https://code.visualstudio.com/download)
 * [Docker](https://docs.docker.com/get-docker/)
@@ -93,7 +118,10 @@ To verify, start typing your python module followed by `Ctrl+Space` to see a lis
 
 
 
-## Configure `.vscode/launch.json` for ease of debugging locally with `AWS Toolkit VSCode extension` and `Docker` (Both Required)
+## Configure `.vscode/launch.json` for debugging locally
+> [!NOTE] 
+`AWS Toolkit VSCode extension` and `Docker` are Both Required.
+
 
 Edit `.vscode/launch.json` config file to look like the following (Replacing the `body` json block with the payload you want to pass to your lambda function):
 
@@ -128,11 +156,44 @@ Edit `.vscode/launch.json` config file to look like the following (Replacing the
 }
 ```
 
+You can also specify a path to a json file instead. For example:
+```json
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "aws-sam",
+            "request": "direct-invoke",
+            "name": "myLambdaFunctionInvoke",
+            "invokeTarget": {
+                "target": "template",
+                "templatePath": "${workspaceFolder}/path/to/template.yml",
+                "logicalId": "myLambda" // <- Replace with the resource id in the "Resources" block of the template file.
+            },
+            "lambda": {
+                "runtime": "python3.10", // Replace runtime accordingly
+                "payload": {
+                    "path": "${workspaceFolder}/events/example-payload.json" // <- Path to .json file
+                },
+                "environmentVariables": { "ENV_KEY": "value"}
+            }
+        },
+    ]
+}
+```
+
 ### Running the code locally
 1. Open VsCode, Select `Run and Debug (Ctrl + Shift + D)`
 2. Select the `RUN AND DEBUG` dropdown and select the config name e.g. `myLambdaFunctionInvoke`
 3. Place debug breakpoints in the respective function
 4. Run the debugger by selecting the green arrow or by pressing `[F5]`
+
+
+### Running the code locally w/o debugger
+If you don't need to use the debugger, you can simply run the following command to invoke your lambda function (replace `MyFunction` with the logicalId defined in your template.yml)
+```bash
+sam local invoke MyFunction -e events/example-payload.json
+```
 
 ## Cost Optimization
 You can run [AWS Lambda Power Tuning](https://docs.aws.amazon.com/lambda/latest/operatorguide/profile-functions.html) against your lambda functions to determine which `MemorySize` and `Architecture` configuration will provide the optimal cost/performance ratio.
