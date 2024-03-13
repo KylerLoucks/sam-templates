@@ -16,8 +16,7 @@ sam deploy -t ecs-network-tester-private-ServiceConnect.yml \
      pPrivateSubnetId1=subnet-01086857935bfcf34 \
      pPrivateSubnetId2=subnet-056e57e04fea05dd5 \
      pR53HostedZoneId=Z0323068C9DQS081P13G \
-     pWebsiteEcrImageUri=174743933558.dkr.ecr.us-east-1.amazonaws.com/connectiontest:latest \
-     pColorAdvisorApiUrl=test" \
+     pWebsiteEcrImageUri=174743933558.dkr.ecr.us-east-1.amazonaws.com/connectiontest:latest" \
   --stack-name pr1-ephemeral \
   --tags CleanupDate=$(date -u -d "+10 days" '+%Y-%m-%dT%H:%M:%SZ') \
   --no-confirm-changeset \

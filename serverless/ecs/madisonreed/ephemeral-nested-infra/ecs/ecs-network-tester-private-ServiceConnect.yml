@@ -16,8 +16,6 @@ Parameters:
     Type: String
   pPrivateSubnetId2:
     Type: String
-  pColorAdvisorApiUrl:
-    Type: String
 
   # Container Ports
   pWebsitePort:
@@ -231,12 +229,11 @@ Resources:
               Protocol: tcp # tcp | udp
               AppProtocol: http
           Environment:
+            # REDIS
             - Name: REDIS_HOST
-              Value: !Sub redis.${pAppName}.cloudmap.internal # Reference internal Service Discovery Namespace
+              Value: !Sub redis.${pAppName}.cloudmap.internal # Reference Cloud Map Namespace
             - Name: REDIS_PORT
               Value: !Ref pRedisPort
-            - Name: COLOR_ADVISOR_URL
-              Value: !Ref pColorAdvisorApiUrl
 
             # MYSQL
             - Name: MYSQL_HOST
