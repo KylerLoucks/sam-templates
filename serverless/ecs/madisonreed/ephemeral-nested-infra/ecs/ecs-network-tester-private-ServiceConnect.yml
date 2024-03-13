@@ -458,6 +458,21 @@ Resources:
         RoutingPolicy: MULTIVALUE
       NamespaceId: !GetAtt serviceDiscoveryNameSpace.Id
 
+  # postgres
+  postgresServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: postgres-ecs # Name must be unique from what is given for ECS service 'ServiceConnectConfiguration.PortName'. 
+      Description: Service discovery for mongo service
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 60
+          - Type: SRV
+            TTL: 60
+        RoutingPolicy: MULTIVALUE
+      NamespaceId: !GetAtt serviceDiscoveryNameSpace.Id
+
   # mongo
   mongoServiceDiscoveryService:
     Type: AWS::ServiceDiscovery::Service
@@ -686,53 +701,54 @@ Resources:
           Value: SAM
 
 
-  # postgresService:
-  #   Type: AWS::ECS::Service
-  #   Properties:
-  #     Cluster: !Ref fargateCluster
-  #     ServiceName: postgres
-  #     DeploymentController: 
-  #       Type: ECS
-  #     DesiredCount: 1
-  #     EnableECSManagedTags: true
-  #     EnableExecuteCommand: true
-  #     LaunchType: FARGATE
-  #     # Allows the ability for updates to create a new task before draining the old task.
-  #     # https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_DeploymentConfiguration.html
-  #     DeploymentConfiguration:
-  #       MinimumHealthyPercent: 100
-  #       MaximumPercent: 200
-  #     NetworkConfiguration: 
-  #       AwsvpcConfiguration:
-  #         AssignPublicIp: DISABLED
-  #         SecurityGroups:
-  #           - !GetAtt serviceSecurityGroup.GroupId
-  #         Subnets: 
-  #           - !Ref pPrivateSubnetId1
-  #           - !Ref pPrivateSubnetId2
-  #     PlatformVersion: LATEST
-  #     PropagateTags: SERVICE
-  #     # Expose containers running on this Service to Cloud Map Service Connect.
-  #     # Allows using Cloud Map to connect services between/within clusters without ELBs
-  #     ServiceConnectConfiguration:
-  #       Enabled: true
-  #       Services:
-  #         - PortName: postgres # Points to the "PortMappings.Name" defined at the Task Definition
-  #           ClientAliases:
-  #             - Port: !Ref pPostgresPort
-  #       # Service Connect Agent logs location
-  #       LogConfiguration:
-  #         LogDriver: awslogs
-  #         Options:
-  #           awslogs-group: !Ref postgresLogGroup
-  #           awslogs-region: !Sub ${AWS::Region}
-  #           awslogs-stream-prefix: service-connect-agent
-  #     # ServiceRegistries: 
-  #     #   - ServiceRegistry
-  #     TaskDefinition: !Ref postgresTaskDefinition
-  #     Tags: 
-  #       - Key: managed-by
-  #         Value: SAM
+  postgresService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref fargateCluster
+      ServiceName: postgres
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      # Allows the ability for updates to create a new task before draining the old task.
+      # https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_DeploymentConfiguration.html
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: 
+            - !Ref pPrivateSubnetId1
+            - !Ref pPrivateSubnetId2
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # Expose containers running on this Service to Cloud Map Service Connect.
+      # Allows using Cloud Map to connect services between/within clusters without ELBs
+      ServiceConnectConfiguration:
+        Enabled: true
+        Services:
+          - PortName: postgres # Points to the "PortMappings.Name" defined at the Task Definition
+            ClientAliases:
+              - Port: !Ref pPostgresPort
+        # Service Connect Agent logs location
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Ref postgresLogGroup
+            awslogs-region: !Sub ${AWS::Region}
+            awslogs-stream-prefix: service-connect-agent
+      ServiceRegistries: 
+        - RegistryArn: !GetAtt postgresServiceDiscoveryService.Arn
+          Port: !Ref pPostgresPort
+      TaskDefinition: !Ref postgresTaskDefinition
+      Tags: 
+        - Key: managed-by
+          Value: SAM
 
   mongoService:
     Type: AWS::ECS::Service
