@@ -241,7 +241,7 @@ Resources:
               AppProtocol: http
           Environment:
             - Name: REDIS_HOST
-              Value: !Sub redis.${pAppName}.cloudmap.internal # Reference internal Service Connect Namespace
+              Value: !Sub redis.${pAppName}.cloudmap.internal # Reference internal Service Discovery Namespace
             - Name: REDIS_PORT
               Value: !Ref pRedisPort
             - Name: COLOR_ADVISOR_URL
