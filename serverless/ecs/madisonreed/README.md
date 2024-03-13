@@ -47,8 +47,8 @@ sam deploy -t ecs/madisonreed-ecs-tester.yml \
      pPublicSubnetId2=subnet-0d650820a97fa5ba3 \
      pR53HostedZoneId=Z0323068C9DQS081P13G \
      pWebsiteEcrImageUri=174743933558.dkr.ecr.us-east-1.amazonaws.com/connectiontest:latest \
-     pACMCertificateArn=arn:aws:acm:us-east-1:174743933558:certificate/07f48ca4-3dcf-4ed7-b4df-147b3412be62" \
-     pColorAdvisorApiUrl=test \
+     pACMCertificateArn=arn:aws:acm:us-east-1:174743933558:certificate/07f48ca4-3dcf-4ed7-b4df-147b3412be62 \
+     pColorAdvisorApiUrl=test" \
   --stack-name pr1-ephemeral \
   --tags CleanupDate=$(date -u -d "+10 days" '+%Y-%m-%dT%H:%M:%SZ') \
   --no-confirm-changeset \

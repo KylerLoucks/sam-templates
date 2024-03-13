@@ -16,18 +16,9 @@ Parameters:
     Type: String
   pPrivateSubnetId2:
     Type: String
-  pPublicSubnetId1:
-    Type: String
-  pPublicSubnetId2:
-    Type: String
-  pACMCertificateArn:
-    Type: String
-    Description: ACM cert ARN for ECS services ALB
-  pR53HostedZoneId:
-    Type: String
-    Description: Route 53 hosted zone
   pColorAdvisorApiUrl:
     Type: String
+
   # Container Ports
   pWebsitePort:
     Type: Number
@@ -273,7 +264,7 @@ Resources:
 
             # MONGO
             - Name: MONGO_HOST
-              Value: !Sub postgres.${pAppName}.cloudmap.internal
+              Value: !Sub mongo.${pAppName}.cloudmap.internal
             - Name: MONGO_PORT
               Value: !Ref pMongoPort
 
@@ -436,6 +427,9 @@ Resources:
 
   # Service Discovery/Connect Namespace (AWS Cloud Map)
   # Creates Private Route53 hosted zone matching the 'Name' property
+
+  # "If you name the namespace 'example.com' and an ECS service 'backend' the resulting DNS name for this service is: 'backend.example.com'"
+  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-servicediscovery-privatednsnamespace.html
   serviceDiscoveryNameSpace:
     Type: AWS::ServiceDiscovery::PrivateDnsNamespace
     Properties:
