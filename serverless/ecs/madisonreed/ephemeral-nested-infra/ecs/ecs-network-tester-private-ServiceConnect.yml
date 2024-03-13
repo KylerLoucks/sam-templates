@@ -191,23 +191,6 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/*:*"
-        - PolicyName: S3Access
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:GetObject*
-                  - s3:GetBucket*
-                  - s3:List*
-                  - s3:DeleteObject*
-                  - s3:PutObject
-                  - s3:PutObjectLegalHold
-                  - s3:PutObjectRetention
-                  - s3:PutObjectTagging
-                  - s3:PutObjectVersionTagging
-                  - s3:Abort*
-                Resource: "*"
         
   taskExecutionRole:
     Type: AWS::IAM::Role
@@ -258,7 +241,7 @@ Resources:
               AppProtocol: http
           Environment:
             - Name: REDIS_HOST
-              Value: !Sub redis.${pAppName}.cloudmap.internal # Reference R53Hosted Zone created by Cloud Map Namespace
+              Value: !Sub redis.${pAppName}.cloudmap.internal # Reference internal Service Connect Namespace
             - Name: REDIS_PORT
               Value: !Ref pRedisPort
             - Name: COLOR_ADVISOR_URL
@@ -316,8 +299,8 @@ Resources:
       RuntimePlatform:
         CpuArchitecture: X86_64
         OperatingSystemFamily: LINUX
-      # EphemeralStorage:
-      #   SizeInGiB: 20
+      EphemeralStorage:
+        SizeInGiB: 30
         
       ContainerDefinitions:
         - Name: redis
@@ -355,7 +338,7 @@ Resources:
       ContainerDefinitions:
         - Name: mysql
           # changes to the Image will cause a new deployment to the ECS service, replacing the old deployment.
-          Image: 174743933558.dkr.ecr.us-east-1.amazonaws.com/mysql-ephemeral  # mysql:latest
+          Image: mysql:latest
           PortMappings:
             - Name: mysql
               ContainerPort: !Ref pMySQLPort
@@ -427,8 +410,8 @@ Resources:
       RuntimePlatform:
         CpuArchitecture: X86_64
         OperatingSystemFamily: LINUX
-      # EphemeralStorage:
-      #   SizeInGiB: 20
+      EphemeralStorage:
+        SizeInGiB: 30
         
       ContainerDefinitions:
         - Name: mongo
@@ -459,30 +442,52 @@ Resources:
       Vpc: !Ref pVpcId
       Name: !Sub ${pAppName}.cloudmap.internal
 
-  # Service Discovery Setup
-  # # UI (Website)
-  # websiteServiceDiscoveryService:
-  #   Type: AWS::ServiceDiscovery::Service
-  #   Properties:
-  #     Name: website
-  #     Description: Service discovery for website service
-  #     DnsConfig:
-  #       DnsRecords:
-  #         - Type: A
-  #           TTL: 30
-  #     NamespaceId: !GetAtt serviceDiscoveryNameSpace.Id
 
-  # # Redis
-  # redisServiceDiscoveryService:
-  #   Type: AWS::ServiceDiscovery::Service
-  #   Properties:
-  #     Name: redis
-  #     Description: Service discovery for redis service
-  #     DnsConfig:
-  #       DnsRecords:
-  #         - Type: A
-  #           TTL: 30
-  #     NamespaceId: !GetAtt serviceDiscoveryNameSpace.Id
+  # mysql
+  mysqlServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: mysql-ecs # Name must be unique from what is given for ECS service 'ServiceConnectConfiguration.PortName'. 
+      Description: Service discovery for mongo service
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 60
+          - Type: SRV
+            TTL: 60
+        RoutingPolicy: MULTIVALUE
+      NamespaceId: !GetAtt serviceDiscoveryNameSpace.Id
+
+  # mongo
+  mongoServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: mongo-ecs # Name must be unique from what is given for ECS service 'ServiceConnectConfiguration.PortName'. 
+      Description: Service discovery for mongo service
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 60
+          - Type: SRV
+            TTL: 60
+        RoutingPolicy: MULTIVALUE
+      NamespaceId: !GetAtt serviceDiscoveryNameSpace.Id
+
+
+  # Redis
+  redisServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: redis-ecs # Name must be unique from what is given for ECS service 'ServiceConnectConfiguration.PortName'. 
+      Description: Service discovery for redis service
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 60
+          - Type: SRV
+            TTL: 60
+        RoutingPolicy: MULTIVALUE
+      NamespaceId: !GetAtt serviceDiscoveryNameSpace.Id
 
   # Website
   # Used to be able to connect via VPN and DNS route to the Web UI (DNS record could be stale)
@@ -522,96 +527,6 @@ Resources:
 
 
 
-  # =========================================================
-  # ================= ALB & LISTENERS/RULES =================
-  # =========================================================
-  
-  # # Listener to redirect HTTP traffic to HTTPS
-  # redirectListener:
-  #   Type: AWS::ElasticLoadBalancingV2::Listener
-  #   Properties: 
-  #     DefaultActions: 
-  #       - Type: "redirect"
-  #         RedirectConfig: 
-  #           Port: 443
-  #           Protocol: "HTTPS"
-  #           StatusCode: "HTTP_301"
-  #     LoadBalancerArn: !Ref ecsLoadBalancer
-  #     Port: 80
-  #     Protocol: "HTTP"
-
-  # httpsListener:
-  #   Type: AWS::ElasticLoadBalancingV2::Listener
-  #   Properties: 
-  #     Certificates: 
-  #       - CertificateArn: !Ref pACMCertificateArn
-  #     DefaultActions: 
-  #       - Type: "fixed-response"
-  #         FixedResponseConfig:
-  #           StatusCode: "503"
-  #           ContentType: "text/plain"
-  #           MessageBody: "You have reached an invalid domain."
-  #     LoadBalancerArn: !Ref ecsLoadBalancer
-  #     Port: 443
-  #     Protocol: HTTPS
-  #     SslPolicy: "ELBSecurityPolicy-2016-08"
-
-  # # WEBSITE
-  # websiteRule:
-  #   Type: AWS::ElasticLoadBalancingV2::ListenerRule
-  #   Properties:
-  #     Actions:
-  #       - Type: forward
-  #         TargetGroupArn: !Ref websiteTg
-  #     Conditions:
-  #       - Field: host-header
-  #         HostHeaderConfig:
-  #           Values: 
-  #             - !Sub ${pAppName}.dev.mdsnrdfd.com
-  #     ListenerArn: !Ref httpsListener
-  #     Priority: 18
-
-
-  # =================================================
-  # ================= TARGET GROUPS =================
-  # =================================================
-
-
-  # # WEBSITE
-  # websiteTg:
-  #   Type: AWS::ElasticLoadBalancingV2::TargetGroup
-  #   Properties: 
-  #     Name: !Sub website-${pAppName}
-
-  #     HealthCheckPath: /
-  #     HealthCheckProtocol: HTTP
-  #     HealthCheckTimeoutSeconds: 120
-  #     HealthCheckIntervalSeconds: 150
-  #     HealthyThresholdCount: 2
-  #     UnhealthyThresholdCount: 2
-  #     Port: !Ref pWebsitePort
-  #     Protocol: HTTP
-  #     ProtocolVersion: HTTP1
-  #     Matcher:
-  #       HttpCode: 200-499
-  #     TargetType: ip
-  #     VpcId: !Ref pVpcId
-
-  
-  # ecsLoadBalancer:
-  #   Type: AWS::ElasticLoadBalancingV2::LoadBalancer
-  #   Properties:
-  #     IpAddressType: ipv4
-  #     Scheme: internet-facing
-  #     SecurityGroups:
-  #       - !GetAtt albSecurityGroup.GroupId
-  #     Subnets:
-  #       - !Ref pPublicSubnetId1
-  #       - !Ref pPublicSubnetId2
-  #     Type: application
-
-
-
   # ================================================
   # ================= ECS SERVICES =================
   # ================================================
@@ -620,8 +535,8 @@ Resources:
     # Dependency is required due to the fact that we must deploy backwards 
     # from a traditional deployment (database > API > Web UI)
     DependsOn:
-      # - websiteRule
       - redisService
+      - mongoService
       - mysqlService
     Type: AWS::ECS::Service
     Properties:
@@ -638,12 +553,6 @@ Resources:
       DeploymentConfiguration:
         MinimumHealthyPercent: 100
         MaximumPercent: 200
-      # Adjust if container takes a while to start up
-      # HealthCheckGracePeriodSeconds: 30
-      # LoadBalancers: 
-      #   - ContainerName: website
-      #     ContainerPort: !Ref pWebsitePort
-      #     TargetGroupArn: !Ref websiteTg
       NetworkConfiguration: 
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
@@ -719,8 +628,9 @@ Resources:
             awslogs-group: !Ref redisLogGroup
             awslogs-region: !Sub ${AWS::Region}
             awslogs-stream-prefix: service-connect-agent
-      # ServiceRegistries: 
-      #   - ServiceRegistry
+      ServiceRegistries: 
+        - RegistryArn: !GetAtt redisServiceDiscoveryService.Arn
+          Port: !Ref pRedisPort
       TaskDefinition: !Ref redisTaskDefinition
       Tags: 
         - Key: managed-by
@@ -767,8 +677,9 @@ Resources:
             awslogs-group: !Ref mysqlLogGroup
             awslogs-region: !Sub ${AWS::Region}
             awslogs-stream-prefix: service-connect-agent
-      # ServiceRegistries: 
-      #   - ServiceRegistry
+      ServiceRegistries: 
+        - RegistryArn: !GetAtt mysqlServiceDiscoveryService.Arn
+          Port: !Ref pMySQLPort
       TaskDefinition: !Ref mysqlTaskDefinition
       Tags: 
         - Key: managed-by
@@ -823,76 +734,57 @@ Resources:
   #       - Key: managed-by
   #         Value: SAM
 
-  # mongoService:
-  #   Type: AWS::ECS::Service
-  #   Properties:
-  #     Cluster: !Ref fargateCluster
-  #     ServiceName: mongo
-  #     DeploymentController: 
-  #       Type: ECS
-  #     DesiredCount: 1
-  #     EnableECSManagedTags: true
-  #     EnableExecuteCommand: true
-  #     LaunchType: FARGATE
-  #     # Allows the ability for updates to create a new task before draining the old task.
-  #     # https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_DeploymentConfiguration.html
-  #     DeploymentConfiguration:
-  #       MinimumHealthyPercent: 100
-  #       MaximumPercent: 200
-  #     NetworkConfiguration: 
-  #       AwsvpcConfiguration:
-  #         AssignPublicIp: DISABLED
-  #         SecurityGroups:
-  #           - !GetAtt serviceSecurityGroup.GroupId
-  #         Subnets: 
-  #           - !Ref pPrivateSubnetId1
-  #           - !Ref pPrivateSubnetId2
-  #     PlatformVersion: LATEST
-  #     PropagateTags: SERVICE
-  #     # Expose containers running on this Service to Cloud Map Service Connect.
-  #     # Allows using Cloud Map to connect services between/within clusters without ELBs
-  #     ServiceConnectConfiguration:
-  #       Enabled: true
-  #       Services:
-  #         - PortName: mongo # Points to the "PortMappings.Name" defined at the Task Definition
-  #           ClientAliases:
-  #             - Port: !Ref pMongoPort
-  #       # Service Connect Agent logs location
-  #       LogConfiguration:
-  #         LogDriver: awslogs
-  #         Options:
-  #           awslogs-group: !Ref mongoLogGroup
-  #           awslogs-region: !Sub ${AWS::Region}
-  #           awslogs-stream-prefix: service-connect-agent
-  #     # ServiceRegistries: 
-  #     #   - ServiceRegistry
-  #     TaskDefinition: !Ref mongoTaskDefinition
-  #     Tags: 
-  #       - Key: managed-by
-  #         Value: SAM
-
-  # ROUTE53 Records
-  # route53Records:
-  #   Type: AWS::Route53::RecordSetGroup
-  #   Properties:
-  #     HostedZoneId: !Ref pR53HostedZoneId # Id of the Hosted Zone created during domain registration
-  #     RecordSets:
-  #       # Website
-  #       - Name: !Sub ${pAppName}.dev.mdsnrdfd.com
-  #         Type: A
-  #         AliasTarget:
-  #           HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID # Loadbalancer Id
-  #           DNSName: !GetAtt ecsLoadBalancer.DNSName
-
-
-
+  mongoService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref fargateCluster
+      ServiceName: mongo
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      # Allows the ability for updates to create a new task before draining the old task.
+      # https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_DeploymentConfiguration.html
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: 
+            - !Ref pPrivateSubnetId1
+            - !Ref pPrivateSubnetId2
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # Expose containers running on this Service to Cloud Map Service Connect.
+      # Allows using Cloud Map to connect services between/within clusters without ELBs
+      ServiceConnectConfiguration:
+        Enabled: true
+        Services:
+          - PortName: mongo # Points to the "PortMappings.Name" defined at the Task Definition
+            ClientAliases:
+              - Port: !Ref pMongoPort
+        # Service Connect Agent logs location
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Ref mongoLogGroup
+            awslogs-region: !Sub ${AWS::Region}
+            awslogs-stream-prefix: service-connect-agent
+      ServiceRegistries: 
+        - RegistryArn: !GetAtt mongoServiceDiscoveryService.Arn
+          Port: !Ref pMongoPort
+      TaskDefinition: !Ref mongoTaskDefinition
+      Tags: 
+        - Key: managed-by
+          Value: SAM
 
 
 Outputs:
-  # albEndpointUrl:
-  #   Description: DNS Endpoint for the ECS ALB
-  #   Value: !GetAtt ecsLoadBalancer.DNSName
-
   websiteUrl:
     Description: Application URL endpoint
     Value: !Sub http://madisonreed.${pAppName}.cloudmap.internal  # !Sub https://${pAppName}.dev.mdsnrdfd.com
