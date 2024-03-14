@@ -123,34 +123,6 @@ Resources:
       CidrIp: 10.20.0.0/16  # Allow traffic from VPC
 
 
-  # ALLOW EVERYTHING FROM ALB SG
-  serviceFrontendIngress:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !GetAtt serviceSecurityGroup.GroupId
-      IpProtocol: -1
-      FromPort: -1
-      ToPort: -1
-      SourceSecurityGroupId: !Ref albSecurityGroup
-
-  # FRONTEND SG
-  albSecurityGroup:
-    Type: AWS::EC2::SecurityGroup
-    Properties:
-      GroupDescription: Security Group for ALB allowing HTTP
-      VpcId: !Ref pVpcId
-      SecurityGroupIngress:
-        - IpProtocol: tcp
-          FromPort: 80
-          ToPort: 80
-          CidrIp: 0.0.0.0/0
-        - IpProtocol: tcp
-          FromPort: 443
-          ToPort: 443
-          CidrIp: 0.0.0.0/0
-
-
-
   # ECS task role
   taskRole:
     Type: AWS::IAM::Role
@@ -298,7 +270,7 @@ Resources:
             - Name: redis
               ContainerPort: !Ref pRedisPort
               Protocol: tcp # tcp | udp
-              # appProtocol: DONT SET THIS FOR TCP. REDIS DOES NOT WORK THROUGH HTTP
+              # appProtocol: DONT SET THIS. REDIS DOES NOT WORK THROUGH HTTP
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -791,9 +763,12 @@ Resources:
           Value: SAM
 
 
+
+
+
 Outputs:
   websiteUrl:
     Description: Application URL endpoint
-    Value: !Sub http://madisonreed.${pAppName}.cloudmap.internal  # !Sub https://${pAppName}.dev.mdsnrdfd.com
+    Value: !Sub http://madisonreed.${pAppName}.cloudmap.internal
 
   
