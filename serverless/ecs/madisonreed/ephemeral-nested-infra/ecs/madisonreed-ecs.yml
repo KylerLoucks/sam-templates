@@ -401,7 +401,6 @@ Resources:
           PortMappings:
               - ContainerPort: !Ref pSocketioPort
           Environment:
-            # TODO: Will change this to be e.g. redis-pullrequest12345.dev.private-mr.com
             - Name: REDIS_HOST
               Value: !Sub redis-${pAppName}.dev.mdsnrdfd.com 
             - Name: NODE_ENV
