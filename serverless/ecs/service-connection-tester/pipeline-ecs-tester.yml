@@ -50,22 +50,7 @@ Parameters:
     Description: Base image used by CodeBuild
     Default: aws/codebuild/amazonlinux2-x86_64-standard:4.0 # 4.0 for Node 16
 
-  pWebsiteBuildSpecPath:
-    Type: String
-    Description: Path and name for the Buildspec in repo
-    Default: buildspec.yml
-
-  pTophatBuildSpecPath:
-    Type: String
-    Description: Path and name for the Buildspec in repo
-    Default: buildspec.yml
-
-  pApiServerBuildSpecPath:
-    Type: String
-    Description: Path and name for the Buildspec in repo
-    Default: buildspec.yml
-
-  pDeployBuildSpecPath:
+  pBuildSpecPath:
     Type: String
     Description: Path and name for the Buildspec in repo
     Default: buildspec.yml
@@ -102,6 +87,10 @@ Metadata:
         default: CodeBuild Compute Type
       pCodeBuildImage:
         default: CodeBuild Docker Image
+      pBuildSpecPath:
+        default: Buildspec file path
+      pEnvironmentTag:
+        default: Environment Tag  
 
     ParameterGroups:
       - Label:
@@ -120,6 +109,11 @@ Metadata:
         Parameters:
           - pCodeBuildComputeType
           - pCodeBuildImage
+          - pBuildSpecPath
+      - Label:
+          default: Tagging
+        Parameters:
+          - pEnvironmentTag
 
 Resources:
 
@@ -128,18 +122,6 @@ Resources:
     Type: AWS::ECR::Repository
     Properties:
       RepositoryName: !Sub website-${pAppName}
-      EmptyOnDelete: true
-
-  ecrApiServerRepo:
-    Type: AWS::ECR::Repository
-    Properties:
-      RepositoryName: !Sub apiserver-${pAppName}
-      EmptyOnDelete: true
-
-  ecrTophatRepo:
-    Type: AWS::ECR::Repository
-    Properties:
-      RepositoryName: !Sub tophat-${pAppName}
       EmptyOnDelete: true
 
   # IAM Role - CodeBuild
@@ -168,7 +150,8 @@ Resources:
                   - logs:CreateLogStream
                   - logs:PutLogEvents
                 Resource:
-                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${pAppName}-build
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${pAppName}-build:*
         - PolicyName: S3ArtifactBucket
           PolicyDocument:
             Version: 2012-10-17
@@ -276,10 +259,10 @@ Resources:
                   - events:*
                 Resource: "*"
 
-  codeBuildDeploy:
+  codeBuildProject:
     Type: AWS::CodeBuild::Project
     Properties:
-      Name: !Sub ${pAppName}-deploy
+      Name: !Sub ${pAppName}-build
       Artifacts:
         Type: CODEPIPELINE
       Description: CodeBuild Project
@@ -295,175 +278,33 @@ Resources:
           - Name: PR_EVENT
             Value: "#{variables.PR_EVENT}"
             Type: PLAINTEXT
+          - Name: ACCOUNT_ID 
+            Value: !Ref AWS::AccountId 
+            Type: PLAINTEXT
 
+          - Name: BASE_IMAGE_REPO_NAME  
+            Value: base-image
+            Type: PLAINTEXT 
           - Name: APP_NAME 
             Value: !Ref pAppName 
             Type: PLAINTEXT
-
           - Name: SSH_KEY_FOR_SUBMODULE
             Value: /GITHUB/SSH_KEY
             Type: PARAMETER_STORE
-
           - Name: WEBSITE_REPOSITORY_URI
             Value: !GetAtt ecrWebsiteRepo.RepositoryUri
-          - Name: TOPHAT_REPOSITORY_URI
-            Value: !GetAtt ecrTophatRepo.RepositoryUri
-          - Name: APISERVER_REPOSITORY_URI
-            Value: !GetAtt ecrApiServerRepo.RepositoryUri
 
       ServiceRole: !GetAtt codeBuildServiceRole.Arn
       Source:
         Type: CODEPIPELINE
-        BuildSpec: !Ref pDeployBuildSpecPath
-      TimeoutInMinutes: 180
-
-  codeBuildDeployLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub "/aws/codebuild/${codeBuildDeploy}"
-      RetentionInDays: 7
-
-  codeBuildTophat:
-    Type: AWS::CodeBuild::Project
-    Properties:
-      Name: !Sub ${pAppName}-tophat
-      Artifacts:
-        Type: CODEPIPELINE
-      Description: CodeBuild Project
-      Environment:
-        ComputeType: !Ref pCodeBuildComputeType
-        Image: !Ref pCodeBuildImage
-        Type: LINUX_CONTAINER
-        PrivilegedMode: true
-        EnvironmentVariables:
-          - Name: PULL_REQUEST_ID
-            Value: "#{variables.PR_ID}"
-            Type: PLAINTEXT
-          - Name: PR_EVENT
-            Value: "#{variables.PR_EVENT}"
-            Type: PLAINTEXT
-
-          - Name: BASE_IMAGE_REPO_NAME  
-            Value: base-image
-            Type: PLAINTEXT
-
-          - Name: BASE_IMAGE_TAG
-            Value: latest
-            Type: PLAINTEXT
-
-          - Name: APP_NAME 
-            Value: !Ref pAppName 
-            Type: PLAINTEXT
-
-          - Name: REPOSITORY_URI
-            Value: !GetAtt ecrTophatRepo.RepositoryUri
-
-      ServiceRole: !GetAtt codeBuildServiceRole.Arn
-      Source:
-        Type: CODEPIPELINE
-        BuildSpec: !Ref pTophatBuildSpecPath
+        BuildSpec: !Ref pBuildSpecPath
       TimeoutInMinutes: 60
 
-  codeBuildTophatLogGroup:
+  codeBuildLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub "/aws/codebuild/${codeBuildTophat}"
+      LogGroupName: !Sub "/aws/codebuild/${codeBuildProject}"
       RetentionInDays: 7
-
-  codeBuildWebsite:
-    Type: AWS::CodeBuild::Project
-    Properties:
-      Name: !Sub ${pAppName}-website
-      Artifacts:
-        Type: CODEPIPELINE
-      Description: CodeBuild Project
-      Environment:
-        ComputeType: !Ref pCodeBuildComputeType
-        Image: !Ref pCodeBuildImage
-        Type: LINUX_CONTAINER
-        PrivilegedMode: true
-        EnvironmentVariables:
-          - Name: PULL_REQUEST_ID
-            Value: "#{variables.PR_ID}"
-            Type: PLAINTEXT
-          - Name: PR_EVENT
-            Value: "#{variables.PR_EVENT}"
-            Type: PLAINTEXT
-
-          - Name: BASE_IMAGE_REPO_NAME  
-            Value: base-image
-            Type: PLAINTEXT
-
-          - Name: BASE_IMAGE_TAG
-            Value: latest
-            Type: PLAINTEXT 
-
-          - Name: APP_NAME 
-            Value: !Ref pAppName 
-            Type: PLAINTEXT
-
-          - Name: REPOSITORY_URI
-            Value: !GetAtt ecrWebsiteRepo.RepositoryUri
-
-      ServiceRole: !GetAtt codeBuildServiceRole.Arn
-      Source:
-        Type: CODEPIPELINE
-        BuildSpec: !Ref pWebsiteBuildSpecPath
-      TimeoutInMinutes: 60
-
-  codeBuildWebsiteLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub "/aws/codebuild/${codeBuildWebsite}"
-      RetentionInDays: 7
-
-  codeBuildApiServer:
-    Type: AWS::CodeBuild::Project
-    Properties:
-      Name: !Sub ${pAppName}-apiserver
-      Artifacts:
-        Type: CODEPIPELINE
-      Description: CodeBuild Project
-      Environment:
-        ComputeType: !Ref pCodeBuildComputeType
-        Image: !Ref pCodeBuildImage
-        Type: LINUX_CONTAINER
-        PrivilegedMode: true
-        EnvironmentVariables:
-          - Name: PULL_REQUEST_ID
-            Value: "#{variables.PR_ID}"
-            Type: PLAINTEXT
-          - Name: PR_EVENT
-            Value: "#{variables.PR_EVENT}"
-            Type: PLAINTEXT
-
-          - Name: BASE_IMAGE_REPO_NAME  
-            Value: base-image
-            Type: PLAINTEXT
-
-          - Name: BASE_IMAGE_TAG
-            Value: latest
-            Type: PLAINTEXT 
-
-          - Name: APP_NAME 
-            Value: !Ref pAppName 
-            Type: PLAINTEXT
-
-          - Name: REPOSITORY_URI
-            Value: !GetAtt ecrApiServerRepo.RepositoryUri
-
-      ServiceRole: !GetAtt codeBuildServiceRole.Arn
-      Source:
-        Type: CODEPIPELINE
-        BuildSpec: !Ref pApiServerBuildSpecPath
-      TimeoutInMinutes: 60
-
-  codeBuildApiServerLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub "/aws/codebuild/${codeBuildApiServer}"
-      RetentionInDays: 7
-      
       
   # IAM Role - CodePipeline    
 
@@ -504,10 +345,7 @@ Resources:
                     - codebuild:BatchGetBuildBatches
                     - codebuild:StartBuildBatch
                   Resource: 
-                    - !GetAtt codeBuildWebsite.Arn
-                    - !GetAtt codeBuildTophat.Arn
-                    - !GetAtt codeBuildApiServer.Arn
-                    - !GetAtt codeBuildDeploy.Arn
+                    - !GetAtt codeBuildProject.Arn
                 - Effect: Allow
                   Action:
                     - codestar-connections:UseConnection
@@ -693,61 +531,19 @@ Resources:
                 ExternalEntityLink: !Sub "https://github.com/${pRepoOwner}/${pRepoName}/commit/#{SourceVariables.CommitId}"
               RunOrder: 1
 
-            - Name: BuildTophat
+            - Name: CodeBuild
               ActionTypeId:
                 Category: Build
                 Owner: AWS
                 Provider: CodeBuild
                 Version: 1
               Configuration:
-                ProjectName: !Ref codeBuildTophat
-              InputArtifacts:
-                - Name: SourceArtifact
-              OutputArtifacts:
-                - Name: BuildArtifactTophat
-              RunOrder: 2
-
-            - Name: BuildApiServer
-              ActionTypeId:
-                Category: Build
-                Owner: AWS
-                Provider: CodeBuild
-                Version: 1
-              Configuration:
-                ProjectName: !Ref codeBuildApiServer
-              InputArtifacts:
-                - Name: SourceArtifact
-              OutputArtifacts:
-                - Name: BuildArtifactApiServer
-              RunOrder: 2
-
-            - Name: BuildWebsite
-              ActionTypeId:
-                Category: Build
-                Owner: AWS
-                Provider: CodeBuild
-                Version: 1
-              Configuration:
-                ProjectName: !Ref codeBuildWebsite
-              InputArtifacts:
-                - Name: SourceArtifact
-              OutputArtifacts:
-                - Name: BuildArtifactWebsite
-              RunOrder: 2
-
-            - Name: DeployECS
-              ActionTypeId:
-                Category: Build
-                Owner: AWS
-                Provider: CodeBuild
-                Version: 1
-              Configuration:
-                ProjectName: !Ref codeBuildDeploy
+                ProjectName: !Ref codeBuildProject
               InputArtifacts:
                 - Name: SourceArtifact
               OutputArtifacts:
                 - Name: BuildArtifact
-              RunOrder: 3
+              RunOrder: 2
 
 Outputs:
 

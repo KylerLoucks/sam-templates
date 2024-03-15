@@ -24,8 +24,6 @@ Parameters:
   pR53HostedZoneId:
     Type: String
     Description: Route 53 hosted zone
-  pColorAdvisorApiUrl:
-    Type: String
   # Container Ports
   pWebsitePort:
     Type: Number
@@ -193,8 +191,6 @@ Resources:
               Value: localhost #!Sub redis-${pAppName}.dev.mdsnrdfd.com
             - Name: REDIS_PORT
               Value: !Ref pRedisPort
-            - Name: COLOR_ADVISOR_URL
-              Value: !Ref pColorAdvisorApiUrl
 
             # MYSQL
             - Name: MYSQL_HOST

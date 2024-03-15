@@ -40,7 +40,10 @@ sam deploy -t madisonreed-ServiceConnect.yml \
      pVpcId=vpc-09ef4a53e9290ca17 \
      pPrivateSubnetId1=subnet-01086857935bfcf34 \
      pPrivateSubnetId2=subnet-056e57e04fea05dd5 \
-     pWebsiteEcrImageUri=174743933558.dkr.ecr.us-east-1.amazonaws.com/website:latest" \
+     pWebsiteEcrImageUri=174743933558.dkr.ecr.us-east-1.amazonaws.com/website:latest \
+     pTophatEcrImageUri=174743933558.dkr.ecr.us-east-1.amazonaws.com/tophat:latest \
+     pSocketIoEcrImageUri=174743933558.dkr.ecr.us-east-1.amazonaws.com/tophat:latest \
+     pApiServerEcrImageUri=174743933558.dkr.ecr.us-east-1.amazonaws.com/apiserver:latest \
   --stack-name pr1-ephemeral \
   --tags CleanupDate=$(date -u -d "+10 days" '+%Y-%m-%dT%H:%M:%SZ') \
   --no-confirm-changeset \

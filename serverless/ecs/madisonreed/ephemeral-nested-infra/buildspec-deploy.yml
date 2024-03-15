@@ -1,0 +1,54 @@
+version: 0.2
+env:
+  git-credential-helper: yes
+  exported-variables:
+    - IMAGE_TAG
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 16
+    commands:
+      - pip3 install --upgrade aws-sam-cli
+  pre_build:
+    commands:
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - IMAGE_TAG=${COMMIT_HASH:-latest}
+
+      - echo Listing Source Files...
+      # list all files by most recently modified in reverse order
+      - ls -ltra
+
+
+  build:
+    commands:
+      - echo Build started on `date`
+
+      # prepare ecs stack
+      - echo Building ECS Stack...
+      - sam build -t ephemeralenv/ecs/madisonreed-ServiceConnect.yml
+
+  post_build:
+    commands:
+      - echo Build completed on `date`
+
+      # Deploy ECS
+      - |
+        sam deploy -t ephemeralenv/ecs/madisonreed-ServiceConnect.yml \
+          --resolve-s3 \
+          --capabilities CAPABILITY_NAMED_IAM \
+          --parameter-overrides \
+            "pAppName=${APP_NAME} \
+            pVpcId=vpc-09ef4a53e9290ca17 \
+            pPrivateSubnetId1=subnet-01086857935bfcf34 \ 
+            pPrivateSubnetId2=subnet-056e57e04fea05dd5 \
+            pWebsiteEcrImageUri=${WEBSITE_REPOSITORY_URI}:${IMAGE_TAG} \
+            pTophatEcrImageUri=${TOPHAT_REPOSITORY_URI}:${IMAGE_TAG} \
+            pSocketIoImageUri=${TOPHAT_REPOSITORY_URI}:${IMAGE_TAG} \
+            pApiServerEcrImageUri=${APISERVER_REPOSITORY_URI}:${IMAGE_TAG}" \
+          --stack-name ${APP_NAME}-ephemeral \
+          --tags CleanupDate=$(date -u -d "+10 days" '+%Y-%m-%dT%H:%M:%SZ') \
+          --no-confirm-changeset \
+          --on-failure DELETE
+
+ 

@@ -55,6 +55,24 @@ Parameters:
       URI of the ECR image used for Website Task Definition. 
       e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
 
+  pTophatEcrImageUri:
+    Type: String
+    Description: > 
+      URI of the ECR image used for Tophat Task Definition. 
+      e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
+
+  pSocketIoEcrImageUri:
+    Type: String
+    Description: > 
+      URI of the ECR image used for Socket IO Task Definition. 
+      e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
+
+  pApiServerEcrImageUri:
+    Type: String
+    Description: > 
+      URI of the ECR image used for API Server Task Definition. 
+      e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
+
 
 Resources:
 
@@ -285,7 +303,7 @@ Resources:
       ContainerDefinitions:
         - Name: redis
           # changes to the Image will cause a new deployment to the ECS service, replacing the old deployment.
-          Image: redis:latest
+          Image: redis:7.0.15
           PortMappings:
             - Name: redis
               ContainerPort: !Ref pRedisPort
@@ -385,7 +403,7 @@ Resources:
         
       ContainerDefinitions:
         - Name: apiserver
-          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/apiserver
+          Image: !Ref pApiServerEcrImageUri
           PortMappings:
             - Name: apiserver
               ContainerPort: !Ref pApiServerPort
@@ -440,7 +458,7 @@ Resources:
         
       ContainerDefinitions:
         - Name: tophat
-          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/tophat
+          Image: !Ref pTophatEcrImageUri
           PortMappings:
             - Name: tophat
               ContainerPort: !Ref pTopHatPort
@@ -494,7 +512,7 @@ Resources:
         
       ContainerDefinitions:
         - Name: socketio
-          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/tophat
+          Image: !Ref pSocketIoEcrImageUri
           PortMappings:
             - Name: socketio
               ContainerPort: !Ref pSocketioPort
