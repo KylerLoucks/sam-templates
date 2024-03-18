@@ -6,8 +6,6 @@ Description: >
 
 Parameters:
 
-  # CodePipeline
-
   pAppName:
     Type: String
     Description: Used to name CI/CD resources.
