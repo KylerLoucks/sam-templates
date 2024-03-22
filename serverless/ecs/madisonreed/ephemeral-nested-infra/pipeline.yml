@@ -48,6 +48,11 @@ Parameters:
     Description: Base image used by CodeBuild
     Default: aws/codebuild/amazonlinux2-x86_64-standard:4.0 # 4.0 for Node 16
 
+  pPilkoBuildSpecPath:
+    Type: String
+    Description: Path and name for the Buildspec in repo
+    Default: buildspec.yml
+
   pWebsiteBuildSpecPath:
     Type: String
     Description: Path and name for the Buildspec in repo
@@ -67,7 +72,6 @@ Parameters:
     Type: String
     Description: Path and name for the Buildspec in repo
     Default: buildspec.yml
-
 
 
 Metadata:
@@ -175,19 +179,15 @@ Resources:
                 Resource:
                   - !Sub "arn:aws:s3:::${artifactBucket}"
                   - !Sub "arn:aws:s3:::${artifactBucket}/*"
-        - PolicyName: ReadMrModules
+        - PolicyName: s3ReadWrite
           PolicyDocument:
             Version: 2012-10-17
             Statement:
               - Effect: Allow
                 Action:
-                  - s3:Get*
-                  - s3:List*
+                  - s3:*
                 Resource:
-                  - arn:aws:s3:::mr-node-modules-dev
-                  - arn:aws:s3:::mr-node-modules-dev/*
-                  - arn:aws:s3:::mr-lambda-dev
-                  - arn:aws:s3:::mr-lambda-dev/*
+                  - "*"
         - PolicyName: ECR
           PolicyDocument:
             Version: 2012-10-17
@@ -276,25 +276,53 @@ Resources:
                   - events:*
                 Resource: "*"
 
-  codeBuildDeploy:
+  codeBuildPilko:
     Type: AWS::CodeBuild::Project
     Properties:
-      Name: !Sub ${pAppName}-deploy
+      Name: !Sub ${pAppName}-pilko
       Artifacts:
         Type: CODEPIPELINE
-      Description: CodeBuild Project
+      Description: Lint and approve PR with mr-github-bot
       Environment:
         ComputeType: !Ref pCodeBuildComputeType
         Image: !Ref pCodeBuildImage
         Type: LINUX_CONTAINER
         PrivilegedMode: true
         EnvironmentVariables:
-          - Name: PULL_REQUEST_ID
-            Value: "#{variables.PR_ID}"
+          - Name: ACCOUNT_ID  
+            Value: !Ref AWS::AccountId
             Type: PLAINTEXT
-          - Name: PR_EVENT
-            Value: "#{variables.PR_EVENT}"
+
+          - Name: APP_NAME 
+            Value: !Ref pAppName 
             Type: PLAINTEXT
+
+
+      ServiceRole: !GetAtt codeBuildServiceRole.Arn
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Ref pPilkoBuildSpecPath
+      TimeoutInMinutes: 60
+
+  codeBuildPilkoLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/codebuild/${codeBuildPilko}"
+      RetentionInDays: 7
+
+  codeBuildDeploy:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${pAppName}-deploy
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: Deploy/Update Ephemeral environment
+      Environment:
+        ComputeType: !Ref pCodeBuildComputeType
+        Image: !Ref pCodeBuildImage
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+        EnvironmentVariables:
           - Name: ACCOUNT_ID  
             Value: !Ref AWS::AccountId
             Type: PLAINTEXT
@@ -332,19 +360,13 @@ Resources:
       Name: !Sub ${pAppName}-tophat
       Artifacts:
         Type: CODEPIPELINE
-      Description: CodeBuild Project
+      Description: Build ECR image for Tophat ECS service
       Environment:
         ComputeType: !Ref pCodeBuildComputeType
         Image: !Ref pCodeBuildImage
         Type: LINUX_CONTAINER
         PrivilegedMode: true
         EnvironmentVariables:
-          - Name: PULL_REQUEST_ID
-            Value: "#{variables.PR_ID}"
-            Type: PLAINTEXT
-          - Name: PR_EVENT
-            Value: "#{variables.PR_EVENT}"
-            Type: PLAINTEXT
           - Name: ACCOUNT_ID  
             Value: !Ref AWS::AccountId
             Type: PLAINTEXT
@@ -382,19 +404,13 @@ Resources:
       Name: !Sub ${pAppName}-website
       Artifacts:
         Type: CODEPIPELINE
-      Description: CodeBuild Project
+      Description: Build ECR image for Website ECS service
       Environment:
         ComputeType: !Ref pCodeBuildComputeType
         Image: !Ref pCodeBuildImage
         Type: LINUX_CONTAINER
         PrivilegedMode: true
         EnvironmentVariables:
-          - Name: PULL_REQUEST_ID
-            Value: "#{variables.PR_ID}"
-            Type: PLAINTEXT
-          - Name: PR_EVENT
-            Value: "#{variables.PR_EVENT}"
-            Type: PLAINTEXT
           - Name: ACCOUNT_ID  
             Value: !Ref AWS::AccountId
             Type: PLAINTEXT
@@ -432,19 +448,13 @@ Resources:
       Name: !Sub ${pAppName}-apiserver
       Artifacts:
         Type: CODEPIPELINE
-      Description: CodeBuild Project
+      Description: Build ECR image for API Server ECS service
       Environment:
         ComputeType: !Ref pCodeBuildComputeType
         Image: !Ref pCodeBuildImage
         Type: LINUX_CONTAINER
         PrivilegedMode: true
         EnvironmentVariables:
-          - Name: PULL_REQUEST_ID
-            Value: "#{variables.PR_ID}"
-            Type: PLAINTEXT
-          - Name: PR_EVENT
-            Value: "#{variables.PR_EVENT}"
-            Type: PLAINTEXT
           - Name: ACCOUNT_ID  
             Value: !Ref AWS::AccountId
             Type: PLAINTEXT
@@ -516,6 +526,7 @@ Resources:
                     - codebuild:BatchGetBuildBatches
                     - codebuild:StartBuildBatch
                   Resource: 
+                    - !GetAtt codeBuildPilko.Arn
                     - !GetAtt codeBuildWebsite.Arn
                     - !GetAtt codeBuildTophat.Arn
                     - !GetAtt codeBuildApiServer.Arn
@@ -668,7 +679,7 @@ Resources:
       RestartExecutionOnUpdate: false
       Variables:
         - Name: PR_ID
-          Description: Pull Request ID
+          Description: Pull Request ID (e.g. 123456)
         - Name: PR_EVENT
           Description: 'Type of PR event. Valid values: [opened, synchronize, reopened, closed]'
       Stages:
@@ -689,6 +700,23 @@ Resources:
                 OutputArtifactFormat: CODEBUILD_CLONE_REF # Code Build Git Full Clone
               OutputArtifacts:
                 - Name: SourceArtifact
+        - Name: Lint
+          Actions:
+            - Name: PilkoLint
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              Configuration:
+                ProjectName: !Ref codeBuildPilko
+                # Override existing or add additional env vars to the buildproject
+                EnvironmentVariables: '[{"name": "PULL_REQUEST_ID", "value": "#{variables.PR_ID}"}, {"name": "PR_EVENT", "value": "#{variables.PR_EVENT}"}]'
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildArtifactPilko
+              RunOrder: 1
         - Name: Build
           Actions:
             - Name: ManualApproval
@@ -710,6 +738,7 @@ Resources:
                 Version: 1
               Configuration:
                 ProjectName: !Ref codeBuildTophat
+                EnvironmentVariables: '[{"name": "PULL_REQUEST_ID", "value": "#{variables.PR_ID}"}, {"name": "PR_EVENT", "value": "#{variables.PR_EVENT}"}]'
               InputArtifacts:
                 - Name: SourceArtifact
               OutputArtifacts:
@@ -724,6 +753,7 @@ Resources:
                 Version: 1
               Configuration:
                 ProjectName: !Ref codeBuildApiServer
+                EnvironmentVariables: '[{"name": "PULL_REQUEST_ID", "value": "#{variables.PR_ID}"}, {"name": "PR_EVENT", "value": "#{variables.PR_EVENT}"}]'
               InputArtifacts:
                 - Name: SourceArtifact
               OutputArtifacts:
@@ -738,6 +768,7 @@ Resources:
                 Version: 1
               Configuration:
                 ProjectName: !Ref codeBuildWebsite
+                EnvironmentVariables: '[{"name": "PULL_REQUEST_ID", "value": "#{variables.PR_ID}"}, {"name": "PR_EVENT", "value": "#{variables.PR_EVENT}"}]'
               InputArtifacts:
                 - Name: SourceArtifact
               OutputArtifacts:
@@ -752,6 +783,7 @@ Resources:
                 Version: 1
               Configuration:
                 ProjectName: !Ref codeBuildDeploy
+                EnvironmentVariables: '[{"name": "PULL_REQUEST_ID", "value": "#{variables.PR_ID}"}, {"name": "PR_EVENT", "value": "#{variables.PR_EVENT}"}]'
               InputArtifacts:
                 - Name: SourceArtifact
               OutputArtifacts:
