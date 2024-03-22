@@ -36,7 +36,7 @@ sam deploy -t madisonreed-ServiceConnect.yml \
   --resolve-s3 \
   --capabilities CAPABILITY_NAMED_IAM \
   --parameter-overrides \
-    "pAppName=pr1 \
+     pAppName=pr1 \
      pVpcId=vpc-09ef4a53e9290ca17 \
      pPrivateSubnetId1=subnet-01086857935bfcf34 \
      pPrivateSubnetId2=subnet-056e57e04fea05dd5 \

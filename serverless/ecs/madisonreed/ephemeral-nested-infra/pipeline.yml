@@ -69,19 +69,6 @@ Parameters:
     Default: buildspec.yml
 
 
-  # Tagging
-
-  pEnvironmentTag:
-    Type: String
-    Description: Environment Tag for default resource tagging
-    Default: development
-    AllowedValues:
-      - production
-      - staging
-      - sandbox
-      - test
-      - development
-      - qa
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -167,6 +154,15 @@ Resources:
                   - logs:PutLogEvents
                 Resource:
                   - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*
+        - PolicyName: GitCloneConnection # Required for CODEBUILD_CLONE_REF
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codestar-connections:UseConnection
+                Resource: 
+                  - !Ref pCodestarConnectionArn
         - PolicyName: S3ArtifactBucket
           PolicyDocument:
             Version: 2012-10-17
@@ -179,15 +175,19 @@ Resources:
                 Resource:
                   - !Sub "arn:aws:s3:::${artifactBucket}"
                   - !Sub "arn:aws:s3:::${artifactBucket}/*"
-        - PolicyName: GitCloneConnection
+        - PolicyName: ReadMrModules
           PolicyDocument:
             Version: 2012-10-17
             Statement:
               - Effect: Allow
                 Action:
-                  - codestar-connections:UseConnection
-                Resource: 
-                  - !Ref pCodestarConnectionArn
+                  - s3:Get*
+                  - s3:List*
+                Resource:
+                  - arn:aws:s3:::mr-node-modules-dev
+                  - arn:aws:s3:::mr-node-modules-dev/*
+                  - arn:aws:s3:::mr-lambda-dev
+                  - arn:aws:s3:::mr-lambda-dev/*
         - PolicyName: ECR
           PolicyDocument:
             Version: 2012-10-17
@@ -208,6 +208,8 @@ Resources:
                   - ecr:PutImage
                 Resource:
                   - !GetAtt ecrWebsiteRepo.Arn
+                  - !GetAtt ecrApiServerRepo.Arn
+                  - !GetAtt ecrTophatRepo.Arn
         - PolicyName: BASE-ECR
           PolicyDocument: 
             Version: 2012-10-17 
@@ -293,6 +295,9 @@ Resources:
           - Name: PR_EVENT
             Value: "#{variables.PR_EVENT}"
             Type: PLAINTEXT
+          - Name: ACCOUNT_ID  
+            Value: !Ref AWS::AccountId
+            Type: PLAINTEXT
 
           - Name: APP_NAME 
             Value: !Ref pAppName 
@@ -339,6 +344,9 @@ Resources:
             Type: PLAINTEXT
           - Name: PR_EVENT
             Value: "#{variables.PR_EVENT}"
+            Type: PLAINTEXT
+          - Name: ACCOUNT_ID  
+            Value: !Ref AWS::AccountId
             Type: PLAINTEXT
 
           - Name: BASE_IMAGE_REPO_NAME  
@@ -387,6 +395,9 @@ Resources:
           - Name: PR_EVENT
             Value: "#{variables.PR_EVENT}"
             Type: PLAINTEXT
+          - Name: ACCOUNT_ID  
+            Value: !Ref AWS::AccountId
+            Type: PLAINTEXT
 
           - Name: BASE_IMAGE_REPO_NAME  
             Value: base-image
@@ -433,6 +444,9 @@ Resources:
             Type: PLAINTEXT
           - Name: PR_EVENT
             Value: "#{variables.PR_EVENT}"
+            Type: PLAINTEXT
+          - Name: ACCOUNT_ID  
+            Value: !Ref AWS::AccountId
             Type: PLAINTEXT
 
           - Name: BASE_IMAGE_REPO_NAME  
@@ -510,7 +524,7 @@ Resources:
                   Action:
                     - codestar-connections:UseConnection
                   Resource: 
-                    - "*"
+                    - !Ref pCodestarConnectionArn
           - PolicyName: ecsUpdate
             PolicyDocument:
               Version: 2012-10-17
@@ -545,9 +559,6 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
-      Tags:
-        - Key: environment
-          Value: !Ref pEnvironmentTag
 
   # Artifact bucket cleanup
   DeleteObjectStorage:

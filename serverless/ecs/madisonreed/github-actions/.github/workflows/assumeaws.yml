@@ -67,10 +67,14 @@ jobs:
           sam deploy -t ephemeralenv/pipeline.yml \
           --config-env pipeline \
           --parameter-overrides \
-            "pAppName=pr${{github.event.pull_request.number}} \
+            pAppName=pr${{github.event.pull_request.number}} \
             pTriggerBranch=${GITHUB_HEAD_REF} \
-            pCodestarConnectionArn=arn:aws:codestar-connections:us-east-1:174743933558:connection/d27c0b2b-88c2-45ac-b8f4-89b0e04af6fd" \
-            pBuildSpecPath=ephemeralenv/buildspec.yml \
+            pCodestarConnectionArn=arn:aws:codestar-connections:us-east-1:174743933558:connection/d27c0b2b-88c2-45ac-b8f4-89b0e04af6fd \
+            pWebsiteBuildSpecPath=ephemeralenv/buildspec-website.yml \
+            pTophatBuildSpecPath=ephemeralenv/buildspec-tophat.yml \
+            pApiServerBuildSpecPath=ephemeralenv/buildspec-apiserver.yml \
+            pDeployBuildSpecPath=ephemeralenv/buildspec-deploy.yml \
+            pPilkoBuildSpecPath=ephemeralenv/buildspec-pilko.yml \
           --stack-name pr${{github.event.pull_request.number}}-pipeline \
           --tags CleanupDate=$(date -u -d "+10 days" '+%Y-%m-%dT%H:%M:%SZ') \
           --no-confirm-changeset \
