@@ -1,0 +1,74 @@
+version = 0.1
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.local_start_api.parameters]
+force_image_build = true
+
+
+
+[mysql.deploy.parameters]
+stack_name = "mysql-ephemeral-ecr-build"
+resolve_s3 = true
+resolve_image_repos = true
+s3_prefix = "ephemeral/"
+region = "us-east-1"
+capabilities = ["CAPABILITY_NAMED_IAM"]
+parameter_overrides = [
+    "pAppName=mysql-ephemeral",
+    "pRepoOwner=MadisonReed",
+    "pRepoName=mr",
+    "pCodestarConnectionArn=arn:aws:codestar-connections:us-east-1:174743933558:connection/d27c0b2b-88c2-45ac-b8f4-89b0e04af6fd",
+    "pTriggerBranch=c303/ephemeral/mysql",
+    "pCodeBuildComputeType=BUILD_GENERAL1_XLARGE",
+    "pDumpBucketName=db-prod-sanitized-backup",
+    "pBuildSpecPath=ephemeralenv/database/mysql/buildspec.yml"
+
+]
+confirm_changeset = true
+
+
+
+[mongo.deploy.parameters]
+stack_name = "mongo-ephemeral-ecr-build"
+resolve_s3 = true
+resolve_image_repos = true
+s3_prefix = "ephemeral/"
+region = "us-east-1"
+capabilities = ["CAPABILITY_NAMED_IAM"]
+parameter_overrides = [
+    "pAppName=mysql-ephemeral",
+    "pRepoOwner=MadisonReed",
+    "pRepoName=mr",
+    "pCodestarConnectionArn=arn:aws:codestar-connections:us-east-1:313588322221:connection/e6cec00c-84fd-4370-b355-5291eaa602bc",
+    "pTriggerBranch=c303/ephemeral/mysql",
+    "pCodeBuildComputeType=BUILD_GENERAL1_SMALL",
+    "pDumpBucketName=db-prod-sanitized-backup",
+    "pBuildSpecPath=ephemeralenv/database/mysql/buildspec.yml"
+
+]
+confirm_changeset = true
+
+
+
+
+[linter.deploy.parameters]
+stack_name = "linter-build"
+resolve_s3 = true
+resolve_image_repos = true
+s3_prefix = "linter/"
+region = "us-east-1"
+capabilities = ["CAPABILITY_NAMED_IAM"]
+parameter_overrides = [
+    "pAppName=linter",
+    "pRepoOwner=MadisonReed",
+    "pRepoName=mr",
+    "pCodestarConnectionArn=arn:aws:codestar-connections:us-east-1:174743933558:connection/d27c0b2b-88c2-45ac-b8f4-89b0e04af6fd",
+    "pTriggerBranch=c303/actions-migration",
+    "pCodeBuildComputeType=BUILD_GENERAL1_SMALL",
+    "pBuildSpecPath=buildspec-pilkolint.yml"
+
+]
+confirm_changeset = true
