@@ -1,4 +1,4 @@
-AWSTemplateFormatVersion: '2010-09-09'
+AWSTemplateFormatVersion: 2010-09-09
 Transform: 'AWS::Serverless-2016-10-31'
 Description: AWS SAM stack for deploying various S3 event triggers
 
@@ -8,6 +8,12 @@ Globals:
     Runtime: python3.9
     Handler: app.lambda_handler
     Tracing: Active
+
+Parameters:
+  pBucketName:
+    Type: String
+    Default: my-s3-bucket
+    Description: Name of S3 bucket that will be used to listen for object upload events.
 
 Resources:
   
@@ -25,17 +31,17 @@ Resources:
         - nodejs16.x
 
   # Optional Layer for Python based lambdas
-  PythonChimeLayer:
+  PythonLayer:
     Type: AWS::Serverless::LayerVersion
     Description: Layer that can be used with all Python based Lambda functions
     Metadata:
-      BuildMethod: python3.9
+      BuildMethod: python3.10
     Properties:
       LayerName: python-layer
       Description: Layer that can be used with all Python based Lambda functions
       ContentUri: dependencies/python
       CompatibleRuntimes:
-        - python3.9
+        - python3.10
   
   lambdaRole:
     Type: AWS::IAM::Role
@@ -77,40 +83,40 @@ Resources:
       Handler: app.lambda_handler
       CodeUri: mp4eventlambda/
       Events:
-        Trigger:
-          Type: CloudWatchEvent
-          Properties:
-            Pattern:
-              source:
-                - aws.s3
-              detail:
-                eventSource:
-                  - s3.amazonaws.com
-                eventName:
-                  - PutObject
-                  - CompleteMultipartUpload
-                requestParameters:
-                  bucketName:
-                    - BUCKET_REF_HERE
-                  key:
-                    - suffix: ".mp4"
+        EventBridgeTrigger:
+            Type: CloudWatchEvent
+            Properties:
+              Pattern:
+                source:
+                  - aws.s3
+                detail:
+                  eventSource:
+                    - s3.amazonaws.com
+                  eventName:
+                    - PutObject
+                    - CompleteMultipartUpload
+                  requestParameters:
+                    bucketName:
+                      - !Ref pBucketName
+                    key:
+                      - suffix: ".mp4"
 
   # Regular S3 Event Notification Trigger for all ObjectCreate events (not using eventbridge)
-  bucketEventsLambda:
-    Type: AWS::Serverless::Function
-    Properties:
-      Role: !GetAtt lambdaRole.Arn
-      Timeout: 60
-      Runtime: nodejs16.x
-      Handler: index.handler
-      Environment:
-        Variables:
-          ACCOUNT_ID: !Sub ${AWS::AccountId}
-      CodeUri: s3events/
-      Events:
-        Trigger:
-          Type: S3
-          Properties:
-            Bucket: BUCKET_REF_HERE
-            Events: 
-              - s3:ObjectCreated:*
+  # bucketEventsLambda:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     Role: !GetAtt lambdaRole.Arn
+  #     Timeout: 60
+  #     Runtime: nodejs16.x
+  #     Handler: index.handler
+  #     Environment:
+  #       Variables:
+  #         ACCOUNT_ID: !Sub ${AWS::AccountId}
+  #     CodeUri: s3events/
+  #     Events:
+  #       s3Trigger:
+  #         Type: S3
+  #         Properties:
+  #           Bucket: !Ref pBucketName
+  #           Events: 
+  #             - s3:ObjectCreated:*

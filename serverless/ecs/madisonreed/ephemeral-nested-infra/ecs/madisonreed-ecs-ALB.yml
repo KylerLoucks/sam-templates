@@ -23,16 +23,16 @@ Parameters:
   # Container Ports
   pWebsitePort:
     Type: Number
-    Default: 3000
+    Default: 80
   pApiServerPort:
     Type: Number
-    Default: 8000
+    Default: 80
   pTopHatPort:
     Type: Number
-    Default: 4000
+    Default: 80
   pSocketioPort:
     Type: Number
-    Default: 4000
+    Default: 80
   pMongoPort:
     Type: Number
     Default: 27017
@@ -1254,7 +1254,7 @@ Resources:
       HostedZoneId: !Ref pR53HostedZone # Id of the Hosted Zone created during domain registration
       RecordSets:
         # Website
-        - Name: !Sub ${pAppname}.dev.mdsnrdfd.com
+        - Name: !Sub ${pAppName}.dev.mdsnrdfd.com
           Type: A
           AliasTarget:
             HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID # Loadbalancer Id

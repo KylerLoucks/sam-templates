@@ -47,7 +47,9 @@ phases:
             pSocketIoImageUri=${TOPHAT_REPOSITORY_URI}:${IMAGE_TAG} \
             pApiServerEcrImageUri=${APISERVER_REPOSITORY_URI}:${IMAGE_TAG}" \
           --stack-name ${APP_NAME}-ephemeral \
-          --tags CleanupDate=$(date -u -d "+10 days" '+%Y-%m-%dT%H:%M:%SZ') \
+          --tags \
+              CleanupDate=$(date -u -d "+10 days" '+%Y-%m-%dT%H:%M:%SZ') \
+              ephemeral:app=${APP_NAME} \
           --no-confirm-changeset \
           --on-failure DELETE
 
