@@ -1,0 +1,144 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+
+
+Parameters:
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the Virtual Private Network (VPC)
+
+  pInstanceType:
+    Type: String
+    Default: t4g.micro
+    AllowedValues:
+      - t4g.micro # 2 vCPU, 1GB RAM (arm64 instance type)
+      - t4g.small # 2 vCPU, 2GB RAM (arm64 instance type)
+
+  pAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: Mapping to retrieve the latest Ubuntu AMI. Do not change this value.
+    Default: /aws/service/canonical/ubuntu/server/22.04/stable/current/arm64/hvm/ebs-gp2/ami-id
+    AllowedValues:
+      - /aws/service/canonical/ubuntu/server/22.04/stable/current/arm64/hvm/ebs-gp2/ami-id # arm64
+      - /aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id # x86
+
+Resources:
+
+
+  # EC2 security group
+  securityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      VpcId: !Ref pVpcId
+      GroupDescription: Control access to EC2 Instance
+      SecurityGroupIngress: 
+        - Description: Allow HTTP IPv4 IN
+          IpProtocol: tcp
+          FromPort: '80'
+          ToPort: '80'
+          CidrIp: '0.0.0.0/0'
+        - Description: 'Allow HTTPS IPv4 IN'
+          IpProtocol: tcp
+          FromPort: '443'
+          ToPort: '443'
+          CidrIp: '0.0.0.0/0'
+        - Description: 'Allow SSH IN'
+          IpProtocol: tcp
+          FromPort: '22'
+          ToPort: '22'
+          CidrIp: '0.0.0.0/0'
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackId}
+
+  ec2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+              - ec2.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+
+  ec2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties: 
+      Path: /
+      Roles: 
+        - !Ref ec2Role
+
+
+  ec2Instance:
+    Type: AWS::EC2::Instance
+    # CreationPolicy: # Used with Cfn-Signal
+    #   ResourceSignal:
+    #     Timeout: PT15M
+    Properties:
+      InstanceType: !Ref pInstanceType
+      ImageId: !Ref pAmiId
+      # KeyName: !Ref SSHKey
+      SecurityGroupIds:
+        - !Ref securityGroup
+      IamInstanceProfile: !Ref ec2InstanceProfile
+      Tags:
+        - Key: Name
+          Value: !Sub ${AWS::StackId}
+      # UserData:
+      #   Fn::Base64: !Sub |
+      #     #!/bin/bash -xe
+
+      #     # Cfn Signal:
+      #     /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackId} --resource ec2Instance --region ${AWS::Region}
+
+
+
+
+  # lambdaLayer:
+  #   Type: AWS::Serverless::LayerVersion
+  #   Description: The AWS SDK with support for Deepgram.
+  #   Metadata:
+  #     BuildMethod: nodejs20.x
+  #   Properties:
+  #     LayerName: lambda-layer
+  #     Description: Custom Authorizer Layer
+  #     ContentUri: deepgrampackages/
+  #     CompatibleRuntimes:
+  #       - nodejs20.x
+
+
+
+
+
+  # defaultLambda:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     Handler: index.handler
+  #     Runtime: nodejs20.x
+  #     CodeUri: websocketapi/stream
+  #     Layers:
+  #       - !Ref deepGramLayer
+  #     MemorySize: 256
+  #     Timeout: 120
+  #     Policies:
+  #       # Required for sending data back to clients
+  #       - Statement:
+  #         - Effect: Allow
+  #           Action:
+  #             - execute-api:ManageConnections
+  #           Resource:
+  #             - !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${webSocketApiGatewayApi}/*
+
+
+
+Outputs:
+  InstanceId:
+    Value: !Ref ec2Instance
+    Description: Instance ID
+      
