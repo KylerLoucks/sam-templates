@@ -158,6 +158,52 @@ Resources:
                   - s3:*
                 Resource:
                   - "*"
+        - PolicyName: ParamStore
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameters*
+                Resource: 
+                  - "*"
+        - PolicyName: SAMDeploy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - 
+                Sid: AllowSAMBucketAccess
+                Effect: Allow
+                Action:
+                  - s3:*
+                Resource: 
+                  - "arn:aws:s3:::aws-sam-cli-managed-default-*/*"
+              - 
+                Sid: IAMRoles
+                Effect: Allow
+                Action:
+                  - iam:*
+                Resource: arn:aws:iam::*:role/*
+              - 
+                Sid: Cloudformation
+                Effect: Allow
+                Action:
+                  - cloudformation:*
+                Resource: "*"
+              -
+                Sid: AllowResourceCreation
+                Effect: Allow
+                Action:
+                  - route53:*
+                  - ecs:*
+                  - ec2:*
+                  - elasticloadbalancing:*
+                  - apigateway:*
+                  - logs:*
+                  - cloudwatch:*
+                  - lambda:*
+                  - events:*
+                Resource: "*"
 
   codeBuildProject:
     Type: AWS::CodeBuild::Project
@@ -182,12 +228,12 @@ Resources:
         Type: CODEPIPELINE
         BuildSpec: !Ref pBuildSpecPath
       TimeoutInMinutes: 60
-      Cache:
-        Type: LOCAL
-        Modes: # You can specify one or more cache mode, 
-          - LOCAL_CUSTOM_CACHE
-          # - LOCAL_DOCKER_LAYER_CACHE
-          # - LOCAL_SOURCE_CACHE
+      # Cache:
+      #   Type: LOCAL
+      #   Modes: # You can specify one or more cache mode, 
+      #     - LOCAL_CUSTOM_CACHE
+      #     # - LOCAL_DOCKER_LAYER_CACHE
+      #     # - LOCAL_SOURCE_CACHE
 
   codeBuildLogGroup:
     Type: AWS::Logs::LogGroup
