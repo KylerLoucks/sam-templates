@@ -2,7 +2,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  Deploys Tophat, Website, API Server, Redis, Mongo and SQL ECS Fargate services, linked together through ECS Service Connect. AWS ALB used for public access to Website.
+  Deploys Tophat, Website, API Server, Redis, Mongo and SQL ECS Fargate services, linked together through ECS Service Connect
 
 Parameters:
   pAppName:
@@ -18,14 +18,14 @@ Parameters:
   pPrivateSubnetId2:
     Type: String
     Default: subnet-056e57e04fea05dd5
-  # pACMCertificateArn:
-  #   Type: String
-  #   Description: ACM cert ARN for ECS services ALB
-  #   Default: arn:aws:acm:us-east-1:174743933558:certificate/07f48ca4-3dcf-4ed7-b4df-147b3412be62
-  pR53HostedZone:
+  pR53HostedZoneId:
     Type: String
-    Description: Route 53 hosted zone
+    Description: Route 53 hosted zone ID
     Default: Z0323068C9DQS081P13G
+  pHostedZoneName:
+    Type: String
+    Description: Route53 Hosted Zone Domain Name (E.g. dev.mdsnrdfd.com)
+    Default: dev.mdsnrdfd.com
   pPublicSubnetId1:
     Type: String
     Default: subnet-0598f465e77230bd5
@@ -97,8 +97,38 @@ Parameters:
 
 Resources:
 
-  
+# # ElastiCache REDIS
+#   RedisSecurityGroup:
+#     Type: AWS::EC2::SecurityGroup
+#     Properties:
+#       GroupDescription: Allow access to Ephemeral Redis from VPC
+#       VpcId: !Ref pVpcId
+#       SecurityGroupIngress:
+#         - IpProtocol: tcp
+#           FromPort: 6379
+#           ToPort: 6379
+#           CidrIp: 10.20.0.0/16
 
+#   RedisSubnetGroup:
+#     Type: AWS::ElastiCache::SubnetGroup
+#     Properties:
+#       Description: Subnet group for Redis
+#       SubnetIds:
+#         - !Ref pPrivateSubnetId1
+
+#   RedisCluster:
+#     Type: AWS::ElastiCache::CacheCluster
+#     Properties:
+#       CacheNodeType: cache.t2.micro
+#       Engine: redis
+#       EngineVersion: 7.1
+#       NumCacheNodes: 1
+#       CacheSubnetGroupName: !Ref RedisSubnetGroup
+#       VpcSecurityGroupIds:
+#         - !Ref RedisSecurityGroup
+#       Tags:
+#         - Key: Name
+#           Value: !Sub ${pAppName}-RedisCluster
 
 
   # ==============================================
@@ -310,8 +340,12 @@ Resources:
             - Name: MONGO_PORT
               Value: !Ref pMongoPort
             
-            - Name: HOSTED_ZONE
-              Value: !Sub ${pAppName}.cloudmap.internal
+            - Name: DOMAIN_NAME
+              Value: !Sub ${pAppName}.${pHostedZoneName}
+            
+            # Hardcoded for development
+            - Name: COLOR_ADVISOR_API_URL
+              Value: !Sub coloradvisor.${pHostedZoneName}/coloradvisor/
 
           # Secrets:
           #   - Name: MYSQL_PASSWORD
@@ -398,8 +432,8 @@ Resources:
     Properties:
       ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
       TaskRoleArn: !GetAtt taskRole.Arn
-      Cpu: 4096
-      Memory: 8192
+      Cpu: 512
+      Memory: 1024
       RequiresCompatibilities:
         - FARGATE
       NetworkMode: awsvpc
@@ -407,7 +441,7 @@ Resources:
         CpuArchitecture: X86_64
         OperatingSystemFamily: LINUX
       EphemeralStorage:
-        SizeInGiB: 30
+        SizeInGiB: 80
         
       ContainerDefinitions:
         - Name: mongo
@@ -471,8 +505,12 @@ Resources:
             - Name: MYSQL_PASSWORD
               Value: root
 
-            - Name: HOSTED_ZONE
-              Value: !Sub ${pAppName}.cloudmap.internal
+            - Name: DOMAIN_NAME
+              Value: !Sub ${pAppName}.${pHostedZoneName}
+
+            # Hardcoded for development
+            - Name: COLOR_ADVISOR_API_URL
+              Value: !Sub coloradvisor.${pHostedZoneName}/coloradvisor/
 
           LogConfiguration:
             LogDriver: awslogs
@@ -529,8 +567,8 @@ Resources:
             - Name: MYSQL_PASSWORD
               Value: root
 
-            - Name: HOSTED_ZONE
-              Value: !Sub ${pAppName}.cloudmap.internal
+            - Name: DOMAIN_NAME
+              Value: !Sub ${pAppName}.${pHostedZoneName}
 
           LogConfiguration:
             LogDriver: awslogs
@@ -576,7 +614,6 @@ Resources:
             - Name: PORT
               Value: !Ref pWebsitePort
 
-
             # MONGO
             - Name: MONGO_HOST
               Value: !Sub mongo.${pAppName}.cloudmap.internal
@@ -588,6 +625,13 @@ Resources:
               Value: root
             - Name: MYSQL_PASSWORD
               Value: root
+
+            - Name: DOMAIN_NAME
+              Value: !Sub ${pAppName}.${pHostedZoneName}
+
+            # Hardcoded for development
+            - Name: COLOR_ADVISOR_API_URL
+              Value: !Sub coloradvisor.${pHostedZoneName}/coloradvisor/
 
           LogConfiguration:
             LogDriver: awslogs
@@ -944,7 +988,7 @@ Resources:
         MinimumHealthyPercent: 100
         MaximumPercent: 200
         DeploymentCircuitBreaker:
-          Enable: true
+          Enable: false
           Rollback: true
       NetworkConfiguration: 
         AwsvpcConfiguration:
@@ -1237,6 +1281,44 @@ Resources:
       TargetType: ip
       VpcId: !Ref pVpcId
 
+  cmsStageTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      Name: !Sub cmsstage-${pAppName}
+
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Port: !Ref pWebsitePort
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      Matcher:
+        HttpCode: 200-499
+      TargetType: ip
+      VpcId: !Ref pVpcId
+
+  cmsPreviewTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      Name: !Sub cmspreview-${pAppName}
+
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 3
+      Port: !Ref pWebsitePort
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      Matcher:
+        HttpCode: 200-499
+      TargetType: ip
+      VpcId: !Ref pVpcId
+
   # SOCKET IO
   socketioTg:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
@@ -1283,11 +1365,13 @@ Resources:
       Certificates: 
         - CertificateArn: !Ref ACMCertificate
       DefaultActions: 
-        - Type: "fixed-response"
-          FixedResponseConfig:
-            StatusCode: "503"
-            ContentType: "text/plain"
-            MessageBody: "You have reached an invalid domain."
+        # - Type: "fixed-response"
+        #   FixedResponseConfig:
+        #     StatusCode: "503"
+        #     ContentType: "text/plain"
+        #     MessageBody: "You have reached an invalid domain."
+        - Type: forward
+          TargetGroupArn: !Ref websiteTg
       LoadBalancerArn: !Ref ecsLoadBalancer
       Port: 443
       Protocol: HTTPS
@@ -1304,12 +1388,12 @@ Resources:
         - Field: host-header
           HostHeaderConfig:
             Values: 
-              - !Sub api.${pAppName}.dev.mdsnrdfd.com
+              - !Sub api.${pAppName}.${pHostedZoneName}
       ListenerArn: !Ref httpsListener
       Priority: 7
 
   # SOCKET IO
-  socketIORule:
+  socketIOTophatRule:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
     Properties:
       Actions:
@@ -1319,12 +1403,25 @@ Resources:
         - Field: host-header
           HostHeaderConfig:
             Values: 
-              - !Sub tophat.${pAppName}.dev.mdsnrdfd.com
+              - !Sub tophat.${pAppName}.${pHostedZoneName}
         - Field: path-pattern
           PathPatternConfig:
             Values: [/socket.io/*]
       ListenerArn: !Ref httpsListener
       Priority: 8
+
+  socketIORule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref socketioTg
+      Conditions:
+        - Field: path-pattern
+          PathPatternConfig:
+            Values: [/socket.io/*]
+      ListenerArn: !Ref httpsListener
+      Priority: 9
 
   colorbarSocketIORule:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
@@ -1336,12 +1433,42 @@ Resources:
         - Field: host-header
           HostHeaderConfig:
             Values: 
-              - !Sub colorbar.${pAppName}.dev.mdsnrdfd.com
+              - !Sub colorbar.${pAppName}.${pHostedZoneName}
         - Field: path-pattern
           PathPatternConfig:
             Values: [/socket.io/*]
       ListenerArn: !Ref httpsListener
-      Priority: 9
+      Priority: 10
+
+
+  # CMS - cmspreview and cmsstage runs as website.
+  cmsStageRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref cmsStageTg
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub cmsstage.${pAppName}.${pHostedZoneName}
+      ListenerArn: !Ref httpsListener
+      Priority: 1001
+
+  cmsPreviewRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref cmsPreviewTg
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub cmspreview.${pAppName}.${pHostedZoneName}
+      ListenerArn: !Ref httpsListener
+      Priority: 5
 
   # TOP HAT
   topHatRule:
@@ -1354,7 +1481,7 @@ Resources:
         - Field: host-header
           HostHeaderConfig:
             Values: 
-              - !Sub tophat.${pAppName}.dev.mdsnrdfd.com
+              - !Sub tophat.${pAppName}.${pHostedZoneName}
       ListenerArn: !Ref httpsListener
       Priority: 12
 
@@ -1369,7 +1496,7 @@ Resources:
         - Field: host-header
           HostHeaderConfig:
             Values: 
-              - !Sub www.${pAppName}.dev.mdsnrdfd.com
+              - !Sub www.${pAppName}.${pHostedZoneName}
       ListenerArn: !Ref httpsListener
       Priority: 18
 
@@ -1377,13 +1504,13 @@ Resources:
   ACMCertificate:
     Type: AWS::CertificateManager::Certificate
     Properties:
-      DomainName: !Sub ${pAppName}.dev.mdsnrdfd.com
+      DomainName: !Sub ${pAppName}.${pHostedZoneName}
       SubjectAlternativeNames:
-        - !Sub ${pAppName}.dev.mdsnrdfd.com
-        - !Sub "*.${pAppName}.dev.mdsnrdfd.com"
+        - !Sub ${pAppName}.${pHostedZoneName}
+        - !Sub "*.${pAppName}.${pHostedZoneName}"
       DomainValidationOptions:
-        - DomainName: !Sub ${pAppName}.dev.mdsnrdfd.com
-          HostedZoneId: !Ref pR53HostedZone
+        - DomainName: !Sub ${pAppName}.${pHostedZoneName}
+          HostedZoneId: !Ref pR53HostedZoneId
       ValidationMethod: DNS
 
   ecsLoadBalancer:
@@ -1403,55 +1530,67 @@ Resources:
   route53Records:
     Type: AWS::Route53::RecordSetGroup
     Properties:
-      HostedZoneId: !Ref pR53HostedZone # Id of the Hosted Zone created during domain registration
+      HostedZoneId: !Ref pR53HostedZoneId # Id of the Hosted Zone created during domain registration
       RecordSets:
         # Website
-        - Name: !Sub www.${pAppName}.dev.mdsnrdfd.com
+        - Name: !Sub www.${pAppName}.${pHostedZoneName}
           Type: A
           AliasTarget:
             HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID # Loadbalancer Id
             DNSName: !GetAtt ecsLoadBalancer.DNSName
         # Website
-        - Name: !Sub ${pAppName}.dev.mdsnrdfd.com
+        - Name: !Sub ${pAppName}.${pHostedZoneName}
+          Type: A
+          AliasTarget:
+            HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID # Loadbalancer Id
+            DNSName: !GetAtt ecsLoadBalancer.DNSName
+
+        # CMS
+        - Name: !Sub cmspreview.${pAppName}.${pHostedZoneName}
+          Type: A
+          AliasTarget:
+            HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID # Loadbalancer Id
+            DNSName: !GetAtt ecsLoadBalancer.DNSName
+        - Name: !Sub cmsstage.${pAppName}.${pHostedZoneName}
           Type: A
           AliasTarget:
             HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID # Loadbalancer Id
             DNSName: !GetAtt ecsLoadBalancer.DNSName
 
         # Tophat
-        - Name: !Sub tophat.${pAppName}.dev.mdsnrdfd.com
+        - Name: !Sub tophat.${pAppName}.${pHostedZoneName}
           Type: A
           AliasTarget:
             HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID
             DNSName: !GetAtt ecsLoadBalancer.DNSName
         
         # Api Server
-        - Name: !Sub api.${pAppName}.dev.mdsnrdfd.com
+        - Name: !Sub api.${pAppName}.${pHostedZoneName}
           Type: A
           AliasTarget:
             HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID
             DNSName: !GetAtt ecsLoadBalancer.DNSName
 
         # Colorbar
-        - Name: !Sub colorbar.${pAppName}.dev.mdsnrdfd.com
+        - Name: !Sub colorbar.${pAppName}.${pHostedZoneName}
           Type: A
           AliasTarget:
             HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID
             DNSName: !GetAtt ecsLoadBalancer.DNSName
 
-        # # mongo
-        # - Name: !Sub mongo-${pAppName}.dev.mdsnrdfd.com
-        #   Type: A
-        #   AliasTarget:
-        #     HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID
-        #     DNSName: !GetAtt ecsLoadBalancer.DNSName
+        # Urm
+        - Name: !Sub urm.${pAppName}.${pHostedZoneName}
+          Type: A
+          AliasTarget:
+            HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID
+            DNSName: !GetAtt ecsLoadBalancer.DNSName
 
-        # # redis
-        # - Name: !Sub redis-${pAppName}.dev.mdsnrdfd.com
-        #   Type: A
-        #   AliasTarget:
-        #     HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID
-        #     DNSName: !GetAtt ecsLoadBalancer.DNSName
+        # Onq
+        - Name: !Sub onq.${pAppName}.${pHostedZoneName}
+          Type: A
+          AliasTarget:
+            HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID
+            DNSName: !GetAtt ecsLoadBalancer.DNSName
 
   # ==================================================
   # =============== Connection Tester! ===============
@@ -1596,6 +1735,6 @@ Resources:
 Outputs:
   websiteUrl:
     Description: Application URL endpoint
-    Value: !Sub http://madisonreed.${pAppName}.cloudmap.internal
+    Value: !Sub www.${pAppName}.${pHostedZoneName} # http://madisonreed.${pAppName}.cloudmap.internal
 
   

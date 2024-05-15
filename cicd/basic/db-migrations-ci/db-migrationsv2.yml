@@ -1,17 +1,30 @@
 AWSTemplateFormatVersion: 2010-09-09
 Transform: AWS::Serverless-2016-10-31
-Description: > 
-  Testing PilkoLinter on source revision
+Description: >
+  Github V2 Source action, perform migrateall.sh for MySQL/Mongo databases
 
 
 Parameters:
 
 
-
   pAppName:
     Type: String
     Description: Used to name CI/CD resources.
-    Default: myapp
+    Default: db-migrations
+
+  pDefaultMigrationEnv:
+    Type: String
+    Description: Migration ENV to run migrations against
+    Default: aws_new_staging
+
+  # CodeBuild Networking (Required for RDS access)
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the Virtual Private Network (VPC)
+  pPrivateSubnetId1:
+    Type: String
+  pPrivateSubnetId2:
+    Type: String
 
   # CodePipeline
   # GitHub Repo
@@ -22,13 +35,13 @@ Parameters:
     Default: MadisonReed
 
   pRepoName:
-    Type: String 
+    Type: String
     Default: mr
 
   pCodestarConnectionArn:
     Type: String
     Description: ARN of the CodeStar Connection.
-    Default: arn:aws:codestar-connections:us-east-1:313588322221:connection/e6cec00c-84fd-4370-b355-5291eaa602bc
+    Default: arn:aws:codestar-connections:us-east-1:174743933558:connection/d27c0b2b-88c2-45ac-b8f4-89b0e04af6fd
 
   pTriggerBranch:
     Type: String
@@ -50,12 +63,23 @@ Parameters:
   pCodeBuildImage:
     Type: String
     Description: Base image used by CodeBuild
-    Default: aws/codebuild/standard:7.0
+    Default: aws/codebuild/amazonlinux2-x86_64-standard:4.0 # 4.0 for Node 16
 
   pBuildSpecPath:
     Type: String
     Description: Path and name for the Buildspec in repo
     Default: buildspec.yml
+
+  # Env var requirements for CodeBuild
+  pMongoHost:
+    Type: String
+    Description: URL of MongoDB Host to run migrations against
+    Default: mongo
+
+  pMySQLSecretName:
+    Type: String
+    Description: ID of the AWS secret that contains 'username' and 'password' for MySQL RDS DB
+    Default: rds!db-bbfcc315-bd36-4f2e-a67c-34e236665b09
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -101,6 +125,7 @@ Resources:
 
 
 
+
   # IAM Role - CodeBuild
   codeBuildServiceRole:
     Type: AWS::IAM::Role
@@ -138,8 +163,8 @@ Resources:
                   - s3:GetObjectVersion
                   - s3:PutObject
                 Resource:
-                  - !Sub "arn:aws:s3:::${artifactBucket}"
-                  - !Sub "arn:aws:s3:::${artifactBucket}/*"
+                  - !Sub arn:aws:s3:::${artifactBucket}
+                  - !Sub arn:aws:s3:::${artifactBucket}/*
         - PolicyName: GitCloneConnection
           PolicyDocument:
             Version: 2012-10-17
@@ -167,43 +192,40 @@ Resources:
                   - ssm:GetParameters*
                 Resource: 
                   - "*"
-        - PolicyName: SAMDeploy
+        - PolicyName: SecretsManager
           PolicyDocument:
             Version: 2012-10-17
             Statement:
-              - 
-                Sid: AllowSAMBucketAccess
-                Effect: Allow
+              - Effect: Allow
                 Action:
-                  - s3:*
+                  - secretsmanager:GetSecretValue
                 Resource: 
-                  - "arn:aws:s3:::aws-sam-cli-managed-default-*/*"
-              - 
-                Sid: IAMRoles
-                Effect: Allow
+                  - arn:aws:secretsmanager:*:*:secret:*
+        # Required permissions to place CodeBuild in the VPC
+        - PolicyName: SecurityGroupAttachment
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
                 Action:
-                  - iam:*
-                Resource: arn:aws:iam::*:role/*
-              - 
-                Sid: Cloudformation
-                Effect: Allow
-                Action:
-                  - cloudformation:*
-                Resource: "*"
-              -
-                Sid: AllowResourceCreation
-                Effect: Allow
-                Action:
-                  - route53:*
-                  - ecs:*
-                  - ec2:*
-                  - elasticloadbalancing:*
-                  - apigateway:*
-                  - logs:*
-                  - cloudwatch:*
-                  - lambda:*
-                  - events:*
-                Resource: "*"
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeDhcpOptions
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeVpcs
+                  - ec2:CreateNetworkInterfacePermission
+                Resource: 
+                  - "*"
+
+
+  codeBuildSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: db migrations codebuild security group
+      VpcId: !Ref pVpcId
+
 
   codeBuildProject:
     Type: AWS::CodeBuild::Project
@@ -218,77 +240,98 @@ Resources:
         Type: LINUX_CONTAINER
         PrivilegedMode: true
         EnvironmentVariables:
-          - Name: ACCOUNT_ID 
-            Value: !Ref AWS::AccountId 
+          - Name: ACCOUNT_ID
+            Value: !Ref AWS::AccountId
             Type: PLAINTEXT
-          
+          - Name: MONGO_HOST
+            Value: !Ref pMongoHost
+            Type: PLAINTEXT
 
+          # MySQL DB Envs. (See mr_modules/config/<db-name>_database.json for env vars naming) 
+          - Name: DB_USERNAME
+            Value: !Sub ${pMySQLSecretName}:username
+            Type: SECRETS_MANAGER
+          - Name: DB_PASSWORD
+            Value: !Sub ${pMySQLSecretName}:password
+            Type: SECRETS_MANAGER
+
+      # VPC required to access RDS
+      VpcConfig:
+        VpcId: !Ref pVpcId
+        Subnets: 
+          - !Ref pPrivateSubnetId1
+          - !Ref pPrivateSubnetId2
+        SecurityGroupIds:
+          - !GetAtt codeBuildSecurityGroup.GroupId
       ServiceRole: !GetAtt codeBuildServiceRole.Arn
       Source:
         Type: CODEPIPELINE
         BuildSpec: !Ref pBuildSpecPath
-      TimeoutInMinutes: 60
-      # Cache:
-      #   Type: LOCAL
-      #   Modes: # You can specify one or more cache mode, 
-      #     - LOCAL_CUSTOM_CACHE
-      #     # - LOCAL_DOCKER_LAYER_CACHE
-      #     # - LOCAL_SOURCE_CACHE
+      TimeoutInMinutes: 480
 
   codeBuildLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub "/aws/codebuild/${codeBuildProject}"
       RetentionInDays: 7
-      
-  # IAM Role - CodePipeline    
+
+  # IAM Role - CodePipeline
 
   codePipelineServiceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: !Sub ${pAppName}-pipeline-role
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - codepipeline.amazonaws.com
-            Action:
-              - sts:AssumeRole
-      Policies:
-        - PolicyName: s3Artifacts
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - s3:PutObject
-                  - s3:GetObject
-                  - s3:GetObjectVersion
-                Resource: 
-                  - !Sub "arn:aws:s3:::${artifactBucket}"
-                  - !Sub "arn:aws:s3:::${artifactBucket}/*"
-        - PolicyName: codeBuildTrigger
-          PolicyDocument:
-            Version: 2012-10-17
-            Statement:
-              - Effect: Allow
-                Action:
-                  - codebuild:BatchGetBuilds
-                  - codebuild:StartBuild
-                  - codebuild:BatchGetBuildBatches
-                  - codebuild:StartBuildBatch
-                Resource: 
-                  - !GetAtt codeBuildProject.Arn
-              - Effect: Allow
-                Action:
-                  - codestar-connections:UseConnection
-                Resource: 
-                  - "*"
-          
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: !Sub ${pAppName}-pipeline-role
+        AssumeRolePolicyDocument:
+          Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - codepipeline.amazonaws.com
+              Action:
+                - sts:AssumeRole
+        Policies:
+          - PolicyName: s3Artifacts
+            PolicyDocument:
+              Version: 2012-10-17
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - s3:PutObject
+                    - s3:GetObject
+                    - s3:GetObjectVersion
+                  Resource:
+                    - !Sub "arn:aws:s3:::${artifactBucket}"
+                    - !Sub "arn:aws:s3:::${artifactBucket}/*"
+          - PolicyName: codeBuildTrigger
+            PolicyDocument:
+              Version: 2012-10-17
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - codebuild:BatchGetBuilds
+                    - codebuild:StartBuild
+                    - codebuild:BatchGetBuildBatches
+                    - codebuild:StartBuildBatch
+                  Resource:
+                    - !GetAtt codeBuildProject.Arn
+                - Effect: Allow
+                  Action:
+                    - codestar-connections:UseConnection
+                  Resource:
+                    - "*"
+          - PolicyName: iamPassRole
+            PolicyDocument:
+              Version: 2012-10-17
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - iam:PassRole
+                  Resource:
+                    - "*"
 
-      
+
+
  # CodePipeline
 
   artifactBucket:
@@ -301,7 +344,6 @@ Resources:
         ServerSideEncryptionConfiguration:
           - ServerSideEncryptionByDefault:
               SSEAlgorithm: AES256
-
   # Artifact bucket cleanup
   DeleteObjectStorage:
     Type: Custom::S3DeleteObjectsLambda
@@ -331,22 +373,22 @@ Resources:
                 Sid: AllowLogging
                 Effect: Allow
                 Action:
-                  - "logs:CreateLogGroup"
-                  - "logs:CreateLogStream"
-                  - "logs:PutLogEvents"
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
                 Resource: "*"
               -
                 Sid: DeleteBucketObjects
                 Effect: Allow
                 Action:
-                  - "s3:ListBucket"
-                  - "s3:ListBucketVersions"
-                  - "s3:GetObject"
-                  - "s3:DeleteObject"
-                  - "s3:DeleteObjectVersion"
+                  - s3:ListBucket
+                  - s3:ListBucketVersions
+                  - s3:GetObject
+                  - s3:DeleteObject
+                  - s3:DeleteObjectVersion
                 Resource:
-                  - !Sub "arn:aws:s3:::${artifactBucket}"
-                  - !Sub "arn:aws:s3:::${artifactBucket}/*"
+                  - !Sub arn:aws:s3:::${artifactBucket}
+                  - !Sub arn:aws:s3:::${artifactBucket}/*
 
   DeleteS3ObjectsFunction:
     Type: AWS::Lambda::Function
@@ -358,7 +400,7 @@ Resources:
       Timeout: 120
       Code:
         ZipFile: |
-          import os 
+          import os
           import json
           import cfnresponse
           import boto3
@@ -387,11 +429,11 @@ Resources:
 
             cfnresponse.send(event, context, result, {})
 
-          def delete_objects(bucket):        
+          def delete_objects(bucket):
             bucket.object_versions.delete()
             bucket.objects.all().delete()
             return cfnresponse.SUCCESS
-            
+
   cleanupLambdaLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
@@ -408,11 +450,12 @@ Resources:
       RoleArn: !GetAtt codePipelineServiceRole.Arn
       PipelineType: V2
       RestartExecutionOnUpdate: false
-      # Variables:
-      #   - Name: PR_ID
-      #     Description: Pull Request ID
-      #   - Name: PR_EVENT
-      #     Description: 'Type of PR event. Valid values: [opened, synchronize, reopened, closed]'
+      Variables:
+        - Name: MIGRATION_ENV
+          Description: "'environment' to perform migrations against. (ex: aws_new_staging)"
+          DefaultValue: !Ref pDefaultMigrationEnv
+        - Name: POST_MIGRATION
+          Description: 'Valid values: [ true | false]'
       Stages:
         - Name: Source
           Actions:
@@ -427,7 +470,7 @@ Resources:
                 FullRepositoryId: !Sub ${pRepoOwner}/${pRepoName}
                 ConnectionArn: !Ref pCodestarConnectionArn
                 BranchName: !Ref pTriggerBranch
-                DetectChanges: false
+                DetectChanges: false # automatically start pipeline when a new commit is made on the configured repository and branch.
                 OutputArtifactFormat: CODEBUILD_CLONE_REF # Code Build Git Full Clone
               OutputArtifacts:
                 - Name: SourceArtifact
@@ -441,6 +484,11 @@ Resources:
                 Version: 1
               Configuration:
                 ProjectName: !Ref codeBuildProject
+                EnvironmentVariables: >
+                  [
+                    {"name": "POST_MIGRATION", "value": "#{variables.POST_MIGRATION}", "type": "PLAINTEXT"},
+                    {"name": "MIGRATION_ENV", "value": "#{variables.MIGRATION_ENV}", "type": "PLAINTEXT"}
+                  ]
               InputArtifacts:
                 - Name: SourceArtifact
               OutputArtifacts:
@@ -451,4 +499,4 @@ Outputs:
 
   Version:
     Description: Template Version
-    Value: ephemeral-pipeline-build-db-dump-0.1
+    Value: db-migrations-0.1

@@ -1,6 +1,6 @@
 AWSTemplateFormatVersion: 2010-09-09
 Transform: AWS::Serverless-2016-10-31
-Description: > 
+Description: >
   Github V2 Source action, Build ECR image for MySQL/Mongo dump files stored in S3.
 
 
@@ -22,7 +22,7 @@ Parameters:
     Default: MadisonReed
 
   pRepoName:
-    Type: String 
+    Type: String
     Default: mr
 
   pCodestarConnectionArn:
@@ -97,7 +97,7 @@ Metadata:
       pBuildSpecPath:
         default: Buildspec file path
       pEnvironmentTag:
-        default: Environment Tag  
+        default: Environment Tag
 
     ParameterGroups:
       - Label:
@@ -198,7 +198,7 @@ Resources:
               - Effect: Allow
                 Action:
                   - codestar-connections:UseConnection
-                Resource: 
+                Resource:
                   - !Ref pCodestarConnectionArn
         - PolicyName: ECR
           PolicyDocument:
@@ -254,14 +254,14 @@ Resources:
         Type: LINUX_CONTAINER
         PrivilegedMode: true
         EnvironmentVariables:
-          - Name: ACCOUNT_ID 
-            Value: !Ref AWS::AccountId 
+          - Name: ACCOUNT_ID
+            Value: !Ref AWS::AccountId
             Type: PLAINTEXT
 
           - Name: REPOSITORY_URI
             Value: !GetAtt ecrRepo.RepositoryUri
             Type: PLAINTEXT
-          
+
           - Name: DB_DUMP_BUCKET
             Value: !Ref pDumpBucketName
             Type: PLAINTEXT
@@ -277,8 +277,8 @@ Resources:
     Properties:
       LogGroupName: !Sub "/aws/codebuild/${codeBuildProject}"
       RetentionInDays: 7
-      
-  # IAM Role - CodePipeline    
+
+  # IAM Role - CodePipeline
 
   codePipelineServiceRole:
       Type: AWS::IAM::Role
@@ -303,7 +303,7 @@ Resources:
                     - s3:PutObject
                     - s3:GetObject
                     - s3:GetObjectVersion
-                  Resource: 
+                  Resource:
                     - !Sub "arn:aws:s3:::${artifactBucket}"
                     - !Sub "arn:aws:s3:::${artifactBucket}/*"
           - PolicyName: codeBuildTrigger
@@ -316,12 +316,12 @@ Resources:
                     - codebuild:StartBuild
                     - codebuild:BatchGetBuildBatches
                     - codebuild:StartBuildBatch
-                  Resource: 
+                  Resource:
                     - !GetAtt codeBuildProject.Arn
                 - Effect: Allow
                   Action:
                     - codestar-connections:UseConnection
-                  Resource: 
+                  Resource:
                     - "*"
           - PolicyName: ecsUpdate
             PolicyDocument:
@@ -340,11 +340,11 @@ Resources:
                 - Effect: Allow
                   Action:
                     - iam:PassRole
-                  Resource: 
+                  Resource:
                     - "*"
-          
 
-      
+
+
  # CodePipeline
 
   artifactBucket:
@@ -417,7 +417,7 @@ Resources:
       Timeout: 120
       Code:
         ZipFile: |
-          import os 
+          import os
           import json
           import cfnresponse
           import boto3
@@ -446,11 +446,11 @@ Resources:
 
             cfnresponse.send(event, context, result, {})
 
-          def delete_objects(bucket):        
+          def delete_objects(bucket):
             bucket.object_versions.delete()
             bucket.objects.all().delete()
             return cfnresponse.SUCCESS
-            
+
   cleanupLambdaLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
