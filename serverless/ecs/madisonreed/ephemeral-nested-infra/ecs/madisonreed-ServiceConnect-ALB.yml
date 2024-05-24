@@ -94,6 +94,18 @@ Parameters:
       e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
     Default: 174743933558.dkr.ecr.us-east-1.amazonaws.com/tophat
 
+  pMysqlEcrImageUri:
+    Type: String
+    Description: > 
+      URI of the ECR image used for MySQL Task Definition. 
+      e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
+
+  pMongoEcrImageUri:
+    Type: String
+    Description: > 
+      URI of the ECR image used for Mongo Task Definition. 
+      e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
+
 
 Resources:
 
@@ -291,6 +303,7 @@ Resources:
   websiteTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
+      Family: !Sub ${pAppName}-website
       ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
       TaskRoleArn: !GetAtt taskRole.Arn
       Cpu: 4096
@@ -361,6 +374,7 @@ Resources:
   redisTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
+      Family: !Sub ${pAppName}-redis
       ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
       TaskRoleArn: !GetAtt taskRole.Arn
       Cpu: 4096
@@ -394,6 +408,7 @@ Resources:
   mysqlTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
+      Family: !Sub ${pAppName}-mysql
       ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
       TaskRoleArn: !GetAtt taskRole.Arn
       Cpu: 4096
@@ -410,7 +425,7 @@ Resources:
       ContainerDefinitions:
         - Name: mysql
           # changes to the Image will cause a new deployment to the ECS service, replacing the old deployment.
-          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/mysql-ephemeral
+          Image: !Ref pMysqlEcrImageUri
           PortMappings:
             - Name: mysql
               ContainerPort: !Ref pMySQLPort
@@ -430,6 +445,7 @@ Resources:
   mongoTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
+      Family: !Sub ${pAppName}-mongo
       ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
       TaskRoleArn: !GetAtt taskRole.Arn
       Cpu: 512
@@ -446,7 +462,7 @@ Resources:
       ContainerDefinitions:
         - Name: mongo
           # changes to the Image will cause a new deployment to the ECS service, replacing the old deployment.
-          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/mongo-ephemeral
+          Image: !Ref pMongoEcrImageUri
           PortMappings:
             - Name: mongo
               ContainerPort: !Ref pMongoPort
@@ -462,6 +478,7 @@ Resources:
   apiServerTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
+      Family: !Sub ${pAppName}-apiserver
       ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
       TaskRoleArn: !GetAtt taskRole.Arn
       Cpu: 512
@@ -523,6 +540,7 @@ Resources:
   topHatTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
+      Family: !Sub ${pAppName}-tophat
       ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
       TaskRoleArn: !GetAtt taskRole.Arn
       Cpu: 512
@@ -581,6 +599,7 @@ Resources:
   socketioTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
+      Family: !Sub ${pAppName}-socketio
       ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
       TaskRoleArn: !GetAtt taskRole.Arn
       Cpu: 512

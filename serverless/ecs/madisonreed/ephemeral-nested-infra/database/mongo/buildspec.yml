@@ -1,0 +1,92 @@
+version: 0.2
+env:
+  git-credential-helper: yes
+  exported-variables:
+    - IMAGE_TAG
+
+phases:
+  install:
+    commands:
+      - docker --version
+  pre_build:
+    commands:
+
+      - echo Logging into ECR...
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+
+      - BACKUP_NAME="mongo5Sanitized"
+      - RESTORE_DATE=$(date --date='1 days ago' "+%Y%m%d")
+      - BACKUP_NAME_DATE="${BACKUP_NAME}_${RESTORE_DATE}"
+      - IMAGE_TAG=${RESTORE_DATE:-latest}
+
+        # List backups sorted by $RESTORE_DATE. e.g. All backups for 20180206
+      - BACKUPS=$(aws s3 ls s3://$DB_DUMP_BUCKET/"${BACKUP_NAME_DATE}" | sort -k1 -r | awk {'print $4'})
+      - BACKUP_NUM=$(echo "$BACKUPS" | wc -w)
+
+      - | 
+        if [ "$BACKUP_NUM" == 0 ]; then
+          echo "No mongo backups were found for $BACKUP_NAME_DATE. Please check that the jenkins mongo backup job ran"
+          RESTORE_DATE=$(date -v-1d "+%Y%m%d")
+          BACKUP_NAME_DATE="${BACKUP_NAME}_${RESTORE_DATE}"
+          BACKUPS=$(aws s3 ls s3://$DB_DUMP_BUCKET/"${BACKUP_NAME_DATE}" | sort -k1 -r | awk {'print $4'})
+          BACKUP_NUM=$(echo "$BACKUPS" | wc -w)
+          if [ "$BACKUP_NUM" == 0 ]; then
+              echo "No mongo backups were found for $BACKUP_NAME_DATE. Please check that the jenkins mongo backup job ran"
+              exit 1
+          fi
+        fi
+        
+      - BACKUPS=$(aws s3 ls s3://$DB_DUMP_BUCKET/"${BACKUP_NAME_DATE}" | sort -k1 -r | awk '{print $4'})
+      - BACKUP_NUM=$(echo "$BACKUPS" | wc -w)
+      
+      - | 
+        if [ "$BACKUP_NUM" == 0 ]; then
+          echo "No mongo backups were found for $BACKUP_NAME_DATE. Please check that the jenkins mongo backup job ran"
+          RESTORE_DATE=$(date -v-1d "+%Y%m%d")
+          BACKUP_NAME_DATE="${BACKUP_NAME}_${RESTORE_DATE}"
+          BACKUPS=$(aws s3 ls s3://$DB_DUMP_BUCKET/"${BACKUP_NAME_DATE}" | sort -k1 -r | awk '{print $4'})
+          BACKUP_NUM=$(echo "$BACKUPS" | wc -w)
+          if [ "$BACKUP_NUM" == 0 ]; then
+              echo "No mongo backups were found for $BACKUP_NAME_DATE. Please check that the jenkins mongo backup job ran"
+              exit 1
+          fi
+        fi
+
+      - BACKUP_DB_LIST=$(aws s3 ls s3://$DB_DUMP_BUCKET/"${BACKUP_NAME_DATE}" | awk '{print $4'} | cut -d_ -f 3 | sort | uniq)
+      
+      - |
+        if [ -z "${BACKUP_DB_LIST}" ]; then
+          echo "Could not retrieve list of db backups."
+          exit 1
+        fi
+
+      - echo $BACKUP_DB_LIST
+      - |
+        echo "${BACKUP_DB_LIST}" | while read db ; do
+          for FILE in $BACKUPS; do
+              if echo "$FILE" | grep -q "$db"; then
+                  echo "Downloading $FILE"
+                  aws s3 cp "s3://${DB_DUMP_BUCKET}/${FILE}" ephemeralenv/database/mongo/dumpfiles/
+                  break
+              fi
+            done
+          done
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo Building the Docker images...
+      - echo Building MONGO...
+      - cd ephemeralenv/database/mongo
+      - docker build -f Dockerfile-mongo --no-cache --build-arg MONGO_DUMP_DIR=dumpfiles -t $REPOSITORY_URI:$IMAGE_TAG .
+      - docker tag $REPOSITORY_URI:$IMAGE_TAG $REPOSITORY_URI:latest
+
+
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing MONGO Docker image...
+      - docker images
+      - docker push $REPOSITORY_URI:$IMAGE_TAG
+      - docker push $REPOSITORY_URI:latest
+
+ 

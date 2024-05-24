@@ -1,0 +1,48 @@
+version: 0.2
+env:
+  git-credential-helper: yes
+  exported-variables:
+    - IMAGE_TAG
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 16
+    commands:
+      - docker --version
+  pre_build:
+    commands:
+      - echo Copying mysql dump file from S3...
+
+        # AWS S3 details
+      - S3_FILE=$(aws s3 ls $DB_DUMP_BUCKET --recursive | sort | tail -n 1 | awk '{print $4}')  # dbs_20240220-1529_mysql.tar
+
+        # Download the dump file from S3
+      - aws s3 cp s3://$DB_DUMP_BUCKET/$S3_FILE /tmp/dbs_mysql.tar
+
+        # Extract the dump file
+      - tar -xf /tmp/dbs_mysql.tar -C /tmp
+      # Move and rename the .dmp file to the ephemeralenv mysql folder as a .sql file
+      - mv /tmp/*.dmp ephemeralenv/database/mysql/dump.sql
+
+      - echo Logging into ECR...
+      - $(aws ecr get-login --no-include-email --region $AWS_DEFAULT_REGION)
+      - FILE_DATE=${S3_FILE:4:8}
+      - IMAGE_TAG=${FILE_DATE:-latest}
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo Building the Docker images...
+      - echo Building MYSQL...
+      - docker build -f ephemeralenv/database/mysql/Dockerfile-mysql --build-arg MYSQL_DATABASES="inventory tophat magento" -t $REPOSITORY_URI:$IMAGE_TAG ephemeralenv/database/mysql
+      - docker tag $REPOSITORY_URI:$IMAGE_TAG $REPOSITORY_URI:latest
+
+
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing MYSQL Docker image...
+      - docker push $REPOSITORY_URI:$IMAGE_TAG
+      - docker push $REPOSITORY_URI:latest
+
+ 

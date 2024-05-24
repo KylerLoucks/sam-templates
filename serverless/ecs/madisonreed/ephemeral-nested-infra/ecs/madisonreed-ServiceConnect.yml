@@ -2,7 +2,7 @@
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  Deploys Tophat, Website, API Server, Redis, Mongo and SQL ECS Fargate services, linked together through ECS Service Connect
+  Deploys ECS Fargate services, linked together through ECS Service Connect
 
 Parameters:
   pAppName:
@@ -20,16 +20,7 @@ Parameters:
   # Container Ports
   pWebsitePort:
     Type: Number
-    Default: 3000
-  pApiServerPort:
-    Type: Number
-    Default: 8000
-  pTopHatPort:
-    Type: Number
-    Default: 4000
-  pSocketioPort:
-    Type: Number
-    Default: 4000
+    Default: 80
   pMongoPort:
     Type: Number
     Default: 27017
@@ -39,38 +30,15 @@ Parameters:
   pMySQLPort:
     Type: Number
     Default: 3306
-
-  # # Secrets
-  # pMySQLSecretArn:
-  #   Type: String
-  #   Description: >
-  #     Arn of the AWS Secrets Manager secret to use for MySQL container username and password
-  #     NOTE: the secret name cannot contain characters other than: a-zA-Z0-9_.-
-  #     NOTE2: the secret key/value must be 'username' and 'password'
+  pPostgresPort:
+    Type: Number
+    Default: 5432
 
   # ECR repos
   pWebsiteEcrImageUri:
     Type: String
     Description: > 
       URI of the ECR image used for Website Task Definition. 
-      e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
-
-  pTophatEcrImageUri:
-    Type: String
-    Description: > 
-      URI of the ECR image used for Tophat Task Definition. 
-      e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
-
-  pSocketIoEcrImageUri:
-    Type: String
-    Description: > 
-      URI of the ECR image used for Socket IO Task Definition. 
-      e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
-
-  pApiServerEcrImageUri:
-    Type: String
-    Description: > 
-      URI of the ECR image used for API Server Task Definition. 
       e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
 
 
@@ -84,46 +52,44 @@ Resources:
   # ================= LOG GROUPS =================
   # ==============================================
 
-  redisLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub /ecs/redis/${pAppName}
-      RetentionInDays: 7
-
   websiteLogGroup:
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub /ecs/website/${pAppName}
       RetentionInDays: 7
 
-  apiServerLogGroup:
+  redisLogGroup:
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub /ecs/apiserver/${pAppName}
+      LogGroupName: !Sub /ecs/redis/${pAppName}
       RetentionInDays: 7
 
-  topHatLogGroup:
+  postgresLogGroup:
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub /ecs/tophat/${pAppName}
-      RetentionInDays: 7
-
-  socketioLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub /ecs/socketio/${pAppName}
-      RetentionInDays: 7
-
-  mongoLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub /ecs/mongo/${pAppName}
+      LogGroupName: !Sub /ecs/postgres/${pAppName}
       RetentionInDays: 7
 
   mysqlLogGroup:
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub /ecs/mysql/${pAppName}
+      RetentionInDays: 7
+
+  mongoLogGroup:
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/mongo/${pAppName}
       RetentionInDays: 7
 
   # ===================================================
@@ -155,7 +121,6 @@ Resources:
       FromPort: -1    # Allows all ports
       ToPort: -1      # Allows all ports
       CidrIp: 10.20.0.0/16  # Allow traffic from VPC
-
 
 
   # ECS task role
@@ -200,19 +165,6 @@ Resources:
               Service:
                 - ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
-      Policies:
-        - PolicyName: Secrets
-          PolicyDocument: 
-            Version: 2012-10-17
-            Statement:
-              - Sid: GetSecrets
-                Action: secretsmanager:GetSecretValue
-                Effect: Allow
-                Resource: arn:aws:secretsmanager:*:*:secret:*
-              - Sid: GetSSMParams
-                Action: ssm:GetParameters
-                Effect: Allow
-                Resource: arn:aws:ssm:*:*:parameter/*
       # Allows pulling ECR image and pushing logs to CW
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
@@ -264,18 +216,28 @@ Resources:
               Value: root
             - Name: MYSQL_PASSWORD
               Value: root
+            - Name: MYSQL_DB
+              Value: mysql
+
+            # POSTGRES
+            - Name: POSTGRES_HOST
+              Value: !Sub postgres.${pAppName}.cloudmap.internal
+            - Name: POSTGRES_PORT
+              Value: !Ref pPostgresPort
+            - Name: POSTGRES_USER
+              Value: postgres
+            - Name: POSTGRES_PASSWORD
+              Value: postgres
+            - Name: POSTGRES_DB
+              Value: postgres
 
             # MONGO
             - Name: MONGO_HOST
               Value: !Sub mongo.${pAppName}.cloudmap.internal
             - Name: MONGO_PORT
               Value: !Ref pMongoPort
-            
 
 
-          # Secrets:
-          #   - Name: MYSQL_PASSWORD
-          #     ValueFrom: !Sub "${pMySQLSecretArn}:password::"
           LogConfiguration:
             LogDriver: awslogs
             Options:
@@ -303,7 +265,7 @@ Resources:
       ContainerDefinitions:
         - Name: redis
           # changes to the Image will cause a new deployment to the ECS service, replacing the old deployment.
-          Image: redis:7.0.15
+          Image: redis:latest
           PortMappings:
             - Name: redis
               ContainerPort: !Ref pRedisPort
@@ -336,18 +298,60 @@ Resources:
       ContainerDefinitions:
         - Name: mysql
           # changes to the Image will cause a new deployment to the ECS service, replacing the old deployment.
-          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/mysql-ephemeral
+          Image: 174743933558.dkr.ecr.us-east-1.amazonaws.com/mysql-ephemeral
           PortMappings:
             - Name: mysql
               ContainerPort: !Ref pMySQLPort
               Protocol: tcp # tcp | udp
           Environment:
+            # Commented out when using a docker image that has a database already defined
+            # - Name: MYSQL_DATABASE
+            #   Value: mysql
             - Name: MYSQL_ROOT_PASSWORD
               Value: root
           LogConfiguration:
             LogDriver: awslogs
             Options:
               awslogs-group: !Ref mysqlLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+
+  # POSTGRES
+  postgresTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
+      TaskRoleArn: !GetAtt taskRole.Arn
+      Cpu: 4096
+      Memory: 8192
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      # EphemeralStorage:
+      #   SizeInGiB: 20
+        
+      ContainerDefinitions:
+        - Name: postgres
+          # changes to the Image will cause a new deployment to the ECS service, replacing the old deployment.
+          Image: postgres:latest
+          PortMappings:
+            - Name: postgres
+              ContainerPort: !Ref pPostgresPort
+              Protocol: tcp # tcp | udp
+          Environment:
+            - Name: POSTGRES_USER
+              Value: postgres
+            - Name: POSTGRES_PASSWORD
+              Value: postgres
+            - Name: POSTGRES_DB
+              Value: postgres
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref postgresLogGroup
               awslogs-region: !Sub ${AWS::Region}
               awslogs-stream-prefix: ecs
 
@@ -372,7 +376,7 @@ Resources:
       ContainerDefinitions:
         - Name: mongo
           # changes to the Image will cause a new deployment to the ECS service, replacing the old deployment.
-          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/mongo
+          Image: 174743933558.dkr.ecr.us-east-1.amazonaws.com/mongo
           PortMappings:
             - Name: mongo
               ContainerPort: !Ref pMongoPort
@@ -381,168 +385,6 @@ Resources:
             LogDriver: awslogs
             Options:
               awslogs-group: !Ref mongoLogGroup
-              awslogs-region: !Sub ${AWS::Region}
-              awslogs-stream-prefix: ecs
-
-  # API SERVER
-  apiServerTaskDefinition:
-    Type: AWS::ECS::TaskDefinition
-    Properties:
-      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
-      TaskRoleArn: !GetAtt taskRole.Arn
-      Cpu: 512
-      Memory: 1024
-      RequiresCompatibilities:
-        - FARGATE
-      NetworkMode: awsvpc
-      RuntimePlatform:
-        CpuArchitecture: X86_64
-        OperatingSystemFamily: LINUX
-      # EphemeralStorage:
-      #   SizeInGiB: 20
-        
-      ContainerDefinitions:
-        - Name: apiserver
-          Image: !Ref pApiServerEcrImageUri
-          PortMappings:
-            - Name: apiserver
-              ContainerPort: !Ref pApiServerPort
-              Protocol: tcp # tcp | udp
-              AppProtocol: http
-          Environment:
-            # REDIS
-            - Name: REDIS_HOST
-              Value: !Sub redis.${pAppName}.cloudmap.internal # Reference Cloud Map Namespace
-            - Name: REDIS_PORT
-              Value: !Ref pRedisPort
-        
-  
-            - Name: NODE_ENV
-              Value: ecs
-
-            # MONGO
-            - Name: MONGO_HOST
-              Value: !Sub mongo.${pAppName}.cloudmap.internal 
-
-            # MYSQL
-            - Name: MYSQL_HOST
-              Value: !Sub mysql.${pAppName}.cloudmap.internal
-            - Name: MYSQL_USER
-              Value: root
-            - Name: MYSQL_PASSWORD
-              Value: root
-
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Ref apiServerLogGroup
-              awslogs-region: !Sub ${AWS::Region}
-              awslogs-stream-prefix: ecs
-
-  # TOPHAT
-  topHatTaskDefinition:
-    Type: AWS::ECS::TaskDefinition
-    Properties:
-      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
-      TaskRoleArn: !GetAtt taskRole.Arn
-      Cpu: 512
-      Memory: 1024
-      RequiresCompatibilities:
-        - FARGATE
-      NetworkMode: awsvpc
-      RuntimePlatform:
-        CpuArchitecture: X86_64
-        OperatingSystemFamily: LINUX
-      # EphemeralStorage:
-      #   SizeInGiB: 20
-        
-      ContainerDefinitions:
-        - Name: tophat
-          Image: !Ref pTophatEcrImageUri
-          PortMappings:
-            - Name: tophat
-              ContainerPort: !Ref pTopHatPort
-              Protocol: tcp # tcp | udp
-              AppProtocol: http
-          Environment:
-            # REDIS
-            - Name: REDIS_HOST
-              Value: !Sub redis.${pAppName}.cloudmap.internal # Reference Cloud Map Namespace
-            - Name: REDIS_PORT
-              Value: !Ref pRedisPort
-
-            - Name: NODE_ENV
-              Value: ecs
-
-            # MONGO
-            - Name: MONGO_HOST
-              Value: !Sub mongo.${pAppName}.cloudmap.internal
-
-            # MYSQL
-            - Name: MYSQL_HOST
-              Value: !Sub mysql.${pAppName}.cloudmap.internal
-            - Name: MYSQL_USER
-              Value: root
-            - Name: MYSQL_PASSWORD
-              Value: root
-
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Ref topHatLogGroup
-              awslogs-region: !Sub ${AWS::Region}
-              awslogs-stream-prefix: ecs
-
-  # SOCKET IO
-  socketioTaskDefinition:
-    Type: AWS::ECS::TaskDefinition
-    Properties:
-      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
-      TaskRoleArn: !GetAtt taskRole.Arn
-      Cpu: 512
-      Memory: 1024
-      RequiresCompatibilities:
-        - FARGATE
-      NetworkMode: awsvpc
-      RuntimePlatform:
-        CpuArchitecture: X86_64
-        OperatingSystemFamily: LINUX
-      # EphemeralStorage:
-      #   SizeInGiB: 20
-        
-      ContainerDefinitions:
-        - Name: socketio
-          Image: !Ref pSocketIoEcrImageUri
-          PortMappings:
-            - Name: socketio
-              ContainerPort: !Ref pSocketioPort
-              Protocol: tcp # tcp | udp
-          Environment:
-            # REDIS
-            - Name: REDIS_HOST
-              Value: !Sub redis.${pAppName}.cloudmap.internal # Reference Cloud Map Namespace
-            - Name: REDIS_PORT
-              Value: !Ref pRedisPort
-
-            - Name: NODE_ENV
-              Value: ecs
-
-            # MONGO
-            - Name: MONGO_HOST
-              Value: !Sub mongo.${pAppName}.cloudmap.internal
-
-            # MYSQL
-            - Name: MYSQL_HOST
-              Value: !Sub mysql.${pAppName}.cloudmap.internal
-            - Name: MYSQL_USER
-              Value: root
-            - Name: MYSQL_PASSWORD
-              Value: root
-
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Ref topHatLogGroup
               awslogs-region: !Sub ${AWS::Region}
               awslogs-stream-prefix: ecs
 
@@ -579,7 +421,22 @@ Resources:
         RoutingPolicy: MULTIVALUE
       NamespaceId: !GetAtt serviceDiscoveryNameSpace.Id
 
-  # Mongo
+  # postgres
+  postgresServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: postgres-ecs # Name must be unique from what is given for ECS service 'ServiceConnectConfiguration.PortName'. 
+      Description: Service discovery for mongo service
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 60
+          - Type: SRV
+            TTL: 60
+        RoutingPolicy: MULTIVALUE
+      NamespaceId: !GetAtt serviceDiscoveryNameSpace.Id
+
+  # mongo
   mongoServiceDiscoveryService:
     Type: AWS::ServiceDiscovery::Service
     Properties:
@@ -652,16 +509,13 @@ Resources:
   # ================= ECS SERVICES =================
   # ================================================
 
-  websiteService:
+  ecsWebsiteService:
     # Dependency is required due to the fact that we must deploy backwards 
     # from a traditional deployment (database > API > Web UI)
     DependsOn:
+      - redisService
       - mongoService
       - mysqlService
-      - redisService
-      - topHatService
-      - apiServerService
-      - socketioService
     Type: AWS::ECS::Service
     Properties:
       Cluster: !Ref fargateCluster
@@ -677,9 +531,6 @@ Resources:
       DeploymentConfiguration:
         MinimumHealthyPercent: 100
         MaximumPercent: 200
-        DeploymentCircuitBreaker:
-          Enable: true
-          Rollback: true
       NetworkConfiguration: 
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
@@ -730,9 +581,6 @@ Resources:
       DeploymentConfiguration:
         MinimumHealthyPercent: 100
         MaximumPercent: 200
-        DeploymentCircuitBreaker:
-          Enable: true
-          Rollback: true
       NetworkConfiguration: 
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
@@ -782,9 +630,6 @@ Resources:
       DeploymentConfiguration:
         MinimumHealthyPercent: 100
         MaximumPercent: 200
-        DeploymentCircuitBreaker:
-          Enable: true
-          Rollback: true
       NetworkConfiguration: 
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
@@ -818,6 +663,56 @@ Resources:
         - Key: managed-by
           Value: SAM
 
+
+  postgresService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref fargateCluster
+      ServiceName: postgres
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      # Allows the ability for updates to create a new task before draining the old task.
+      # https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_DeploymentConfiguration.html
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: 
+            - !Ref pPrivateSubnetId1
+            - !Ref pPrivateSubnetId2
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # Expose containers running on this Service to Cloud Map Service Connect.
+      # Allows using Cloud Map to connect services between/within clusters without ELBs
+      ServiceConnectConfiguration:
+        Enabled: true
+        Services:
+          - PortName: postgres # Points to the "PortMappings.Name" defined at the Task Definition
+            ClientAliases:
+              - Port: !Ref pPostgresPort
+        # Service Connect Agent logs location
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Ref postgresLogGroup
+            awslogs-region: !Sub ${AWS::Region}
+            awslogs-stream-prefix: service-connect-agent
+      ServiceRegistries: 
+        - RegistryArn: !GetAtt postgresServiceDiscoveryService.Arn
+          Port: !Ref pPostgresPort
+      TaskDefinition: !Ref postgresTaskDefinition
+      Tags: 
+        - Key: managed-by
+          Value: SAM
+
   mongoService:
     Type: AWS::ECS::Service
     Properties:
@@ -834,9 +729,6 @@ Resources:
       DeploymentConfiguration:
         MinimumHealthyPercent: 100
         MaximumPercent: 200
-        DeploymentCircuitBreaker:
-          Enable: true
-          Rollback: true
       NetworkConfiguration: 
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
@@ -871,168 +763,7 @@ Resources:
           Value: SAM
 
 
-  # API Server
-  apiServerService:
-    DependsOn:
-      - mongoService
-      - mysqlService
-      - redisService
-    Type: AWS::ECS::Service
-    Properties:
-      Cluster: !Ref fargateCluster
-      DeploymentController: 
-        Type: ECS
-      DesiredCount: 1
-      EnableECSManagedTags: true
-      EnableExecuteCommand: true
-      LaunchType: FARGATE
-      DeploymentConfiguration:
-        MinimumHealthyPercent: 100
-        MaximumPercent: 200
-        DeploymentCircuitBreaker:
-          Enable: true
-          Rollback: true
-      NetworkConfiguration: 
-        AwsvpcConfiguration:
-          AssignPublicIp: DISABLED
-          SecurityGroups:
-            - !GetAtt serviceSecurityGroup.GroupId
-          Subnets: 
-            - !Ref pPrivateSubnetId1
-            - !Ref pPrivateSubnetId2
-      PlatformVersion: LATEST
-      PropagateTags: SERVICE
-      # Expose containers running on this Service to Cloud Map Service Connect.
-      # Allows using Cloud Map to connect services between/within clusters without ELBs
-      ServiceConnectConfiguration:
-        Enabled: true
-        Services:
-          - PortName: apiserver # Points to the "PortMappings.Name" defined at the Task Definition
-            ClientAliases:
-              - Port: !Ref pApiServerPort
-        # Service Connect Agent logs location
-        LogConfiguration:
-          LogDriver: awslogs
-          Options:
-            awslogs-group: !Ref apiServerLogGroup
-            awslogs-region: !Sub ${AWS::Region}
-            awslogs-stream-prefix: service-connect-agent
-      ServiceName: !Sub apiserver
-      # ServiceRegistries: 
-      #   - ServiceRegistry
-      TaskDefinition: !Ref apiServerTaskDefinition
-      Tags: 
-        - Key: managed-by
-          Value: SAM
 
-  # TOP HAT
-  topHatService:
-    DependsOn:
-      - apiServerService
-      - mongoService
-      - mysqlService
-      - redisService
-    Type: AWS::ECS::Service
-    Properties:
-      Cluster: !Ref fargateCluster
-      DeploymentController: 
-        Type: ECS
-      DesiredCount: 1
-      EnableECSManagedTags: true
-      EnableExecuteCommand: true
-      LaunchType: FARGATE
-      DeploymentConfiguration:
-        MinimumHealthyPercent: 100
-        MaximumPercent: 200
-        DeploymentCircuitBreaker:
-          Enable: true
-          Rollback: true
-      NetworkConfiguration: 
-        AwsvpcConfiguration:
-          AssignPublicIp: DISABLED
-          SecurityGroups:
-            - !GetAtt serviceSecurityGroup.GroupId
-          Subnets: 
-            - !Ref pPrivateSubnetId1
-            - !Ref pPrivateSubnetId2
-      PlatformVersion: LATEST
-      PropagateTags: SERVICE
-      # Expose containers running on this Service to Cloud Map Service Connect.
-      # Allows using Cloud Map to connect services between/within clusters without ELBs
-      ServiceConnectConfiguration:
-        Enabled: true
-        Services:
-          - PortName: tophat # Points to the "PortMappings.Name" defined at the Task Definition
-            ClientAliases:
-              - Port: !Ref pApiServerPort
-        # Service Connect Agent logs location
-        LogConfiguration:
-          LogDriver: awslogs
-          Options:
-            awslogs-group: !Ref topHatLogGroup
-            awslogs-region: !Sub ${AWS::Region}
-            awslogs-stream-prefix: service-connect-agent
-      ServiceName: !Sub tophat
-      # ServiceRegistries: 
-      #   - ServiceRegistry
-      TaskDefinition: !Ref topHatTaskDefinition
-      Tags: 
-        - Key: managed-by
-          Value: SAM
-
-  # SOCKET IO
-  socketioService:
-    DependsOn:
-      - mongoService
-      - mysqlService
-      - redisService
-    Type: AWS::ECS::Service
-    Properties:
-      Cluster: !Ref fargateCluster
-      DeploymentController: 
-        Type: ECS
-      DesiredCount: 1
-      EnableECSManagedTags: true
-      EnableExecuteCommand: true
-      LaunchType: FARGATE
-      DeploymentConfiguration:
-        MinimumHealthyPercent: 100
-        MaximumPercent: 200
-        DeploymentCircuitBreaker:
-          Enable: true
-          Rollback: true
-      NetworkConfiguration: 
-        AwsvpcConfiguration:
-          AssignPublicIp: DISABLED
-          SecurityGroups:
-            - !GetAtt serviceSecurityGroup.GroupId
-          Subnets: 
-            - !Ref pPrivateSubnetId1
-            - !Ref pPrivateSubnetId2
-      PlatformVersion: LATEST
-      PropagateTags: SERVICE
-      # Expose containers running on this Service to Cloud Map Service Connect.
-      # Allows using Cloud Map to connect services between/within clusters without ELBs
-      ServiceConnectConfiguration:
-        Enabled: true
-        Services:
-          - PortName: socketio # Points to the "PortMappings.Name" defined at the Task Definition
-            ClientAliases:
-              - Port: !Ref pSocketioPort
-        # Service Connect Agent logs location
-        LogConfiguration:
-          LogDriver: awslogs
-          Options:
-            awslogs-group: !Ref socketioLogGroup
-            awslogs-region: !Sub ${AWS::Region}
-            awslogs-stream-prefix: service-connect-agent
-      ServiceName: !Sub socketio
-      # ServiceRegistries: 
-      #   - ServiceRegistry
-      TaskDefinition: !Ref socketioTaskDefinition
-      Tags: 
-        - Key: managed-by
-          Value: SAM
 
 
 Outputs:

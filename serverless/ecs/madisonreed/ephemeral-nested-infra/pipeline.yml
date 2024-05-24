@@ -46,7 +46,13 @@ Parameters:
   pCodeBuildImage:
     Type: String
     Description: Base image used by CodeBuild
-    Default: aws/codebuild/amazonlinux2-x86_64-standard:4.0 # 4.0 for Node 16
+    Default: aws/codebuild/standard:7.0
+
+  # BUILDSPECPATHS
+  pLabelPRBuildSpecPath:
+    Type: String
+    Description: Path and name for the Buildspec in repo
+    Default: buildspec.yml
 
   pPilkoBuildSpecPath:
     Type: String
@@ -73,6 +79,15 @@ Parameters:
     Description: Path and name for the Buildspec in repo
     Default: buildspec.yml
 
+  pDeployLambdasBuildSpecPath:
+    Type: String
+    Description: Path and name for the Buildspec in repo
+    Default: buildspec-buildlambdafunctionsv3.yml
+
+  pHostedZoneName:
+    Type: String
+    Description: Route53 Hosted Zone Name
+    Default: dev.mdsnrdfd.com
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -210,6 +225,8 @@ Resources:
                   - !GetAtt ecrWebsiteRepo.Arn
                   - !GetAtt ecrApiServerRepo.Arn
                   - !GetAtt ecrTophatRepo.Arn
+                  - !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/mysql-ephemeral
+                  - !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/mongo-ephemeral
         - PolicyName: BASE-ECR
           PolicyDocument: 
             Version: 2012-10-17 
@@ -230,14 +247,21 @@ Resources:
                 Action:
                   - ecr:GetAuthorizationToken
                 Resource: "*"
-        - PolicyName: ParamStoreSSHKey
+        - PolicyName: ParamStore
           PolicyDocument:
             Version: 2012-10-17
             Statement:
               - Effect: Allow
                 Action:
                   - ssm:GetParameters
-                Resource: !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/GITHUB/SSH_KEY"
+                Resource: 
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/GITHUB/SSH_KEY"
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/GITHUB/ACCESS_TOKEN"
+              - Effect: Allow # Used for generateSecureConfig script
+                Action:
+                  - ssm:GetParameters*
+                Resource: 
+                  - "*"
         - PolicyName: SAMDeploy
           PolicyDocument:
             Version: 2012-10-17
@@ -274,7 +298,49 @@ Resources:
                   - cloudwatch:*
                   - lambda:*
                   - events:*
+                  - servicediscovery:*
+                  - acm:*
                 Resource: "*"
+
+
+  codeBuildLabelPR:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${pAppName}-label-pr
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: Add Labels to PRs via Github API
+      Environment:
+        ComputeType: !Ref pCodeBuildComputeType
+        Image: !Ref pCodeBuildImage
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: ACCOUNT_ID  
+            Value: !Ref AWS::AccountId
+            Type: PLAINTEXT
+
+          - Name: APP_NAME 
+            Value: !Ref pAppName 
+            Type: PLAINTEXT
+
+          - Name: GITHUB_TOKEN
+            Value: /GITHUB/ACCESS_TOKEN
+            Type: PARAMETER_STORE
+
+
+      ServiceRole: !GetAtt codeBuildServiceRole.Arn
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Ref pLabelPRBuildSpecPath
+      TimeoutInMinutes: 60
+
+  codeBuildLabelPRLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/codebuild/${codeBuildLabelPR}"
+      RetentionInDays: 7
+
 
   codeBuildPilko:
     Type: AWS::CodeBuild::Project
@@ -485,76 +551,135 @@ Resources:
     Properties:
       LogGroupName: !Sub "/aws/codebuild/${codeBuildApiServer}"
       RetentionInDays: 7
+
+  codeBuildLambdas:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${pAppName}-deploy-lambdas
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: Deploy/Update Lambdas
+      Environment:
+        ComputeType: !Ref pCodeBuildComputeType
+        Image: !Ref pCodeBuildImage
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: ACCOUNT_ID  
+            Value: !Ref AWS::AccountId
+            Type: PLAINTEXT
+
+          # All these envs are required to allow connectivity from Lambdas
+          - Name: REDIS_HOST
+            Value: !Sub redis-ecs.${pAppName}.cloudmap.internal
+          - Name: MONGO_HOST
+            Value: !Sub mongo-ecs.${pAppName}.cloudmap.internal
+          - Name: MYSQL_HOST
+            Value: !Sub mysql-ecs.${pAppName}.cloudmap.internal
+          - Name: MYSQL_PASSWORD
+            Value: root
+          - Name: MYSQL_USER
+            Value: root
+
+          - Name: DOMAIN_NAME
+            Value: !Sub ${pAppName}.${pHostedZoneName}
+          
+          - Name: COLOR_ADVISOR_API_URL
+            Value: !Sub coloradvisor.${pHostedZoneName}/coloradvisor/
+
+          # Gulp Lambda config
+          - Name: GULP_LAMBDA_API_ID # Empty API GW (Should be removed at some point)
+            Value: asct374564
+          - Name: GULP_LAMBDA_IAM_ROLE_ARN # Lambda Execution Role ARN
+            Value: !Sub arn:aws:iam::${AWS::AccountId}:role/ConsumerLambdaRole
+          - Name: GULP_LAMBDA_SECURITY_GROUP_ID # SG for Lambdas to be in VPC
+            Value: sg-08d325adcfc900ceb 
+          - Name: GULP_LAMBDA_SUBNET_ID # Private1a Subnet
+            Value: subnet-01086857935bfcf34
+
+      ServiceRole: !GetAtt codeBuildServiceRole.Arn
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Ref pDeployLambdasBuildSpecPath
+      TimeoutInMinutes: 180
+
+  codeBuildDeployLambdasLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/codebuild/${codeBuildLambdas}"
+      RetentionInDays: 7
       
       
   # IAM Role - CodePipeline    
 
   codePipelineServiceRole:
-      Type: AWS::IAM::Role
-      Properties:
-        RoleName: !Sub ${pAppName}-pipeline-role
-        AssumeRolePolicyDocument:
-          Version: 2012-10-17
-          Statement:
-            - Effect: Allow
-              Principal:
-                Service:
-                  - codepipeline.amazonaws.com
-              Action:
-                - sts:AssumeRole
-        Policies:
-          - PolicyName: s3Artifacts
-            PolicyDocument:
-              Version: 2012-10-17
-              Statement:
-                - Effect: Allow
-                  Action:
-                    - s3:PutObject
-                    - s3:GetObject
-                    - s3:GetObjectVersion
-                  Resource: 
-                    - !Sub "arn:aws:s3:::${artifactBucket}"
-                    - !Sub "arn:aws:s3:::${artifactBucket}/*"
-          - PolicyName: codeBuildTrigger
-            PolicyDocument:
-              Version: 2012-10-17
-              Statement:
-                - Effect: Allow
-                  Action:
-                    - codebuild:BatchGetBuilds
-                    - codebuild:StartBuild
-                    - codebuild:BatchGetBuildBatches
-                    - codebuild:StartBuildBatch
-                  Resource: 
-                    - !GetAtt codeBuildPilko.Arn
-                    - !GetAtt codeBuildWebsite.Arn
-                    - !GetAtt codeBuildTophat.Arn
-                    - !GetAtt codeBuildApiServer.Arn
-                    - !GetAtt codeBuildDeploy.Arn
-                - Effect: Allow
-                  Action:
-                    - codestar-connections:UseConnection
-                  Resource: 
-                    - !Ref pCodestarConnectionArn
-          - PolicyName: ecsUpdate
-            PolicyDocument:
-              Version: 2012-10-17
-              Statement:
-                - Effect: Allow
-                  Action:
-                    - ecs:*
-                    - ecr:*
-                  Resource:
-                    - "*"
-          - PolicyName: iamPassRole
-            PolicyDocument:
-              Version: 2012-10-17
-              Statement:
-                - Effect: Allow
-                  Action:
-                    - iam:PassRole
-                  Resource: 
-                    - "*"
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${pAppName}-pipeline-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: s3Artifacts
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource: 
+                  - !Sub "arn:aws:s3:::${artifactBucket}"
+                  - !Sub "arn:aws:s3:::${artifactBucket}/*"
+        - PolicyName: codeBuildTrigger
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuildBatches
+                  - codebuild:StartBuildBatch
+                Resource: 
+                  - !GetAtt codeBuildLabelPR.Arn
+                  - !GetAtt codeBuildPilko.Arn
+                  - !GetAtt codeBuildWebsite.Arn
+                  - !GetAtt codeBuildTophat.Arn
+                  - !GetAtt codeBuildApiServer.Arn
+                  - !GetAtt codeBuildDeploy.Arn
+                  - !GetAtt codeBuildLambdas.Arn
+              - Effect: Allow
+                Action:
+                  - codestar-connections:UseConnection
+                Resource: 
+                  - !Ref pCodestarConnectionArn
+        - PolicyName: ecsUpdate
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:*
+                  - ecr:*
+                Resource:
+                  - "*"
+        - PolicyName: iamPassRole
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: 
+                  - "*"
           
 
       
@@ -702,20 +827,35 @@ Resources:
                 - Name: SourceArtifact
         - Name: Lint
           Actions:
-            - Name: PilkoLint
+            # - Name: PilkoLint
+            #   ActionTypeId:
+            #     Category: Build
+            #     Owner: AWS
+            #     Provider: CodeBuild
+            #     Version: 1
+            #   Configuration:
+            #     ProjectName: !Ref codeBuildPilko
+            #     # Override existing or add additional env vars to the buildproject
+            #     EnvironmentVariables: '[{"name": "PULL_REQUEST_ID", "value": "#{variables.PR_ID}"}, {"name": "PR_EVENT", "value": "#{variables.PR_EVENT}"}]'
+            #   InputArtifacts:
+            #     - Name: SourceArtifact
+            #   OutputArtifacts:
+            #     - Name: BuildArtifactPilko
+            #   RunOrder: 1
+            - Name: MergeConflicts
               ActionTypeId:
                 Category: Build
                 Owner: AWS
                 Provider: CodeBuild
                 Version: 1
               Configuration:
-                ProjectName: !Ref codeBuildPilko
+                ProjectName: !Ref codeBuildLabelPR
                 # Override existing or add additional env vars to the buildproject
                 EnvironmentVariables: '[{"name": "PULL_REQUEST_ID", "value": "#{variables.PR_ID}"}, {"name": "PR_EVENT", "value": "#{variables.PR_EVENT}"}]'
               InputArtifacts:
                 - Name: SourceArtifact
               OutputArtifacts:
-                - Name: BuildArtifactPilko
+                - Name: BuildArtifactLabelPR
               RunOrder: 1
         - Name: Build
           Actions:
@@ -789,9 +929,25 @@ Resources:
               OutputArtifacts:
                 - Name: BuildArtifact
               RunOrder: 3
+        - Name: DeployLambdas
+          Actions:
+            - Name: DeployLambdas
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              RunOrder: 1
+              Configuration:
+                ProjectName: !Ref codeBuildLambdas
+                EnvironmentVariables: '[{"name": "PULL_REQUEST_ID", "value": "#{variables.PR_ID}"}, {"name": "PR_EVENT", "value": "#{variables.PR_EVENT}"}]'
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildArtifactLambdas
 
 Outputs:
 
   Version:
     Description: Template Version
-    Value: ephemeral-pipeline-build-ecs-0.1
+    Value: ephemeral-pipeline-1.0

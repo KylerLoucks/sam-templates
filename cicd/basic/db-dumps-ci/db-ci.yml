@@ -35,6 +35,13 @@ Parameters:
     Description: Branch to trigger CodePipeline off of.
     Default: master
 
+  pEnableDailyTrigger:
+    Type: String
+    Description: Enable or disable codepipeline daily trigger (ENABLED or DISABLED)
+    Default: DISABLED
+    AllowedValues:
+      - ENABLED
+      - DISABLED
 
   # CodeBuild
   pCodeBuildComputeType:
@@ -505,6 +512,41 @@ Resources:
               OutputArtifacts:
                 - Name: BuildArtifact
               RunOrder: 1
+
+
+  # Pipeline CRON execution
+
+  eventBridgeInvokePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${pAppName}-eventbridge-invoke-pipeline-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokePipeline
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: codepipeline:StartPipelineExecution
+                Resource: !Sub arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${codePipeline}
+
+  dailyTriggerRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${pAppName}-daily-trigger
+      ScheduleExpression: cron(59 23 * * ? *)
+      State: !Ref pEnableDailyTrigger
+      Targets:
+        - Arn: !Sub arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${codePipeline}
+          Id: CodePipelineTarget
+          RoleArn: !GetAtt eventBridgeInvokePipelineRole.Arn
+
 
 Outputs:
 

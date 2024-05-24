@@ -12,7 +12,7 @@ phases:
     commands:
       - GLOBAL_TZ='PDT\|PST'
       - echo Logging in to Amazon ECR...
-      - $(aws ecr get-login --no-include-email --region $AWS_DEFAULT_REGION)
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
       - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
       - IMAGE_TAG=${COMMIT_HASH:=latest}
       
@@ -23,14 +23,14 @@ phases:
       - echo Build started on $(date)
       - echo node $(node -v) \(npm $(npm -v)\)
       - bin/prod-node-modules.sh -t build
-      - bin/generateSecureConfig.js -e $NODE_ENV --microservice || true # TODO: no fail for now
-      - bin/downloadGeoIpDBFromS3.sh # needed for website?
-      - bin/generateCodebaseJson # needed for website?
-      - npm run gulp-build-website > gulpBuildWebsite.log 2>&1
+      - bin/generateSecureConfig.js -e $NODE_ENV --microservice
+      - bin/downloadGeoIpDBFromS3.sh # required for website
+      - bin/generateCodebaseJson # required for website
+      - npm run gulp-build-website
       - cd website
-      - npm ci > npmInstall.log 2>&1
+      - npm i
       - npm run buildProduction > buildProduction.log 2>&1
-      - npm run postBuildProduction > postBuildProduction.log 2>&1 || true # TODO: no fail for now
+      - npm run postBuildProduction
       - cd ../
       - echo Building the Docker images...
       - |
@@ -47,10 +47,3 @@ phases:
       - echo Pushing the Docker image...
       - docker push $REPOSITORY_URI:latest
       - docker push $REPOSITORY_URI:$IMAGE_TAG
-artifacts:
-  files: 
-    - npmInstall.log
-    - gulpBuildWebsite.log
-    - buildProduction.log
-    - postBuildProduction.log
- 

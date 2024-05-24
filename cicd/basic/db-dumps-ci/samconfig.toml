@@ -24,7 +24,8 @@ parameter_overrides = [
     "pTriggerBranch=c303/ephemeral/mysql",
     "pCodeBuildComputeType=BUILD_GENERAL1_XLARGE",
     "pDumpBucketName=db-prod-sanitized-backup",
-    "pBuildSpecPath=ephemeralenv/database/mysql/buildspec.yml"
+    "pBuildSpecPath=ephemeralenv/database/mysql/buildspec.yml",
+    "pEnableDailyTrigger=DISABLED"
 
 ]
 confirm_changeset = true
@@ -47,7 +48,8 @@ parameter_overrides = [
     "pCodeBuildComputeType=BUILD_GENERAL1_LARGE",
     "pDumpBucketName=mr-mongo-atlas-sanitized-backup",
     "pCodeBuildImage=aws/codebuild/standard:7.0",
-    "pBuildSpecPath=ephemeralenv/database/mongo/buildspec.yml"
+    "pBuildSpecPath=ephemeralenv/database/mongo/buildspec.yml",
+    "pEnableDailyTrigger=ENABLED"
 
 ]
 confirm_changeset = true
