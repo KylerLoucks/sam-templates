@@ -1,9 +1,9 @@
 
 
 AWSTemplateFormatVersion: "2010-09-09"
-Transform: AWS::Serverless-2016-10-
+Transform: AWS::Serverless-2016-10-31
 Description: >
-  Creates a standalone EC2 Host for ECS Clusters
+  Creates a MySQL ECS task that has a large EBS volume configured at launch
 
 Parameters:
   pAppName:
@@ -151,6 +151,25 @@ Resources:
       ManagedPolicyArns:
         - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
 
+  # Role used for managing ECS EBS Volume creation for ECS Tasks
+  # You can view the EBS volumes used per task in the EBS Volumes Console
+  # https://docs.aws.amazon.com/AmazonECS/latest/developerguide/infrastructure_IAM_role.html
+  ecsInfraStructureRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs.amazonaws.com
+            Action: sts:AssumeRole
+      # Allows ec2:CreateVolume for the specified task
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSInfrastructureRolePolicyForVolumes
+
 
   mysqlTaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -161,8 +180,11 @@ Resources:
       Cpu: 512
       Memory: 1024
       RequiresCompatibilities:
-        - EC2
+        - FARGATE
       NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
       ContainerDefinitions:
         - Name: mysql
           Image: !Ref pMysqlEcrImageUri
@@ -179,12 +201,13 @@ Resources:
               awslogs-region: !Sub ${AWS::Region}
               awslogs-stream-prefix: ecs
           MountPoints:
-            - SourceVolume: mysql-storage
+            - SourceVolume: mysql
               ContainerPath: /var/lib/mysql
       Volumes:
-        - Name: mysql-storage
-          Host:
-            SourcePath: /mnt/mysql-data  # Specify the mount path for the instance storage
+        - Name: mysql
+          ConfiguredAtLaunch: true
+          # Host:
+          #   SourcePath: /mnt/mysql-data  # Specify the mount path for the instance storage
 
   mysqlLogGroup:
     Type: AWS::Logs::LogGroup
@@ -192,75 +215,9 @@ Resources:
       LogGroupName: !Sub /ecs/mysql/${pAppName}
       RetentionInDays: 7
 
-
-  ECSInstanceProfile:
-    Type: AWS::IAM::InstanceProfile
-    Properties:
-      Roles:
-        - !Ref ECSInstanceRole
-
-  ECSInstanceRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ec2.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: ECSInstancePolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ecs:*
-                  - ecr:*
-                  - ec2:*
-                  - logs:*
-                  - s3:*
-                Resource: "*"
-      ManagedPolicyArns:
-        # See reference: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/security-iam-awsmanpol.html#security-iam-awsmanpol-AmazonEC2ContainerServiceforEC2Role
-        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
-        # This managed policy allows us to connect to the instance using SSM
-        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
-
-  ec2Instance:
-    Type: AWS::EC2::Instance
-    Properties:
-      InstanceType: t3.large
-      # KeyName: !Ref KeyName
-      ImageId: !Ref pECSAMI # ami-0c55b159cbfafe1f0  # Use the latest Amazon ECS optimized AMI
-      IamInstanceProfile: !Ref ECSInstanceProfile
-      SecurityGroupIds:
-        - !GetAtt serviceSecurityGroup.GroupId
-      SubnetId: !Ref pPrivateSubnetId1
-
-      # Add the Instance into the ECS cluster
-      # https://docs.aws.amazon.com/AmazonECS/latest/developerguide/launch_container_instance.html
-      UserData:
-        Fn::Base64: !Sub |
-          #!/bin/bash
-          echo ECS_CLUSTER=${fargateCluster} >> /etc/ecs/ecs.config
-          mkfs -t ext4 /dev/xvdf
-          mkdir -p /mnt/mysql-data
-          mount /dev/xvdf /mnt/mysql-data
-      BlockDeviceMappings:
-        - DeviceName: /dev/xvda
-          Ebs:
-            VolumeSize: 30  # Root volume size in GB
-            VolumeType: gp3
-        - DeviceName: /dev/xvdf
-          Ebs:
-            VolumeSize: 500  # MySQL data volume size in GB
-            VolumeType: gp3 
-
   mysqlService:
-    DependsOn:
-      - ec2Instance
+    # DependsOn:
+    #   - ec2Instance
     Type: AWS::ECS::Service
     Properties:
       Cluster: !Ref fargateCluster
@@ -270,7 +227,7 @@ Resources:
       DesiredCount: 1
       EnableECSManagedTags: true
       EnableExecuteCommand: true
-      LaunchType: EC2
+      LaunchType: FARGATE
       # CapacityProviderStrategy:
       #   - Base: 0
       #     CapacityProvider: !Ref CapacityProvider
@@ -279,7 +236,7 @@ Resources:
         MinimumHealthyPercent: 100
         MaximumPercent: 200
         DeploymentCircuitBreaker:
-          Enable: true
+          Enable: false
           Rollback: true
       NetworkConfiguration: 
         AwsvpcConfiguration:
@@ -294,6 +251,15 @@ Resources:
         - RegistryArn: !GetAtt mysqlServiceDiscoveryService.Arn
           Port: !Ref pMySQLPort
       TaskDefinition: !Ref mysqlTaskDefinition
+      # Configure EBS Volume at launch time for each task in the service.
+      # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-properties-ecs-service-servicemanagedebsvolumeconfiguration.html
+      VolumeConfigurations: 
+        - Name: mysql # Must match the name defined in the `Volume` object of the Task Definition
+          ManagedEBSVolume:
+            RoleArn: !GetAtt ecsInfraStructureRole.Arn
+            VolumeType: gp3
+            SizeInGiB: 300
+            FilesystemType: ext4
       Tags: 
         - Key: managed-by
           Value: SAM
