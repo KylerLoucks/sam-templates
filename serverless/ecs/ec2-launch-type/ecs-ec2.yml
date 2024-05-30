@@ -258,7 +258,10 @@ Resources:
         # - DeviceName: /dev/xvdf
         #   Ebs:
         #     VolumeSize: 500  # MySQL data volume size in GB
-        #     VolumeType: gp3 
+        #     VolumeType: gp3
+      Tags:
+        - Key: Name
+          Value: !Sub mysql-ephemeral-${pAppName}
 
   mysqlService:
     DependsOn:
