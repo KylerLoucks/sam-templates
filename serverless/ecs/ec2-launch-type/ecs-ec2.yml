@@ -247,6 +247,12 @@ Resources:
         Fn::Base64: !Sub |
           #!/bin/bash
           echo ECS_CLUSTER=${fargateCluster} >> /etc/ecs/ecs.config
+
+          # Prevent the 'DockerTimeoutError: Could not transition to 'created' error
+          echo ECS_CONTAINER_START_TIMEOUT=10m >> /etc/ecs/ecs.config
+          echo ECS_CONTAINER_CREATE_TIMEOUT=10m >> /etc/ecs/ecs.config
+
+
           # mkfs -t ext4 /dev/xvdf
           # mkdir -p /mnt/mysql-data
           # mount /dev/xvdf /mnt/mysql-data
@@ -255,6 +261,7 @@ Resources:
           Ebs:
             VolumeSize: 400  # Root volume size in GB
             VolumeType: gp3
+            Iops: 6000
         # - DeviceName: /dev/xvdf
         #   Ebs:
         #     VolumeSize: 500  # MySQL data volume size in GB
