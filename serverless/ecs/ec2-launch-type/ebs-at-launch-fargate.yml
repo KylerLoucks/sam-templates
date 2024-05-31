@@ -37,7 +37,7 @@ Parameters:
 
   pMysqlEcrImageUri:
     Type: String
-    Default: 174743933558.dkr.ecr.us-east-1.amazonaws.com/mysql-ephemeral:20240529
+    Default: 174743933558.dkr.ecr.us-east-1.amazonaws.com/mysql-ephemeral:20240509
     Description: > 
       URI of the ECR image used for MySQL Task Definition. 
       e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
@@ -182,7 +182,7 @@ Resources:
         CpuArchitecture: X86_64
         OperatingSystemFamily: LINUX
       EphemeralStorage:
-        SizeInGiB: 200
+        SizeInGiB: 30
       ContainerDefinitions:
         - Name: mysql
           Image: !Ref pMysqlEcrImageUri
@@ -200,10 +200,10 @@ Resources:
               awslogs-stream-prefix: ecs
           MountPoints:
             - SourceVolume: mysql
-              ContainerPath: /var/lib/mysql
+              ContainerPath: /var/lib/mysql # This doesn't work. Seems like additional EBS storage is only configured after the Task is in the running state.
       Volumes:
         - Name: mysql
-          ConfiguredAtLaunch: true
+          ConfiguredAtLaunch: true # Configure additional EBS volumes at launch
           # Host:
           #   SourcePath: /mnt/mysql-data  # Specify the mount path for the instance storage
 
