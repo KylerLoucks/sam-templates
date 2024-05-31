@@ -106,6 +106,20 @@ Resources:
                 - ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
       Policies:
+        # Ecs Exec into Fargate containers https://aws.amazon.com/blogs/containers/new-using-amazon-ecs-exec-access-your-containers-fargate-ec2/
+        # Also requires `ssmmessages` Interface VPC endpoint: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-exec.html#ecs-exec-troubleshooting
+        - PolicyName: EcsExec
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowEcsExec
+                Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: "*"
         - PolicyName: CloudWatchLogs
           PolicyDocument: 
             Version: 2012-10-17
@@ -158,8 +172,8 @@ Resources:
       Family: !Sub ${pAppName}-mysql
       ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
       TaskRoleArn: !GetAtt taskRole.Arn
-      Cpu: 512
-      Memory: 1024
+      Cpu: 4096 # 2048
+      Memory: 8192 # 4096
       RequiresCompatibilities:
         - EC2
       NetworkMode: awsvpc
@@ -281,7 +295,7 @@ Resources:
         Type: ECS
       DesiredCount: 1
       EnableECSManagedTags: true
-      EnableExecuteCommand: true
+      EnableExecuteCommand: true # allows `docker exec` for an interactive terminal inside the container
       LaunchType: EC2
       # CapacityProviderStrategy:
       #   - Base: 0

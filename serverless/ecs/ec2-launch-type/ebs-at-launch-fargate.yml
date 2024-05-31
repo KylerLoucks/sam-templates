@@ -20,25 +20,6 @@ Parameters:
   pPrivateSubnetId2:
     Type: String
     Default: subnet-056e57e04fea05dd5
-  pR53HostedZoneId:
-    Type: String
-    Description: Route 53 hosted zone ID
-    Default: Z0323068C9DQS081P13G
-  pHostedZoneName:
-    Type: String
-    Description: Route53 Hosted Zone Domain Name (E.g. dev.mdsnrdfd.com)
-    Default: dev.mdsnrdfd.com
-  pPublicSubnetId1:
-    Type: String
-    Default: subnet-0598f465e77230bd5
-  pPublicSubnetId2:
-    Type: String
-    Default: subnet-0d650820a97fa5ba3
-
-  pECSAMI:
-    Description: "The Amazon Machine Image ID used for the cluster"
-    Type: "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>"
-    Default: "/aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id"
 
   # Container Ports
   pMySQLPort:
@@ -56,7 +37,7 @@ Parameters:
 
   pMysqlEcrImageUri:
     Type: String
-    Default: 174743933558.dkr.ecr.us-east-1.amazonaws.com/mysql-ephemeral:20240509
+    Default: 174743933558.dkr.ecr.us-east-1.amazonaws.com/mysql-ephemeral:20240529
     Description: > 
       URI of the ECR image used for MySQL Task Definition. 
       e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
@@ -106,6 +87,21 @@ Resources:
                 - ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
       Policies:
+        # Ecs Exec into Fargate containers https://aws.amazon.com/blogs/containers/new-using-amazon-ecs-exec-access-your-containers-fargate-ec2/
+        # Also requires `ssmmessages` Interface VPC endpoint: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-exec.html#ecs-exec-troubleshooting
+        # Requires the SSM Session Manager plugin for the AWS CLI (https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
+        - PolicyName: EcsExec
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowEcsExec
+                Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: "*"
         - PolicyName: CloudWatchLogs
           PolicyDocument: 
             Version: 2012-10-17
@@ -185,6 +181,8 @@ Resources:
       RuntimePlatform:
         CpuArchitecture: X86_64
         OperatingSystemFamily: LINUX
+      EphemeralStorage:
+        SizeInGiB: 200
       ContainerDefinitions:
         - Name: mysql
           Image: !Ref pMysqlEcrImageUri
@@ -216,8 +214,6 @@ Resources:
       RetentionInDays: 7
 
   mysqlService:
-    # DependsOn:
-    #   - ec2Instance
     Type: AWS::ECS::Service
     Properties:
       Cluster: !Ref fargateCluster
