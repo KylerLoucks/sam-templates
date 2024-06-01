@@ -46,9 +46,9 @@ Resources:
       DatabaseName: ephemeral
       Engine: aurora-mysql
       EngineVersion: '5.7.mysql_aurora.2.08.3' #'5.7'
-      EngineMode: serverless
+      EngineMode: provisioned
       DBClusterIdentifier: ephemeral-aurora-mysql-serverless
-      # SnapshotIdentifier: your-db-snapshot-identifier # Can't use with master use and password specified...
+      # SnapshotIdentifier: your-db-snapshot-identifier # Can't use with master user and password specified...
 
       # TODO: need to specify secret from external stack. The secret currently used here is referencing one managed by an already existing RDS DB.
       MasterUsername: !Sub '{{resolve:secretsmanager:arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:rds!db-9a890b61-a8d0-4dd2-be50-2821f8752698-rb2djF:SecretString:username}}'
@@ -59,11 +59,11 @@ Resources:
       Tags:
         - Key: Name
           Value: Ephemeral Aurora MySQL Serverless
-      ScalingConfiguration:
-        AutoPause: true
-        MinCapacity: 2
-        MaxCapacity: 16
-        SecondsUntilAutoPause: 300
+      # ScalingConfiguration:
+      #   AutoPause: true
+      #   MinCapacity: 2
+      #   MaxCapacity: 16
+      #   SecondsUntilAutoPause: 300
 
 Outputs:
   ClusterEndpoint:

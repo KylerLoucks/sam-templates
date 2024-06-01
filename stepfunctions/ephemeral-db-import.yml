@@ -1,0 +1,235 @@
+
+
+Resources:
+
+
+
+        # - PolicyName: StateMachineSendState
+        #   PolicyDocument:
+        #     Version: 2012-10-17
+        #     Statement:
+        #       - Effect: Allow
+        #         Action:
+        #           - states:SendTaskSuccess
+        #           - states:SendTaskFailure
+        #         Resource: "*"
+        
+
+
+  openPaymentsStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Definition:
+        StartAt: RunFargateTask
+        States:
+          RunFargateTask:
+            Type: Task
+            Resource: arn:aws:states:::ecs:runTask.waitForTaskToken
+            Next: CheckDataUpdated
+            Parameters:
+              LaunchType: FARGATE
+              Cluster: !Ref fargateCluster
+              TaskDefinition: !Ref taskDefinition
+              NetworkConfiguration:
+                AwsvpcConfiguration:
+                  Subnets: 
+                   - !Ref pPrivateSubnet1a
+                   - !Ref pPrivateSubnet1b
+                  AssignPublicIp: DISABLED
+              # Override task def env vars
+              Overrides:
+                ContainerOverrides:
+                  - Name: OpenPayments # Replace with the name of the container in the task definition
+                    Environment:
+                      - Name: TASK_TOKEN
+                        Value: "$$.Task.Token"
+                      - Name: OPENPAYMENTS_URL
+                        Value: https://download.cms.gov/openpayments/PGYR18_P063023.ZIP
+                      - Name: DATA_BUCKET
+                        Value: !Ref dataBucket
+                      - Name: DATASET_INFO_TABLE
+                        Value: !Ref datasetInfoTable
+          # Check if the response from the fargate task was true for 'datasetUpdated'
+          CheckDataUpdated:
+            Type: Choice
+            Choices:
+              - Variable: "$.datasetUpdated"
+                BooleanEquals: true
+                Next: RunGlueETLJob
+            Default: EndState
+          RunGlueETLJob:
+            Type: Task
+            Resource: arn:aws:states:::glue:startJobRun.sync
+            Parameters:
+              JobName: !Ref openPaymentsMergeEtl
+            Next: RunGlueCrawler
+          RunGlueCrawler:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:glue:startCrawler
+            Parameters:
+              Name: !Ref openPaymentsCrawler
+            Retry:
+              - ErrorEquals:
+                  - Glue.EntityNotFoundException
+                BackoffRate: 1
+                IntervalSeconds: 1
+                MaxAttempts: 0
+                Comment: EntityNotFoundException - Fail
+              - ErrorEquals:
+                  - Glue.CrawlerRunningException
+                BackoffRate: 1
+                IntervalSeconds: 1
+                MaxAttempts: 0              
+            Next: GetGlueCrawler
+            ResultPath: $.response.start_crawler
+            Catch:
+              - ErrorEquals:
+                  - Glue.CrawlerRunningException
+                Next: GetGlueCrawler
+                Comment: Crawler Already Running, continue to monitor
+                ResultPath: $.response.start_crawler
+          GetGlueCrawler:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:glue:getCrawler
+            Parameters:
+              Name: !Ref openPaymentsCrawler
+            ResultPath: $.response.get_crawler
+            Next: IsRunning?
+          IsRunning?:
+            Type: Choice
+            Choices:
+              - Or:
+                  - Variable: $.response.get_crawler.Crawler.State
+                    StringEquals: RUNNING # Valid states are READY, RUNNING, STOPPING
+                  - Variable: $.response.get_crawler.Crawler.State
+                    StringEquals: STOPPING
+                Next: WaitForCrawlerCompletion
+            Default: EndState
+          WaitForCrawlerCompletion:
+            Type: Wait
+            Seconds: 5
+            Next: GetGlueCrawler
+          EndState:
+            Type: Succeed
+      Role: !GetAtt stateMachineExecutionRole.Arn
+      Events:
+        CronSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 8 1 1 ? *)  # Every 1st of January @ 8 AM UTC. Data updates yearly at the beginning of the year (Jan 1st?)
+            Enabled: False
+
+
+  stateMachineExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StateMachineExecutionPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                  - ecs:DescribeTaskDefinition
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecs:RunTask
+                  - ecs:DescribeTasks
+                Resource: "*"
+                  # - !GetAtt fargateCluster.Arn
+                  # - !Ref taskDefinition
+              # - Sid: PassEcsExecutionRole
+              #   Effect: Allow
+              #   Action:
+              #     - iam:PassRole
+              #   Resource: !GetAtt taskExecutionRole.Arn
+
+
+# Use Step Functions to RunInstances
+# use the instance ID from the output as input into the next step (ssm:startAutomationExecution.waitForTaskToken)
+# https://github.com/aws-samples/amazon-stepfunctions-ssm-waitfortasktoken/tree/main <- Use this cloudformation to make the SSM document
+
+
+
+# {
+#   "Comment": "A description of my state machine",
+#   "StartAt": "CreateDBCluster",
+#   "States": {
+#     "CreateDBCluster": {
+#       "Type": "Task",
+#       "Parameters": {
+#         "DbClusterIdentifier": "aurora-serverless-ephemeral-import",
+#         "Engine": "aurora-mysql",
+#         "EngineVersion": "8.0.mysql_aurora.3.04.1",
+#         "EngineMode": "provisioned",
+#         "ServerlessV2ScalingConfiguration": {
+#           "MinCapacity": 0.5,
+#           "MaxCapacity": 16
+#         },
+#         "MasterUsername": "masteruser",
+#         "MasterUserPassword": "ephemeralroot",
+#         "DbSubnetGroupName": "madisonreed-development-rds-mysql",
+#         "VpcSecurityGroupIds": [
+#           "sg-0e3b6e63ea5ef0eba"
+#         ]
+#       },
+#       "Resource": "arn:aws:states:::aws-sdk:rds:createDBCluster",
+#       "Next": "CreateDBInstance",
+#       "ResultPath": "$.response.create_db"
+#     },
+#     "CreateDBInstance": {
+#       "Type": "Task",
+#       "Parameters": {
+#         "DbInstanceClass": "db.serverless",
+#         "DbInstanceIdentifier": "ephemeral-import-writer-instance",
+#         "DbClusterIdentifier": "aurora-serverless-ephemeral-import",
+#         "Engine": "aurora-mysql"
+#       },
+#       "Resource": "arn:aws:states:::aws-sdk:rds:createDBInstance",
+#       "Next": "DescribeDBClusterEndpoints",
+#       "ResultPath": "$.response.create_db_writer"
+#     },
+#     "DescribeDBClusterEndpoints": {
+#       "Type": "Task",
+#       "Parameters": {
+#         "DbClusterIdentifier": "aurora-serverless-ephemeral-import"
+#       },
+#       "Resource": "arn:aws:states:::aws-sdk:rds:describeDBClusterEndpoints",
+#       "Next": "IsAvailable?",
+#       "ResultPath": "$.response.describe_endpoints"
+#     },
+#     "IsAvailable?": {
+#       "Type": "Choice",
+#       "Choices": [
+#         {
+#           "Variable": "$.response.describe_endpoints.DbClusterEndpoints[0].Status",
+#           "StringMatches": "available",
+#           "Next": "Success"
+#         }
+#       ],
+#       "Default": "Wait"
+#     },
+#     "Success": {
+#       "Type": "Succeed"
+#     },
+#     "Wait": {
+#       "Type": "Wait",
+#       "Seconds": 10,
+#       "Next": "DescribeDBClusterEndpoints",
+#       "Comment": "Wait until db cluster endpoints are available"
+#     }
+#   }
+# }
+
+
+# State.CreateDBCluster output:
+# DbCluster.Endpoint   | "aurora-serverless-ephemeral-import.cluster-cizses2inrh6.us-east-1.rds.amazonaws.com"
