@@ -480,7 +480,7 @@ Resources:
             Type: Task
             Resource: arn:aws:states:::aws-sdk:ec2:describeInstanceStatus
             Parameters:
-              InstanceIds.$: States.Array(runInstances.Instances[0].InstanceId)
+              InstanceIds.$: States.Array($.runInstances.Instances[0].InstanceId)
               IncludeAllInstances: true
             Next: IsSystemStatusOk
             ResultPath: $.instanceStatus
@@ -503,17 +503,23 @@ Resources:
                 InstanceIds.$: States.Array($.runInstances.Instances[0].InstanceId)
                 taskToken.$: States.Array($$.Task.Token)
                 workingDirectory:
-                  - /home/ssm-user/
-                Commands:
-                  - echo "This is a test running automation waitForTaskToken" >> automation.log
-                  - sleep 10
+                  - /home/ubuntu/ # Use directory that is created at instance launch, otherwise you'll get a no such file or directory error
+
+                # Need to use States.Array so we can pass state input with Commands.$
+                Commands.$: |
+                  States.Array(
+                    'LOG_FILE=/home/ubuntu/automation.log', 
+                    States.Format('INSTANCE_STATUS={}', $.instanceStatus.InstanceStatuses[0].SystemStatus.Status), 
+                    'echo $INSTANCE_STATUS >> $LOG_FILE'
+                  )
                 executionTimeout:
                   - "10800"
                 deliveryTimeout:
                   - "30"
                 shell:
-                  - Shell # Execute Linux Shell commands
+                  - Shell  # Execute Linux Shell commands
             Next: CreateDBCluster
+            ResultPath: $.runImportInstanceScript
 
 
           # Create Aurora Serverless V2 MySQL Cluster
@@ -530,7 +536,8 @@ Resources:
                 MinCapacity: 0.5
                 MaxCapacity: 16
               MasterUsername: masteruser
-              MasterUserPassword: ephemeralroot # Can we specify the password securely?
+              ManageMasterUserPassword: true
+              # MasterUserPassword: ephemeralroot # Can we specify the password securely?
               DbSubnetGroupName: madisonreed-development-rds-mysql # Change this to a subnet group created by this IaC
               VpcSecurityGroupIds:
                 - sg-0e3b6e63ea5ef0eba # Change this to a SG created by this IaC
@@ -687,6 +694,7 @@ Resources:
                   - rds:CreateDBInstance
                   - rds:CreateDBClusterSnapshot
                   - rds:DescribeDBClusterSnapshots
+                  - secretsmanager:Create*
                 Resource: "*"
               - Sid: DeleteRDSCluster
                 Effect: Allow
@@ -746,3 +754,67 @@ Resources:
 
 # State.CreateDBCluster output:
 # DbCluster.Endpoint   | "aurora-serverless-ephemeral-import.cluster-cizses2inrh6.us-east-1.rds.amazonaws.com"
+
+
+# USE THIS TO GRAB THE USER PASSWORD FROM THE EC2 INSTANCE. EC2 must have ability to grab Secret values
+# DB_PASSWORD=$(aws secretsmanager get-secret-value --secret-id {SECRET_ARN} --query SecretString --output text | jq -r .password)",
+# DbCluster Secret $.response.create_db.DbCluster.MasterUserSecret.SecretArn:
+    # "create_db": {
+    #   "DbCluster": {
+    #     "AllocatedStorage": 1,
+    #     "AssociatedRoles": [],
+    #     "AutoMinorVersionUpgrade": true,
+    #     "AvailabilityZones": [
+    #       "us-east-1c",
+    #       "us-east-1a",
+    #       "us-east-1b"
+    #     ],
+    #     "BackupRetentionPeriod": 1,
+    #     "ClusterCreateTime": "2024-06-02T18:36:26.974Z",
+    #     "CopyTagsToSnapshot": false,
+    #     "CrossAccountClone": false,
+    #     "DbClusterArn": "arn:aws:rds:us-east-1:174743933558:cluster:aurora-serverless-ephemeral-import",
+    #     "DbClusterIdentifier": "aurora-serverless-ephemeral-import",
+    #     "DbClusterMembers": [],
+    #     "DbClusterParameterGroup": "default.aurora-mysql8.0",
+    #     "DbClusterResourceId": "cluster-6HB2ANPSUV7IIKJA42F5FH7O7E",
+    #     "DbSubnetGroup": "madisonreed-development-rds-mysql",
+    #     "DeletionProtection": false,
+    #     "DomainMemberships": [],
+    #     "Endpoint": "aurora-serverless-ephemeral-import.cluster-cizses2inrh6.us-east-1.rds.amazonaws.com",
+    #     "Engine": "aurora-mysql",
+    #     "EngineMode": "provisioned",
+    #     "EngineVersion": "8.0.mysql_aurora.3.04.1",
+    #     "HostedZoneId": "Z2R2ITUGPM61AM",
+    #     "HttpEndpointEnabled": false,
+    #     "IamDatabaseAuthenticationEnabled": false,
+    #     "KmsKeyId": "arn:aws:kms:us-east-1:174743933558:key/89578399-7b83-405f-ad1b-9a744d3e2507",
+    #     "LocalWriteForwardingStatus": "disabled",
+    #     "MasterUserSecret": {
+    #       "KmsKeyId": "arn:aws:kms:us-east-1:174743933558:key/ebf1291e-248e-4e38-b2e7-420b691183d5",
+    #       "SecretArn": "arn:aws:secretsmanager:us-east-1:174743933558:secret:rds!cluster-6797630e-21fe-423d-8101-0ae8ac1c9040-4ihPo7",
+    #       "SecretStatus": "creating"
+    #     },
+    #     "MasterUsername": "masteruser",
+    #     "MultiAZ": false,
+    #     "NetworkType": "IPV4",
+    #     "Port": 3306,
+    #     "PreferredBackupWindow": "07:26-07:56",
+    #     "PreferredMaintenanceWindow": "tue:08:49-tue:09:19",
+    #     "ReadReplicaIdentifiers": [],
+    #     "ReaderEndpoint": "aurora-serverless-ephemeral-import.cluster-ro-cizses2inrh6.us-east-1.rds.amazonaws.com",
+    #     "ServerlessV2ScalingConfiguration": {
+    #       "MaxCapacity": 16,
+    #       "MinCapacity": 0.5
+    #     },
+    #     "Status": "creating",
+    #     "StorageEncrypted": true,
+    #     "TagList": [],
+    #     "VpcSecurityGroups": [
+    #       {
+    #         "Status": "active",
+    #         "VpcSecurityGroupId": "sg-0e3b6e63ea5ef0eba"
+    #       }
+    #     ]
+    #   }
+    # },
