@@ -1,8 +1,7 @@
-
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
 
 Resources:
-
-
 
         # - PolicyName: StateMachineSendState
         #   PolicyDocument:
@@ -13,110 +12,207 @@ Resources:
         #           - states:SendTaskSuccess
         #           - states:SendTaskFailure
         #         Resource: "*"
-        
 
 
-  openPaymentsStateMachine:
+  lambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+      Policies:
+        - PolicyName: XRAYAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xxray:PutTelemetryRecords
+                Resource: "*"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+
+  getDatePatternLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt lambdaRole.Arn
+      Timeout: 120
+      MemorySize: 128
+      Runtime: python3.10
+      Architectures:
+        - x86_64
+      Handler: app.lambda_handler
+      CodeUri: lambdas/getDatePattern/
+
+  datePatternLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${getDatePatternLambda}
+      RetentionInDays: 30
+
+  auroraMysqlServerlessImportStateMachine:
     Type: AWS::Serverless::StateMachine
     Properties:
       Definition:
-        StartAt: RunFargateTask
+        StartAt: CreateDBCluster
         States:
-          RunFargateTask:
+
+          # Create Aurora Serverless V2 MySQL Cluster
+          CreateDBCluster:
             Type: Task
-            Resource: arn:aws:states:::ecs:runTask.waitForTaskToken
-            Next: CheckDataUpdated
+            Resource: arn:aws:states:::aws-sdk:rds:createDBCluster
             Parameters:
-              LaunchType: FARGATE
-              Cluster: !Ref fargateCluster
-              TaskDefinition: !Ref taskDefinition
-              NetworkConfiguration:
-                AwsvpcConfiguration:
-                  Subnets: 
-                   - !Ref pPrivateSubnet1a
-                   - !Ref pPrivateSubnet1b
-                  AssignPublicIp: DISABLED
-              # Override task def env vars
-              Overrides:
-                ContainerOverrides:
-                  - Name: OpenPayments # Replace with the name of the container in the task definition
-                    Environment:
-                      - Name: TASK_TOKEN
-                        Value: "$$.Task.Token"
-                      - Name: OPENPAYMENTS_URL
-                        Value: https://download.cms.gov/openpayments/PGYR18_P063023.ZIP
-                      - Name: DATA_BUCKET
-                        Value: !Ref dataBucket
-                      - Name: DATASET_INFO_TABLE
-                        Value: !Ref datasetInfoTable
-          # Check if the response from the fargate task was true for 'datasetUpdated'
-          CheckDataUpdated:
+              DbClusterIdentifier: aurora-serverless-ephemeral-import
+              Engine: aurora-mysql
+              EngineVersion: 8.0.mysql_aurora.3.04.1
+              EngineMode: provisioned
+              ServerlessV2ScalingConfiguration:
+                MinCapacity: 0.5
+                MaxCapacity: 16
+              MasterUsername: masteruser
+              MasterUserPassword: ephemeralroot # Can we specify the password securely?
+              DbSubnetGroupName: madisonreed-development-rds-mysql # Change this to a subnet group created by this IaC
+              VpcSecurityGroupIds:
+                - sg-0e3b6e63ea5ef0eba # Change this to a SG created by this IaC
+            
+            # Create the Writer Instance next so we can have the DB URL endpoints active.
+            Next: CreateDBInstance
+            ResultPath: $.response.create_db
+
+          CreateDBInstance:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:rds:createDBInstance
+            Parameters:
+              DbInstanceClass: db.serverless
+              DbInstanceIdentifier: ephemeral-import-writer-instance
+              DbClusterIdentifier: aurora-serverless-ephemeral-import
+              Engine: aurora-mysql
+            
+            # Move to Choice loop to check if the Endpoint is available before doing anything else
+            Next: DescribeDBClusterWriterInstance
+            ResultPath: $.response.create_db_writer
+          
+          # Check if Writer instance is available
+          DescribeDBClusterWriterInstance:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:rds:describeDBInstances
+            Parameters:
+              DbInstanceIdentifier: ephemeral-import-writer-instance
+            Next: IsEndpointAvailable?
+            ResultPath: $.response.describe_writer_instance
+          
+          IsEndpointAvailable?:
             Type: Choice
             Choices:
-              - Variable: "$.datasetUpdated"
-                BooleanEquals: true
-                Next: RunGlueETLJob
-            Default: EndState
-          RunGlueETLJob:
+              - Variable: $.response.describe_writer_instance.DbInstances[0].DbInstanceStatus
+                StringMatches: available
+                Next: GetSnapshotDatePattern
+            Default: WaitForDbEndpointCreation
+          WaitForDbEndpointCreation:
+            Type: Wait
+            Seconds: 30
+            Next: DescribeDBClusterWriterInstance
+            Comment: Wait until db cluster endpoints are available
+
+          # Call lambda function to get snapshot name date pattern suffix
+          GetSnapshotDatePattern:
             Type: Task
-            Resource: arn:aws:states:::glue:startJobRun.sync
+            Resource: arn:aws:states:::lambda:invoke
             Parameters:
-              JobName: !Ref openPaymentsMergeEtl
-            Next: RunGlueCrawler
-          RunGlueCrawler:
-            Type: Task
-            Resource: arn:aws:states:::aws-sdk:glue:startCrawler
-            Parameters:
-              Name: !Ref openPaymentsCrawler
+              Payload.$: $
+              FunctionName: !Ref getDatePatternLambda
             Retry:
               - ErrorEquals:
-                  - Glue.EntityNotFoundException
-                BackoffRate: 1
+                  - Lambda.ServiceException
+                  - Lambda.AWSLambdaException
+                  - Lambda.SdkClientException
+                  - Lambda.TooManyRequestsException
                 IntervalSeconds: 1
-                MaxAttempts: 0
-                Comment: EntityNotFoundException - Fail
-              - ErrorEquals:
-                  - Glue.CrawlerRunningException
-                BackoffRate: 1
-                IntervalSeconds: 1
-                MaxAttempts: 0              
-            Next: GetGlueCrawler
-            ResultPath: $.response.start_crawler
-            Catch:
-              - ErrorEquals:
-                  - Glue.CrawlerRunningException
-                Next: GetGlueCrawler
-                Comment: Crawler Already Running, continue to monitor
-                ResultPath: $.response.start_crawler
-          GetGlueCrawler:
+                MaxAttempts: 3
+                BackoffRate: 2
+            Next: CreateDBSnapshot
+            ResultPath: $.lambda_date_result
+
+          CreateDBSnapshot:
             Type: Task
-            Resource: arn:aws:states:::aws-sdk:glue:getCrawler
+            Resource: arn:aws:states:actions:CreateDBSnapshot
             Parameters:
-              Name: !Ref openPaymentsCrawler
-            ResultPath: $.response.get_crawler
-            Next: IsRunning?
-          IsRunning?:
+              DbSnapshotIdentifier.$: States.Format('ephemeral-{}', $.lambda_date_result.Payload.datePattern)
+              DbInstanceIdentifier: ephemeral-import-writer-instance
+            Next: WaitForSnapshotCreation
+            ResultPath: $.snapshotResult
+
+          WaitForSnapshotCreation:
+            Type: Wait
+            Seconds: 30
+            Next: CheckSnapshotStatus
+
+          CheckSnapshotStatus:
+            Type: Task
+            Resource: arn:aws:states:actions:DescribeDBSnapshots
+            Parameters:
+              DbSnapshotIdentifier.$: States.Format('ephemeral-{}', $.lambda_date_result.Payload.datePattern)
+              DbInstanceIdentifier: ephemeral-import-writer-instance
+            Next: IsSnapshotAvailable
+            ResultPath: $.snapshotStatusResult
+
+          # If snapshot is available, move to delete the cluster
+          IsSnapshotAvailable:
             Type: Choice
             Choices:
-              - Or:
-                  - Variable: $.response.get_crawler.Crawler.State
-                    StringEquals: RUNNING # Valid states are READY, RUNNING, STOPPING
-                  - Variable: $.response.get_crawler.Crawler.State
-                    StringEquals: STOPPING
-                Next: WaitForCrawlerCompletion
-            Default: EndState
-          WaitForCrawlerCompletion:
-            Type: Wait
-            Seconds: 5
-            Next: GetGlueCrawler
-          EndState:
+              - Variable: $.snapshotStatusResult.DBSnapshots[0].Status
+                StringEquals: available
+                Next: DeleteWriterInstance
+            Default: WaitForSnapshotCreation
+
+          
+          # Delete the writer instance so we can delete the cluster
+          DeleteWriterInstance:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:rds:deleteDBInstance
+            Parameters:
+              DbInstanceIdentifier: ephemeral-import-writer-instance
+            Next: DeleteDBCluster
+            ResultPath: null # Discard the results from this step
+          
+          # Delete the Aurora Cluster and take a final snapshot beforehand
+          DeleteDBCluster:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:rds:deleteDBCluster
+            Parameters:
+              DbClusterIdentifier: aurora-serverless-ephemeral-import
+              SkipFinalSnapshot: true
+
+              # Using this gives the error: [The field "FinalDbSnapshotIdentifier" is not supported by Step Functions] ???
+              # FinalDbSnapshotIdentifier.$: States.Format('ephemeral-{}', $.lambda_date_result.Payload.datePattern)
+            Next: EndSuccess
+          
+          EndSuccess:
             Type: Succeed
+
+
+
+
+
+
+
+
+
+
       Role: !GetAtt stateMachineExecutionRole.Arn
       Events:
         CronSchedule:
           Type: Schedule
           Properties:
-            Schedule: cron(0 8 1 1 ? *)  # Every 1st of January @ 8 AM UTC. Data updates yearly at the beginning of the year (Jan 1st?)
+            Schedule: cron(0 8 1 1 ? *)
             Enabled: False
 
 
@@ -124,7 +220,7 @@ Resources:
     Type: AWS::IAM::Role
     Properties:
       AssumeRolePolicyDocument:
-        Version: '2012-10-17'
+        Version: 2012-10-17
         Statement:
           - Effect: Allow
             Principal:
@@ -138,15 +234,33 @@ Resources:
               - Effect: Allow
                 Action:
                   - lambda:InvokeFunction
-                  - ecs:DescribeTaskDefinition
                 Resource: "*"
-              - Effect: Allow
+              - Sid: RDSApiCalls
+                Effect: Allow
                 Action:
-                  - ecs:RunTask
-                  - ecs:DescribeTasks
+                  - rds:DescribeDBClusters
+                  - rds:DescribeDBInstances
+                  - rds:CreateDBCluster
+                  - rds:CreateDBInstance
+                  - rds:DescribeDBClusterEndpoints
                 Resource: "*"
-                  # - !GetAtt fargateCluster.Arn
-                  # - !Ref taskDefinition
+              - Sid: DeleteRDSCluster
+                Effect: Allow
+                Action:
+                  - rds:DeleteDBCluster
+                  - rds:DeleteDBInstance
+                Resource: "*" # Make this more fine grained
+
+
+
+              # - Effect: Allow
+              #   Action:
+              #     - ecs:RunTask
+              #     - ecs:DescribeTasks
+              #     - ecs:DescribeTaskDefinition
+              #   Resource: "*"
+              #     - !GetAtt fargateCluster.Arn
+              #     - !Ref taskDefinition
               # - Sid: PassEcsExecutionRole
               #   Effect: Allow
               #   Action:
@@ -159,76 +273,6 @@ Resources:
 # https://github.com/aws-samples/amazon-stepfunctions-ssm-waitfortasktoken/tree/main <- Use this cloudformation to make the SSM document
 
 
-
-# {
-#   "Comment": "A description of my state machine",
-#   "StartAt": "CreateDBCluster",
-#   "States": {
-#     "CreateDBCluster": {
-#       "Type": "Task",
-#       "Parameters": {
-#         "DbClusterIdentifier": "aurora-serverless-ephemeral-import",
-#         "Engine": "aurora-mysql",
-#         "EngineVersion": "8.0.mysql_aurora.3.04.1",
-#         "EngineMode": "provisioned",
-#         "ServerlessV2ScalingConfiguration": {
-#           "MinCapacity": 0.5,
-#           "MaxCapacity": 16
-#         },
-#         "MasterUsername": "masteruser",
-#         "MasterUserPassword": "ephemeralroot",
-#         "DbSubnetGroupName": "madisonreed-development-rds-mysql",
-#         "VpcSecurityGroupIds": [
-#           "sg-0e3b6e63ea5ef0eba"
-#         ]
-#       },
-#       "Resource": "arn:aws:states:::aws-sdk:rds:createDBCluster",
-#       "Next": "CreateDBInstance",
-#       "ResultPath": "$.response.create_db"
-#     },
-#     "CreateDBInstance": {
-#       "Type": "Task",
-#       "Parameters": {
-#         "DbInstanceClass": "db.serverless",
-#         "DbInstanceIdentifier": "ephemeral-import-writer-instance",
-#         "DbClusterIdentifier": "aurora-serverless-ephemeral-import",
-#         "Engine": "aurora-mysql"
-#       },
-#       "Resource": "arn:aws:states:::aws-sdk:rds:createDBInstance",
-#       "Next": "DescribeDBClusterEndpoints",
-#       "ResultPath": "$.response.create_db_writer"
-#     },
-#     "DescribeDBClusterEndpoints": {
-#       "Type": "Task",
-#       "Parameters": {
-#         "DbClusterIdentifier": "aurora-serverless-ephemeral-import"
-#       },
-#       "Resource": "arn:aws:states:::aws-sdk:rds:describeDBClusterEndpoints",
-#       "Next": "IsAvailable?",
-#       "ResultPath": "$.response.describe_endpoints"
-#     },
-#     "IsAvailable?": {
-#       "Type": "Choice",
-#       "Choices": [
-#         {
-#           "Variable": "$.response.describe_endpoints.DbClusterEndpoints[0].Status",
-#           "StringMatches": "available",
-#           "Next": "Success"
-#         }
-#       ],
-#       "Default": "Wait"
-#     },
-#     "Success": {
-#       "Type": "Succeed"
-#     },
-#     "Wait": {
-#       "Type": "Wait",
-#       "Seconds": 10,
-#       "Next": "DescribeDBClusterEndpoints",
-#       "Comment": "Wait until db cluster endpoints are available"
-#     }
-#   }
-# }
 
 
 # State.CreateDBCluster output:
