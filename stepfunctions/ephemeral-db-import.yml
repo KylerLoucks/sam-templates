@@ -138,29 +138,29 @@ Resources:
                 IntervalSeconds: 1
                 MaxAttempts: 3
                 BackoffRate: 2
-            Next: CreateDBSnapshot
+            Next: CreateDBClusterSnapshot
             ResultPath: $.lambda_date_result
 
-          CreateDBSnapshot:
+          CreateDBClusterSnapshot:
             Type: Task
-            Resource: arn:aws:states:::aws-sdk:rds:createDBSnapshot
+            Resource: arn:aws:states:::aws-sdk:rds:createDBClusterSnapshot
             Parameters:
-              DbSnapshotIdentifier.$: States.Format('ephemeral-{}', $.lambda_date_result.Payload.datePattern)
-              DbInstanceIdentifier: ephemeral-import-writer-instance
+              DbClusterSnapshotIdentifier.$: States.Format('ephemeral-{}', $.lambda_date_result.Payload.datePattern)
+              DbClusterIdentifier: aurora-serverless-ephemeral-import
             Next: WaitForSnapshotCreation
             ResultPath: $.snapshotResult
 
           WaitForSnapshotCreation:
             Type: Wait
             Seconds: 30
-            Next: CheckSnapshotStatus
+            Next: CheckClusterSnapshotStatus
 
-          CheckSnapshotStatus:
+          CheckClusterSnapshotStatus:
             Type: Task
-            Resource: arn:aws:states:::aws-sdk:rds:describeDBSnapshots
+            Resource: arn:aws:states:::aws-sdk:rds:describeDBClusterSnapshots
             Parameters:
-              DbSnapshotIdentifier.$: States.Format('ephemeral-{}', $.lambda_date_result.Payload.datePattern)
-              DbInstanceIdentifier: ephemeral-import-writer-instance
+              DbClusterSnapshotIdentifier.$: States.Format('ephemeral-{}', $.lambda_date_result.Payload.datePattern)
+              DbClusterIdentifier: aurora-serverless-ephemeral-import
             Next: IsSnapshotAvailable
             ResultPath: $.snapshotStatusResult
 
