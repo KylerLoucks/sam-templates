@@ -467,8 +467,31 @@ Resources:
                     VolumeType: gp3
                     Iops: 3000
               InstanceInitiatedShutdownBehavior: terminate # Set this so we can terminate the instance using shutdown shell cmd
-            Next: RunImportInstanceScript
+            Next: WaitForInstanceInitialization
             ResultPath: $.runInstances
+
+          WaitForInstanceInitialization:
+            Type: Wait
+            Seconds: 60  # Adjust the wait time as needed
+            Next: CheckInstanceStatus
+
+          # Make sure the instance is fully initialized before running scripts on it.
+          CheckInstanceStatus:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:ec2:describeInstanceStatus
+            Parameters:
+              InstanceIds.$: States.Array(runInstances.Instances[0].InstanceId)
+              IncludeAllInstances: true
+            Next: IsSystemStatusOk
+            ResultPath: $.instanceStatus
+
+          IsSystemStatusOk:
+            Type: Choice
+            Choices:
+              - Variable: $.instanceStatus.InstanceStatuses[0].SystemStatus.Status
+                StringEquals: ok
+                Next: RunImportInstanceScript
+            Default: WaitForInstanceInitialization  # If not ok, wait again
 
 
           RunImportInstanceScript:
@@ -683,6 +706,7 @@ Resources:
                 Action:
                   - ec2:RunInstances
                   - ec2:TerminateInstances
+                  - ec2:DescribeInstance*
                 Resource: "*"
               # Permissions to allow running an SSM automation document on EC2 instance
               - Sid: StartAutomation
