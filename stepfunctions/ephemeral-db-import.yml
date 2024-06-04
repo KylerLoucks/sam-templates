@@ -10,6 +10,16 @@ Parameters:
   pPrivateSubnet1a:
     Type: String
     Default: subnet-01086857935bfcf34
+  
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the Virtual Private Network (VPC)
+    Default: vpc-09ef4a53e9290ca17
+
+  pVpcCidr:
+    Type: String
+    Description: CIDR range of the VPC (e.g. 10.20.0.0/16)
+    Default: 10.20.0.0/16
 
 Resources:
 
@@ -443,6 +453,21 @@ Resources:
       Roles:
         - !Ref runInstanceRole
 
+  # RDS Aurora SG. Use this for both EC2 and Serverless Cluster
+  auroraSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for MYSQL/Aurora
+      VpcId: !Ref pVpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: !Ref pVpcCidr
+      Tags:
+        - Key: Name
+          Value: EphemeralAuroraMySQLImport
+
   auroraMysqlServerlessImportStateMachine:
     Type: AWS::Serverless::StateMachine
     Properties:
@@ -467,7 +492,7 @@ Resources:
               # MasterUserPassword: ephemeralroot # Can we specify the password securely?
               DbSubnetGroupName: madisonreed-development-rds-mysql # Change this to a subnet group created by this IaC
               VpcSecurityGroupIds:
-                - sg-0e3b6e63ea5ef0eba # Change this to a SG created by this IaC
+                - !GetAtt auroraSecurityGroup.GroupId
             
             # Create the Writer Instance next so we can have the DB URL endpoints active.
             Next: CreateDBInstance
@@ -518,7 +543,7 @@ Resources:
               IamInstanceProfile: 
                 Arn: !GetAtt runInstanceProfile.Arn
               SecurityGroupIds:
-                - sg-0e3b6e63ea5ef0eba
+                - !GetAtt auroraSecurityGroup.GroupId
               SubnetId: !Ref pPrivateSubnet1a
               MaxCount: 1
               MinCount: 1
@@ -556,7 +581,7 @@ Resources:
                 Next: RunImportInstanceScript
             Default: WaitForInstanceInitialization  # If not ok, wait again
 
-          # Run Script on EC2 instances
+          # Run Script on EC2 instance(s)
           RunImportInstanceScript:
             Type: Task
             Resource: arn:aws:states:::aws-sdk:ssm:startAutomationExecution.waitForTaskToken
@@ -788,76 +813,69 @@ Resources:
               #   Resource: !GetAtt taskExecutionRole.Arn
 
 
+
 # Use Step Functions to RunInstances
 # use the instance ID from the output as input into the next step (ssm:startAutomationExecution.waitForTaskToken)
 # https://github.com/aws-samples/amazon-stepfunctions-ssm-waitfortasktoken/tree/main <- Use this cloudformation to make the SSM document
 
-
-
-
-# State.CreateDBCluster output:
+# CreateDBCluster output:
 # DbCluster.Endpoint   | "aurora-serverless-ephemeral-import.cluster-cizses2inrh6.us-east-1.rds.amazonaws.com"
-
-
-# USE THIS TO GRAB THE USER PASSWORD FROM THE EC2 INSTANCE. EC2 must have ability to grab Secret values
-# DB_PASSWORD=$(aws secretsmanager get-secret-value --secret-id {SECRET_ARN} --query SecretString --output text | jq -r .password)",
-# DbCluster Secret $.response.create_db.DbCluster.MasterUserSecret.SecretArn:
-    # "create_db": {
-    #   "DbCluster": {
-    #     "AllocatedStorage": 1,
-    #     "AssociatedRoles": [],
-    #     "AutoMinorVersionUpgrade": true,
-    #     "AvailabilityZones": [
-    #       "us-east-1c",
-    #       "us-east-1a",
-    #       "us-east-1b"
-    #     ],
-    #     "BackupRetentionPeriod": 1,
-    #     "ClusterCreateTime": "2024-06-02T18:36:26.974Z",
-    #     "CopyTagsToSnapshot": false,
-    #     "CrossAccountClone": false,
-    #     "DbClusterArn": "arn:aws:rds:us-east-1:174743933558:cluster:aurora-serverless-ephemeral-import",
-    #     "DbClusterIdentifier": "aurora-serverless-ephemeral-import",
-    #     "DbClusterMembers": [],
-    #     "DbClusterParameterGroup": "default.aurora-mysql8.0",
-    #     "DbClusterResourceId": "cluster-6HB2ANPSUV7IIKJA42F5FH7O7E",
-    #     "DbSubnetGroup": "madisonreed-development-rds-mysql",
-    #     "DeletionProtection": false,
-    #     "DomainMemberships": [],
-    #     "Endpoint": "aurora-serverless-ephemeral-import.cluster-cizses2inrh6.us-east-1.rds.amazonaws.com",
-    #     "Engine": "aurora-mysql",
-    #     "EngineMode": "provisioned",
-    #     "EngineVersion": "8.0.mysql_aurora.3.04.1",
-    #     "HostedZoneId": "Z2R2ITUGPM61AM",
-    #     "HttpEndpointEnabled": false,
-    #     "IamDatabaseAuthenticationEnabled": false,
-    #     "KmsKeyId": "arn:aws:kms:us-east-1:174743933558:key/89578399-7b83-405f-ad1b-9a744d3e2507",
-    #     "LocalWriteForwardingStatus": "disabled",
-    #     "MasterUserSecret": {
-    #       "KmsKeyId": "arn:aws:kms:us-east-1:174743933558:key/ebf1291e-248e-4e38-b2e7-420b691183d5",
-    #       "SecretArn": "arn:aws:secretsmanager:us-east-1:174743933558:secret:rds!cluster-6797630e-21fe-423d-8101-0ae8ac1c9040-4ihPo7",
-    #       "SecretStatus": "creating"
-    #     },
-    #     "MasterUsername": "masteruser",
-    #     "MultiAZ": false,
-    #     "NetworkType": "IPV4",
-    #     "Port": 3306,
-    #     "PreferredBackupWindow": "07:26-07:56",
-    #     "PreferredMaintenanceWindow": "tue:08:49-tue:09:19",
-    #     "ReadReplicaIdentifiers": [],
-    #     "ReaderEndpoint": "aurora-serverless-ephemeral-import.cluster-ro-cizses2inrh6.us-east-1.rds.amazonaws.com",
-    #     "ServerlessV2ScalingConfiguration": {
-    #       "MaxCapacity": 16,
-    #       "MinCapacity": 0.5
-    #     },
-    #     "Status": "creating",
-    #     "StorageEncrypted": true,
-    #     "TagList": [],
-    #     "VpcSecurityGroups": [
-    #       {
-    #         "Status": "active",
-    #         "VpcSecurityGroupId": "sg-0e3b6e63ea5ef0eba"
-    #       }
-    #     ]
-    #   }
-    # },
+# "create_db": {
+#   "DbCluster": {
+#     "AllocatedStorage": 1,
+#     "AssociatedRoles": [],
+#     "AutoMinorVersionUpgrade": true,
+#     "AvailabilityZones": [
+#       "us-east-1c",
+#       "us-east-1a",
+#       "us-east-1b"
+#     ],
+#     "BackupRetentionPeriod": 1,
+#     "ClusterCreateTime": "2024-06-02T18:36:26.974Z",
+#     "CopyTagsToSnapshot": false,
+#     "CrossAccountClone": false,
+#     "DbClusterArn": "arn:aws:rds:us-east-1:174743933558:cluster:aurora-serverless-ephemeral-import",
+#     "DbClusterIdentifier": "aurora-serverless-ephemeral-import",
+#     "DbClusterMembers": [],
+#     "DbClusterParameterGroup": "default.aurora-mysql8.0",
+#     "DbClusterResourceId": "cluster-6HB2ANPSUV7IIKJA42F5FH7O7E",
+#     "DbSubnetGroup": "madisonreed-development-rds-mysql",
+#     "DeletionProtection": false,
+#     "DomainMemberships": [],
+#     "Endpoint": "aurora-serverless-ephemeral-import.cluster-cizses2inrh6.us-east-1.rds.amazonaws.com",
+#     "Engine": "aurora-mysql",
+#     "EngineMode": "provisioned",
+#     "EngineVersion": "8.0.mysql_aurora.3.04.1",
+#     "HostedZoneId": "Z2R2ITUGPM61AM",
+#     "HttpEndpointEnabled": false,
+#     "IamDatabaseAuthenticationEnabled": false,
+#     "KmsKeyId": "arn:aws:kms:us-east-1:174743933558:key/89578399-7b83-405f-ad1b-9a744d3e2507",
+#     "LocalWriteForwardingStatus": "disabled",
+#     "MasterUserSecret": {
+#       "KmsKeyId": "arn:aws:kms:us-east-1:174743933558:key/ebf1291e-248e-4e38-b2e7-420b691183d5",
+#       "SecretArn": "arn:aws:secretsmanager:us-east-1:174743933558:secret:rds!cluster-6797630e-21fe-423d-8101-0ae8ac1c9040-4ihPo7",
+#       "SecretStatus": "creating"
+#     },
+#     "MasterUsername": "masteruser",
+#     "MultiAZ": false,
+#     "NetworkType": "IPV4",
+#     "Port": 3306,
+#     "PreferredBackupWindow": "07:26-07:56",
+#     "PreferredMaintenanceWindow": "tue:08:49-tue:09:19",
+#     "ReadReplicaIdentifiers": [],
+#     "ReaderEndpoint": "aurora-serverless-ephemeral-import.cluster-ro-cizses2inrh6.us-east-1.rds.amazonaws.com",
+#     "ServerlessV2ScalingConfiguration": {
+#       "MaxCapacity": 16,
+#       "MinCapacity": 0.5
+#     },
+#     "Status": "creating",
+#     "StorageEncrypted": true,
+#     "TagList": [],
+#     "VpcSecurityGroups": [
+#       {
+#         "Status": "active",
+#         "VpcSecurityGroupId": "sg-0e3b6e63ea5ef0eba"
+#       }
+#     ]
+#   }
+# }
