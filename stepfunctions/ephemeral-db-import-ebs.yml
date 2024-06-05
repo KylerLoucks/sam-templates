@@ -482,7 +482,7 @@ Resources:
             Resource: arn:aws:states:::aws-sdk:ec2:runInstances
             Parameters:
               ImageId: !Ref pUbuntuImageId
-              InstanceType: t3.xlarge
+              InstanceType: t3.large
               IamInstanceProfile: 
                 Arn: !GetAtt runInstanceProfile.Arn
               SecurityGroupIds:
@@ -493,16 +493,19 @@ Resources:
               BlockDeviceMappings:
                 - DeviceName: /dev/sda1
                   Ebs:
-                    VolumeSize: 8
+                    VolumeSize: 80
                     DeleteOnTermination: true
                     VolumeType: gp3
                     Iops: 3000
+                    Encrypted: true
                 - DeviceName: /dev/xvdf
                   Ebs:
                     VolumeSize: 300
                     DeleteOnTermination: false
                     VolumeType: gp3
                     Iops: 3000
+                    Encrypted: true
+
               InstanceInitiatedShutdownBehavior: terminate # Set this so we can terminate the instance using shutdown shell cmd
             Next: WaitForInstanceInitialization
             ResultPath: $.runInstances
@@ -546,12 +549,44 @@ Resources:
                 Commands.$: |
                   States.Array(
                     'LOG_FILE=/home/ubuntu/automation.log', 
-                    'apt install -y mysql-client-core-8.0 >> $LOG_FILE 2>&1',
+                    'apt install -y mysql-server >> $LOG_FILE 2>&1',
                     'apt install -y unzip >> $LOG_FILE 2>&1',
                     'apt install -y jq >> $LOG_FILE 2>&1',
                     'curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"',
                     'unzip awscliv2.zip',
-                    './aws/install'
+                    './aws/install',
+                    'mkfs -t ext4 /dev/nvme1n1',
+                    'mkdir -p /var/lib/mysql',
+                    'mount /dev/nvme1n1 /var/lib/mysql',
+                    'echo "Mounted nvme1n1 volume to /var/lib/mysql..."',
+                    'chown -R mysql:mysql /var/lib/mysql',
+                    'sed -i "0,/^# datadir/s|^# datadir.*|datadir = /var/lib/mysql|" /etc/mysql/mysql.conf.d/mysqld.cnf',
+                    'systemctl start mysql',
+                    'systemctl enable mysql',
+                    'mysqladmin -u root password "root"',
+                    'DATABASES="inventory magento tophat"',
+                    'for DB_NAME in $DATABASES; do',
+                    '  echo "Creating database $DB_NAME" >> $LOG_FILE',
+                    '  if mysql -u root -proot -e "CREATE DATABASE IF NOT EXISTS $DB_NAME;"; then',
+                    '    echo "Database $DB_NAME created successfully." >> $LOG_FILE',
+                    '  else',
+                    '  echo "Error creating database $DB_NAME Exiting..." >> $LOG_FILE',
+                    '  exit 1',
+                    '  fi',
+                    'done',
+                    'echo "All Databases created successfully, proceeding with import" >> $LOG_FILE',
+                    'S3_FILE=$(aws s3api list-objects-v2 --bucket db-prod-sanitized-backup --query "reverse(sort_by(Contents, &LastModified))[0].Key" --output text)',
+                    'echo "Copying $S3_FILE from dump bucket..." >> $LOG_FILE',
+                    'aws s3 cp s3://db-prod-sanitized-backup/$S3_FILE dbs_mysql.tar',
+                    'tar -xf dbs_mysql.tar',
+                    'mv *.dmp dump.sql',
+                    'if mysql -u root -proot < dump.sql; then',
+                    '  echo "Database import completed successfully." >> $LOG_FILE',
+                    'else',
+                    '  echo "Error during database import. Exiting..." >> $LOG_FILE',
+                    '  exit 1',
+                    'fi',
+                    'echo "Script completed." >> $LOG_FILE'
                   )
                 executionTimeout:
                   - "72000"
@@ -563,29 +598,8 @@ Resources:
             ResultPath: $.runImportInstanceScript
 
 
-                    # 'DATABASES="inventory magento tophat"',
-                    # 'for DB_NAME in $DATABASES; do',
-                    # '  echo "Creating database $DB_NAME" >> $LOG_FILE',
-                    # '  if mysql -h $DB_ENDPOINT -u $DB_USER -p$DB_PASSWORD -e "CREATE DATABASE IF NOT EXISTS $DB_NAME;"; then',
-                    # '    echo "Database $DB_NAME created successfully." >> $LOG_FILE',
-                    # '  else',
-                    # '  echo "Error creating database $DB_NAME Exiting..." >> $LOG_FILE',
-                    # '  exit 1',
-                    # '  fi',
-                    # 'done',
-                    # 'echo "All Databases created successfully, proceeding with import" >> $LOG_FILE',
-                    # 'S3_FILE=$(aws s3api list-objects-v2 --bucket db-prod-sanitized-backup --query "reverse(sort_by(Contents, &LastModified))[0].Key" --output text)',
-                    # 'echo "Copying $S3_FILE from dump bucket..." >> $LOG_FILE',
-                    # 'aws s3 cp s3://db-prod-sanitized-backup/$S3_FILE dbs_mysql.tar',
-                    # 'tar -xf dbs_mysql.tar',
-                    # 'mv *.dmp dump.sql',
-                    # 'if mysql -h $DB_ENDPOINT -u $DB_USER -p$DB_PASSWORD < dump.sql; then',
-                    # '  echo "Database import completed successfully." >> $LOG_FILE',
-                    # 'else',
-                    # '  echo "Error during database import. Exiting..." >> $LOG_FILE',
-                    # '  exit 1',
-                    # 'fi',
-                    # 'echo "Script completed." >> $LOG_FILE'
+
+
 
 
           # TerminateInstance:
