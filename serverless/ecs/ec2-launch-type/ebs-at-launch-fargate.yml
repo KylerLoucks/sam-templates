@@ -256,6 +256,9 @@ Resources:
             VolumeType: gp3
             SizeInGiB: 300
             FilesystemType: ext4
+            # SnapshotId: # Here we can specify the Snapshot of an EBS volume to use.
+            # We can grab the latest created snapshot ID as long as we provide a tag-key that makes sense. 
+            # aws ec2 describe-snapshots --filters Name=tag-key,Values=ephemeral-mysql --query "Snapshots[].[SnapshotId,StartTime]" --output json | jq -r 'sort_by(.[1]) | last | .[0]'
       Tags: 
         - Key: managed-by
           Value: SAM
