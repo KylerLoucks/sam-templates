@@ -743,8 +743,10 @@ Resources:
                   - ec2:RunInstances
                   - ec2:TerminateInstances
                   - ec2:DescribeInstances
+                  - ec2:DescribeInstanceStatus
                   - ec2:CreateSnapshot
                   - ec2:DescribeSnapshots
+                  - ec2:CreateTags
                 Resource: "*"
               - Sid: DeleteVolume
                 Effect: Allow
