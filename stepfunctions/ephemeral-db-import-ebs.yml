@@ -739,7 +739,7 @@ Resources:
               #   Resource: !GetAtt taskExecutionRole.Arn
 
 
-
+# aws ec2 describe-snapshots --filters Name=tag-key,Values=ephemeral-mysql --query "Snapshots[].[SnapshotId,StartTime]" --output json | jq -r 'sort_by(.[1]) | last | .[0]'
 # Use Step Functions to RunInstances
 # use the instance ID from the output as input into the next step (ssm:startAutomationExecution.waitForTaskToken)
 # https://github.com/aws-samples/amazon-stepfunctions-ssm-waitfortasktoken/tree/main <- Use this cloudformation to make the SSM document
