@@ -37,7 +37,7 @@ Parameters:
 
   pMysqlEcrImageUri:
     Type: String
-    Default: 174743933558.dkr.ecr.us-east-1.amazonaws.com/mysql-ephemeral:20240509
+    Default: mysql:latest # 174743933558.dkr.ecr.us-east-1.amazonaws.com/mysql-ephemeral:20240509
     Description: > 
       URI of the ECR image used for MySQL Task Definition. 
       e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
@@ -88,6 +88,7 @@ Resources:
             Action: sts:AssumeRole
       Policies:
         # Ecs Exec into Fargate containers https://aws.amazon.com/blogs/containers/new-using-amazon-ecs-exec-access-your-containers-fargate-ec2/
+        # aws ecs execute-command --region us-east-1 --cluster <cluster-name> --task <task-id> --container mysql --command "/bin/bash"
         # Also requires `ssmmessages` Interface VPC endpoint: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-exec.html#ecs-exec-troubleshooting
         # Requires the SSM Session Manager plugin for the AWS CLI (https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
         - PolicyName: EcsExec

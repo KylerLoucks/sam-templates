@@ -493,7 +493,7 @@ Resources:
               BlockDeviceMappings:
                 - DeviceName: /dev/sda1
                   Ebs:
-                    VolumeSize: 80
+                    VolumeSize: 100
                     DeleteOnTermination: true
                     VolumeType: gp3
                     Iops: 3000
@@ -546,24 +546,31 @@ Resources:
                   - /home/ubuntu/ # Use directory that is created at instance launch, otherwise you'll get a `no such file or directory` error
 
                 # Need to use States.Array so we can pass state input with Commands.$
+                # TLDR of this script: 
+                # 1. create temp mounting dir for the new Ebs volume
+                # 2. copy the contents of the base mysql data as to not break mysql when we move the new mount back to var/lib/mysql
+                # 3. import database dump
+                # NOTE: if script fails, it could be due to instance root volume running out of storage. Verify /dev/root with `df -h` cmd
                 Commands.$: |
                   States.Array(
                     'LOG_FILE=/home/ubuntu/automation.log', 
-                    'apt install -y mysql-server >> $LOG_FILE 2>&1',
                     'apt install -y unzip >> $LOG_FILE 2>&1',
                     'apt install -y jq >> $LOG_FILE 2>&1',
                     'curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"',
                     'unzip awscliv2.zip',
                     './aws/install',
-                    'mkfs -t ext4 /dev/nvme1n1',
-                    'mkdir -p /var/lib/mysql',
-                    'mount /dev/nvme1n1 /var/lib/mysql',
-                    'echo "Mounted nvme1n1 volume to /var/lib/mysql..."',
-                    'chown -R mysql:mysql /var/lib/mysql',
-                    'sed -i "0,/^# datadir/s|^# datadir.*|datadir = /var/lib/mysql|" /etc/mysql/mysql.conf.d/mysqld.cnf',
-                    'systemctl start mysql',
-                    'systemctl enable mysql',
+                    'apt install -y mysql-server >> $LOG_FILE 2>&1',
                     'mysqladmin -u root password "root"',
+                    'systemctl stop mysql',
+                    'mkdir -p /mnt/tmpdata',
+                    'mkfs -t ext4 /dev/nvme1n1',
+                    'mount /dev/nvme1n1 /mnt/tmpdata',
+                    'chown -R mysql:mysql /mnt/tmpdata',
+                    'rsync -a /var/lib/mysql/ /mnt/tmpdata/',
+                    'umount /mnt/tmpdata',
+                    'mount /dev/nvme1n1 /var/lib/mysql',
+                    'echo "Mounted to /var/lib/mysql" >> $LOG_FILE',
+                    'systemctl start mysql',
                     'DATABASES="inventory magento tophat"',
                     'for DB_NAME in $DATABASES; do',
                     '  echo "Creating database $DB_NAME" >> $LOG_FILE',
@@ -580,6 +587,7 @@ Resources:
                     'aws s3 cp s3://db-prod-sanitized-backup/$S3_FILE dbs_mysql.tar',
                     'tar -xf dbs_mysql.tar',
                     'mv *.dmp dump.sql',
+                    'echo "Importing MySQL dump!" >> $LOG_FILE'
                     'if mysql -u root -proot < dump.sql; then',
                     '  echo "Database import completed successfully." >> $LOG_FILE',
                     'else',
@@ -596,11 +604,6 @@ Resources:
                   - Shell  # Execute Linux Shell commands
             Next: EndSuccess
             ResultPath: $.runImportInstanceScript
-
-
-
-
-
 
           # TerminateInstance:
           #   Type: Task
