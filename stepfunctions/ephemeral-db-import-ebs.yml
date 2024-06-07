@@ -473,8 +473,27 @@ Resources:
     Type: AWS::Serverless::StateMachine
     Properties:
       Definition:
-        StartAt: RunInstances
+        StartAt: GetSnapshotDatePattern
         States:
+
+          # Call lambda function to get snapshot name date pattern suffix
+          GetSnapshotDatePattern:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters:
+              Payload.$: $
+              FunctionName: !Ref getDatePatternLambda
+            Retry:
+              - ErrorEquals:
+                  - Lambda.ServiceException
+                  - Lambda.AWSLambdaException
+                  - Lambda.SdkClientException
+                  - Lambda.TooManyRequestsException
+                IntervalSeconds: 1
+                MaxAttempts: 3
+                BackoffRate: 2
+            Next: RunInstances
+            ResultPath: $.lambda_date_result
 
           # Run Import DB EC2 Instance
           RunInstances:
@@ -490,6 +509,18 @@ Resources:
               SubnetId: !Ref pPrivateSubnet1a
               MaxCount: 1
               MinCount: 1
+              # Tag both the volumes and Ec2 Instance for visability and queries
+              TagSpecifications:
+                - ResourceType: instance
+                  Tags:
+                    - Key: Name
+                      Value.$: States.Format('ephemeral-mysql-{}', $.lambda_date_result.Payload.datePattern)
+                - ResourceType: volume
+                  Tags:
+                    - Key: Name
+                      Value.$: States.Format('ephemeral-mysql-{}', $.lambda_date_result.Payload.datePattern)
+                    - Key: ephemeral-mysql
+                      Value.$: States.Format('{}', $.lambda_date_result.Payload.datePattern)
               BlockDeviceMappings:
                 - DeviceName: /dev/sda1
                   Ebs:
@@ -553,7 +584,7 @@ Resources:
                 # NOTE: if script fails, it could be due to instance root volume running out of storage. Verify /dev/root with `df -h` cmd
                 Commands.$: |
                   States.Array(
-                    'LOG_FILE=/home/ubuntu/automation.log', 
+                    'LOG_FILE=/home/ubuntu/automation.log',
                     'apt install -y unzip >> $LOG_FILE 2>&1',
                     'apt install -y jq >> $LOG_FILE 2>&1',
                     'curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"',
@@ -577,8 +608,8 @@ Resources:
                     '  if mysql -u root -proot -e "CREATE DATABASE IF NOT EXISTS $DB_NAME;"; then',
                     '    echo "Database $DB_NAME created successfully." >> $LOG_FILE',
                     '  else',
-                    '  echo "Error creating database $DB_NAME Exiting..." >> $LOG_FILE',
-                    '  exit 1',
+                    '    echo "Error creating database $DB_NAME Exiting..." >> $LOG_FILE',
+                    '    exit 1',
                     '  fi',
                     'done',
                     'echo "All Databases created successfully, proceeding with import" >> $LOG_FILE',
@@ -587,7 +618,7 @@ Resources:
                     'aws s3 cp s3://db-prod-sanitized-backup/$S3_FILE dbs_mysql.tar',
                     'tar -xf dbs_mysql.tar',
                     'mv *.dmp dump.sql',
-                    'echo "Importing MySQL dump!" >> $LOG_FILE'
+                    'echo "Importing MySQL dump!" >> $LOG_FILE',
                     'if mysql -u root -proot < dump.sql; then',
                     '  echo "Database import completed successfully." >> $LOG_FILE',
                     'else',
@@ -602,68 +633,71 @@ Resources:
                   - "30"
                 shell:
                   - Shell  # Execute Linux Shell commands
-            Next: EndSuccess
+            Next: DescribeImportInstanceVolume
             ResultPath: $.runImportInstanceScript
 
-          # TerminateInstance:
-          #   Type: Task
-          #   Resource: arn:aws:states:::aws-sdk:ec2:terminateInstances
-          #   Parameters:
-          #     InstanceIds.$: States.Array($.runInstances.Instances[0].InstanceId)
-          #   Next: GetSnapshotDatePattern
-          #   ResultPath: null
+          DescribeImportInstanceVolume:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:ec2:describeInstances
+            Parameters:
+              InstanceIds.$: States.Array($.runInstances.Instances[0].InstanceId)
+            ResultPath: $.describeImportInstance
+            Next: TerminateInstance
 
-          # Call lambda function to get snapshot name date pattern suffix
-          # GetSnapshotDatePattern:
-          #   Type: Task
-          #   Resource: arn:aws:states:::lambda:invoke
-          #   Parameters:
-          #     Payload.$: $
-          #     FunctionName: !Ref getDatePatternLambda
-          #   Retry:
-          #     - ErrorEquals:
-          #         - Lambda.ServiceException
-          #         - Lambda.AWSLambdaException
-          #         - Lambda.SdkClientException
-          #         - Lambda.TooManyRequestsException
-          #       IntervalSeconds: 1
-          #       MaxAttempts: 3
-          #       BackoffRate: 2
-          #   Next: CreateDBClusterSnapshot
-          #   ResultPath: $.lambda_date_result
+          TerminateInstance:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:ec2:terminateInstances
+            Parameters:
+              InstanceIds.$: States.Array($.runInstances.Instances[0].InstanceId)
+            Next: SnapshotEbsVolume
+            ResultPath: null
+          
+          SnapshotEbsVolume:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:ec2:createSnapshot
+            Parameters:
+              VolumeId: $.describeImportInstance.Reservations[0].Instances[0].BlockDeviceMappings[1].Ebs.VolumeId
+              TagSpecifications:
+                - ResourceType: snapshot
+                  Tags:
+                    - Key: Name
+                      Value.$: States.Format('ephemeral-mysql-{}', $.lambda_date_result.Payload.datePattern)
+                    - Key: ephemeral-mysql
+                      Value.$: States.Format('{}', $.lambda_date_result.Payload.datePattern)
+            ResultPath: $.snapshotEbsVolume
+            Next: WaitForSnapshotCreation
+  
+          WaitForSnapshotCreation:
+            Type: Wait
+            Seconds: 30
+            Next: CheckSnapshotStatus
 
-          # CreateDBClusterSnapshot:
-          #   Type: Task
-          #   Resource: arn:aws:states:::aws-sdk:rds:createDBClusterSnapshot
-          #   Parameters:
-          #     DbClusterSnapshotIdentifier.$: States.Format('ephemeral-{}', $.lambda_date_result.Payload.datePattern)
-          #     DbClusterIdentifier: aurora-serverless-ephemeral-import
-          #   Next: WaitForSnapshotCreation
-          #   ResultPath: $.snapshotResult
+          # Describe the Ebs snapshot to see if its in the available state
+          CheckSnapshotStatus:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:ec2:describeSnapshots
+            Parameters:
+              SnapshotIds.$: States.Array($.snapshotEbsVolume.SnapshotId)
+            Next: IsSnapshotAvailable
+            ResultPath: $.snapshotStatusResult
 
-          # WaitForSnapshotCreation:
-          #   Type: Wait
-          #   Seconds: 30
-          #   Next: CheckClusterSnapshotStatus
-
-          # # Describe the cluster snapshot to see if its in the available state
-          # CheckClusterSnapshotStatus:
-          #   Type: Task
-          #   Resource: arn:aws:states:::aws-sdk:rds:describeDBClusterSnapshots
-          #   Parameters:
-          #     DbClusterSnapshotIdentifier.$: States.Format('ephemeral-{}', $.lambda_date_result.Payload.datePattern)
-          #     DbClusterIdentifier: aurora-serverless-ephemeral-import
-          #   Next: IsSnapshotAvailable
-          #   ResultPath: $.snapshotStatusResult
-
-          # # If snapshot is available, move to delete the cluster
-          # IsSnapshotAvailable:
-          #   Type: Choice
-          #   Choices:
-          #     - Variable: $.snapshotStatusResult.DbClusterSnapshots[0].Status
-          #       StringEquals: available
-          #       Next: DeleteWriterInstance
-          #   Default: WaitForSnapshotCreation
+          # If snapshot is available, move to delete the cluster
+          IsSnapshotAvailable:
+            Type: Choice
+            Choices:
+              - Variable: $.snapshotStatusResult.Snapshots[0].State
+                StringEquals: completed
+                Next: DeleteVolume
+            Default: WaitForSnapshotCreation
+          
+          # Delete the volume now that we have a snapshot of it.
+          DeleteVolume:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:ec2:deleteVolume
+            Parameters:
+              VolumeId: $.describeImportInstance.Reservations[0].Instances[0].BlockDeviceMappings[1].Ebs.VolumeId
+            ResultPath: null
+            Next: EndSuccess
           
           EndSuccess:
             Type: Succeed
@@ -709,6 +743,11 @@ Resources:
                   - ec2:RunInstances
                   - ec2:TerminateInstances
                   - ec2:DescribeInstance*
+                Resource: "*"
+              - Sid: DeleteVolume
+                Effect: Allow
+                Action:
+                  - ec2:DeleteVolume
                 Resource: "*"
               # Permissions to allow running an SSM automation document on EC2 instance
               - Sid: StartAutomation
