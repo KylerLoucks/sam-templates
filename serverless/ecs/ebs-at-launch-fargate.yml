@@ -151,7 +151,7 @@ Resources:
   # Role used for managing ECS EBS Volume creation for ECS Tasks
   # You can view the EBS volumes used per task in the EBS Volumes Console
   # https://docs.aws.amazon.com/AmazonECS/latest/developerguide/infrastructure_IAM_role.html
-  ecsInfraStructureRole:
+  ecsInfrastructureRole:
     Type: AWS::IAM::Role
     Properties:
       Path: /
@@ -253,11 +253,13 @@ Resources:
       VolumeConfigurations: 
         - Name: mysql # Must match the name defined in the `Volume` object of the Task Definition
           ManagedEBSVolume:
-            RoleArn: !GetAtt ecsInfraStructureRole.Arn
+            RoleArn: !GetAtt ecsInfrastructureRole.Arn
             VolumeType: gp3
             # SizeInGiB: 300
-            FilesystemType: ext4
-            SnapshotId: snap-abc123 # Here we can specify the Snapshot of an EBS volume to use.
+            FilesystemType: ext4 # Specify the same filesystem type that the volume was using when the snapshot was created.
+            SnapshotId: snap-0cade24c9a68ef5f0 # Here we can specify the Snapshot of an EBS volume to use.
+
+            
             # We can grab the latest created snapshot ID as long as we provide a tag-key that makes sense. 
             # aws ec2 describe-snapshots --filters Name=tag-key,Values=ephemeral-mysql --query "Snapshots[].[SnapshotId,StartTime]" --output json | jq -r 'sort_by(.[1]) | last | .[0]'
       Tags: 

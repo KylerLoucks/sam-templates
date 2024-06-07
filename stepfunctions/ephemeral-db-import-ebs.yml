@@ -582,51 +582,55 @@ Resources:
                 # 2. copy the contents of the base mysql data as to not break mysql when we move the new mount back to var/lib/mysql
                 # 3. import database dump
                 # NOTE: if script fails, it could be due to instance root volume running out of storage. Verify /dev/root with `df -h` cmd
-                Commands.$: |
-                  States.Array(
-                    'LOG_FILE=/home/ubuntu/automation.log',
-                    'apt install -y unzip >> $LOG_FILE 2>&1',
-                    'apt install -y jq >> $LOG_FILE 2>&1',
-                    'curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"',
-                    'unzip awscliv2.zip',
-                    './aws/install',
-                    'apt install -y mysql-server >> $LOG_FILE 2>&1',
-                    'mysqladmin -u root password "root"',
-                    'systemctl stop mysql',
-                    'mkdir -p /mnt/tmpdata',
-                    'mkfs -t ext4 /dev/nvme1n1',
-                    'mount /dev/nvme1n1 /mnt/tmpdata',
-                    'chown -R mysql:mysql /mnt/tmpdata',
-                    'rsync -a /var/lib/mysql/ /mnt/tmpdata/',
-                    'umount /mnt/tmpdata',
-                    'mount /dev/nvme1n1 /var/lib/mysql',
-                    'echo "Mounted to /var/lib/mysql" >> $LOG_FILE',
-                    'systemctl start mysql',
-                    'DATABASES="inventory magento tophat"',
-                    'for DB_NAME in $DATABASES; do',
-                    '  echo "Creating database $DB_NAME" >> $LOG_FILE',
-                    '  if mysql -u root -proot -e "CREATE DATABASE IF NOT EXISTS $DB_NAME;"; then',
-                    '    echo "Database $DB_NAME created successfully." >> $LOG_FILE',
-                    '  else',
-                    '    echo "Error creating database $DB_NAME Exiting..." >> $LOG_FILE',
-                    '    exit 1',
-                    '  fi',
-                    'done',
-                    'echo "All Databases created successfully, proceeding with import" >> $LOG_FILE',
-                    'S3_FILE=$(aws s3api list-objects-v2 --bucket db-prod-sanitized-backup --query "reverse(sort_by(Contents, &LastModified))[0].Key" --output text)',
-                    'echo "Copying $S3_FILE from dump bucket..." >> $LOG_FILE',
-                    'aws s3 cp s3://db-prod-sanitized-backup/$S3_FILE dbs_mysql.tar',
-                    'tar -xf dbs_mysql.tar',
-                    'mv *.dmp dump.sql',
-                    'echo "Importing MySQL dump!" >> $LOG_FILE',
-                    'if mysql -u root -proot < dump.sql; then',
-                    '  echo "Database import completed successfully." >> $LOG_FILE',
-                    'else',
-                    '  echo "Error during database import. Exiting..." >> $LOG_FILE',
-                    '  exit 1',
-                    'fi',
-                    'echo "Script completed." >> $LOG_FILE'
-                  )
+                Commands:
+                  - LOG_FILE=/home/ubuntu/automation.log
+                  - apt install -y unzip >> $LOG_FILE 2>&1
+                  - apt install -y jq >> $LOG_FILE 2>&1
+                  - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+                  - unzip awscliv2.zip
+                  - ./aws/install
+                  - apt install -y mysql-server >> $LOG_FILE 2>&1
+                  - mysqladmin -u root password "root"
+                  - systemctl stop mysql
+                  - echo "[mysqld]" >> /etc/mysql/my.cnf
+                  - echo "bind-address = 0.0.0.0" >> /etc/mysql/my.cnf
+                  - mkdir -p /mnt/tmpdata
+                  - mkfs -t ext4 /dev/nvme1n1
+                  - mount /dev/nvme1n1 /mnt/tmpdata
+                  - chown -R mysql:mysql /mnt/tmpdata
+                  - rsync -a /var/lib/mysql/ /mnt/tmpdata/
+                  - umount /mnt/tmpdata
+                  - mount /dev/nvme1n1 /var/lib/mysql
+                  - echo "Mounted to /var/lib/mysql" >> $LOG_FILE
+                  - systemctl start mysql
+                  - mysql -u root -proot -e "CREATE USER 'root'@'%' IDENTIFIED BY 'root';"
+                  - mysql -u root -proot -e "GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION;"
+                  - mysql -u root -proot -e "FLUSH PRIVILEGES;"
+                  - DATABASES="inventory magento tophat"
+                  - for DB_NAME in $DATABASES; do
+                  -   echo "Creating database $DB_NAME" >> $LOG_FILE
+                  -   if mysql -u root -proot -e "CREATE DATABASE IF NOT EXISTS $DB_NAME;"; then
+                  -     echo "Database $DB_NAME created successfully." >> $LOG_FILE
+                  -   else
+                  -     echo "Error creating database $DB_NAME. Exiting..." >> $LOG_FILE
+                  -     exit 1
+                  -   fi
+                  - done
+                  - echo "All Databases created successfully, proceeding with import" >> $LOG_FILE
+                  - S3_FILE=$(aws s3api list-objects-v2 --bucket db-prod-sanitized-backup --query "reverse(sort_by(Contents, &LastModified))[0].Key" --output text)
+                  - echo "Copying $S3_FILE from dump bucket..." >> $LOG_FILE
+                  - aws s3 cp s3://db-prod-sanitized-backup/$S3_FILE dbs_mysql.tar
+                  - tar -xf dbs_mysql.tar
+                  - mv *.dmp dump.sql
+                  - echo "Importing MySQL dump!" >> $LOG_FILE
+                  - if mysql -u root -proot < dump.sql; then
+                  -   echo "Database import completed successfully." >> $LOG_FILE
+                  - else
+                  -   echo "Error during database import. Exiting..." >> $LOG_FILE
+                  -   exit 1
+                  - fi
+                  - echo "Script completed." >> $LOG_FILE
+
                 executionTimeout:
                   - "72000"
                 deliveryTimeout:
@@ -635,6 +639,12 @@ Resources:
                   - Shell  # Execute Linux Shell commands
             Next: DescribeImportInstanceVolume
             ResultPath: $.runImportInstanceScript
+
+            # Turns out I need to add this stuff to the script in order for users to connect to the mounted ecs vol:
+            # /etc/mysql/my.cnf:
+            # [mysqld]
+            # bind-address = 0.0.0.0
+            # 'mysql -u root -proot -e "CREATE USER 'root'@'%' IDENTIFIED BY 'root';"'
 
           DescribeImportInstanceVolume:
             Type: Task
