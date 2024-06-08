@@ -592,6 +592,7 @@ Resources:
                   - apt install -y mysql-server >> $LOG_FILE 2>&1
                   - mysqladmin -u root password "root"
                   - systemctl stop mysql
+                  # mysql conf needs bind address open from anywhere to accept connections
                   - echo "[mysqld]" >> /etc/mysql/my.cnf
                   - echo "bind-address = 0.0.0.0" >> /etc/mysql/my.cnf
                   - mkdir -p /mnt/tmpdata
@@ -603,6 +604,7 @@ Resources:
                   - mount /dev/nvme1n1 /var/lib/mysql
                   - echo "Mounted to /var/lib/mysql" >> $LOG_FILE
                   - systemctl start mysql
+                  # Have to create root user with allowing connections from any IP (root@%)
                   - mysql -u root -proot -e "CREATE USER 'root'@'%' IDENTIFIED BY 'root';"
                   - mysql -u root -proot -e "GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION;"
                   - mysql -u root -proot -e "FLUSH PRIVILEGES;"
@@ -666,7 +668,7 @@ Resources:
             Type: Task
             Resource: arn:aws:states:::aws-sdk:ec2:createSnapshot
             Parameters:
-              VolumeId: $.describeImportInstance.Reservations[0].Instances[0].BlockDeviceMappings[1].Ebs.VolumeId
+              VolumeId.$: $.describeImportInstance.Reservations[0].Instances[0].BlockDeviceMappings[1].Ebs.VolumeId
               TagSpecifications:
                 - ResourceType: snapshot
                   Tags:
@@ -705,7 +707,7 @@ Resources:
             Type: Task
             Resource: arn:aws:states:::aws-sdk:ec2:deleteVolume
             Parameters:
-              VolumeId: $.describeImportInstance.Reservations[0].Instances[0].BlockDeviceMappings[1].Ebs.VolumeId
+              VolumeId.$: $.describeImportInstance.Reservations[0].Instances[0].BlockDeviceMappings[1].Ebs.VolumeId
             ResultPath: null
             Next: EndSuccess
           

@@ -37,9 +37,9 @@ Parameters:
 
   pMysqlEcrImageUri:
     Type: String
-    Default: mysql:latest # 174743933558.dkr.ecr.us-east-1.amazonaws.com/mysql-ephemeral:20240509
+    Default: mysql:8.0 # 174743933558.dkr.ecr.us-east-1.amazonaws.com/mysql-ephemeral:20240509
     Description: > 
-      URI of the ECR image used for MySQL Task Definition. 
+      URI of the ECR or Dockerhub image used for MySQL Task Definition. 
       e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
 
 
@@ -201,7 +201,7 @@ Resources:
               awslogs-stream-prefix: ecs
           MountPoints:
             - SourceVolume: mysql
-              ContainerPath: /var/lib/mysql # This doesn't work. Seems like additional EBS storage is only configured after the Task is in the running state.
+              ContainerPath: /var/lib/mysql # Must use volume that is pre-populated with mysql data. Otherwise, this location will be empty.
       Volumes:
         - Name: mysql
           ConfiguredAtLaunch: true # Configure additional EBS volumes at launch
@@ -257,7 +257,7 @@ Resources:
             VolumeType: gp3
             # SizeInGiB: 300
             FilesystemType: ext4 # Specify the same filesystem type that the volume was using when the snapshot was created.
-            SnapshotId: snap-0cade24c9a68ef5f0 # Here we can specify the Snapshot of an EBS volume to use.
+            SnapshotId: snap-06934e13d7d90fae2 # Here we can specify the Snapshot of an EBS volume to use.
 
             
             # We can grab the latest created snapshot ID as long as we provide a tag-key that makes sense. 
