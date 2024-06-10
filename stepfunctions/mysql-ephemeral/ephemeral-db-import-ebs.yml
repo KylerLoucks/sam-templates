@@ -1,6 +1,15 @@
 AWSTemplateFormatVersion: 2010-09-09
 Transform: AWS::Serverless-2016-10-31
-Description: State Machine to Create an EBS volume for mysql
+Description: State Machine to Create Scheduled Snapshots of an EBS volume used for MySQL ECS Fargate Containers
+
+
+# This Template will create a Step Function that will create an EBS volume that holds MySQL data.
+# The volume will be snapshot and maintained by the 'cleanUpOldSnapshots' Lambda function.
+
+# Use the following command to grab the most recent snapshot with the tag 'ephemeral-mysql'
+# aws ec2 describe-snapshots --filters Name=tag-key,Values=ephemeral-mysql --query "Snapshots[].[SnapshotId,StartTime]" --output json | jq -r 'sort_by(.[1]) | last | .[0]'
+
+
 
 Parameters:
   pUbuntuImageId:
@@ -414,10 +423,10 @@ Resources:
       Role: !GetAtt lambdaRoleCleanSnapshots.Arn
       Timeout: 120
       MemorySize: 128
-      Runtime: python3.10
+      Runtime: python3.11
       Environment: 
         Variables:
-          - SNAPSHOT_RETAIN_AMOUNT: !Ref pSnapshotRetainAmount
+          SNAPSHOT_RETAIN_AMOUNT: !Ref pSnapshotRetainAmount
       Architectures:
         - x86_64
       Handler: app.lambda_handler
@@ -469,7 +478,7 @@ Resources:
       Role: !GetAtt lambdaRole.Arn
       Timeout: 120
       MemorySize: 128
-      Runtime: python3.10
+      Runtime: python3.11
       Architectures:
         - x86_64
       Handler: app.lambda_handler
@@ -856,71 +865,3 @@ Resources:
               #   Action:
               #     - iam:PassRole
               #   Resource: !GetAtt taskExecutionRole.Arn
-
-
-# aws ec2 describe-snapshots --filters Name=tag-key,Values=ephemeral-mysql --query "Snapshots[].[SnapshotId,StartTime]" --output json | jq -r 'sort_by(.[1]) | last | .[0]'
-# Use Step Functions to RunInstances
-# use the instance ID from the output as input into the next step (ssm:startAutomationExecution.waitForTaskToken)
-# https://github.com/aws-samples/amazon-stepfunctions-ssm-waitfortasktoken/tree/main <- Use this cloudformation to make the SSM document
-
-# CreateDBCluster output:
-# DbCluster.Endpoint   | "aurora-serverless-ephemeral-import.cluster-cizses2inrh6.us-east-1.rds.amazonaws.com"
-# "create_db": {
-#   "DbCluster": {
-#     "AllocatedStorage": 1,
-#     "AssociatedRoles": [],
-#     "AutoMinorVersionUpgrade": true,
-#     "AvailabilityZones": [
-#       "us-east-1c",
-#       "us-east-1a",
-#       "us-east-1b"
-#     ],
-#     "BackupRetentionPeriod": 1,
-#     "ClusterCreateTime": "2024-06-02T18:36:26.974Z",
-#     "CopyTagsToSnapshot": false,
-#     "CrossAccountClone": false,
-#     "DbClusterArn": "arn:aws:rds:us-east-1:174743933558:cluster:aurora-serverless-ephemeral-import",
-#     "DbClusterIdentifier": "aurora-serverless-ephemeral-import",
-#     "DbClusterMembers": [],
-#     "DbClusterParameterGroup": "default.aurora-mysql8.0",
-#     "DbClusterResourceId": "cluster-6HB2ANPSUV7IIKJA42F5FH7O7E",
-#     "DbSubnetGroup": "madisonreed-development-rds-mysql",
-#     "DeletionProtection": false,
-#     "DomainMemberships": [],
-#     "Endpoint": "aurora-serverless-ephemeral-import.cluster-cizses2inrh6.us-east-1.rds.amazonaws.com",
-#     "Engine": "aurora-mysql",
-#     "EngineMode": "provisioned",
-#     "EngineVersion": "8.0.mysql_aurora.3.04.1",
-#     "HostedZoneId": "Z2R2ITUGPM61AM",
-#     "HttpEndpointEnabled": false,
-#     "IamDatabaseAuthenticationEnabled": false,
-#     "KmsKeyId": "arn:aws:kms:us-east-1:174743933558:key/89578399-7b83-405f-ad1b-9a744d3e2507",
-#     "LocalWriteForwardingStatus": "disabled",
-#     "MasterUserSecret": {
-#       "KmsKeyId": "arn:aws:kms:us-east-1:174743933558:key/ebf1291e-248e-4e38-b2e7-420b691183d5",
-#       "SecretArn": "arn:aws:secretsmanager:us-east-1:174743933558:secret:rds!cluster-6797630e-21fe-423d-8101-0ae8ac1c9040-4ihPo7",
-#       "SecretStatus": "creating"
-#     },
-#     "MasterUsername": "masteruser",
-#     "MultiAZ": false,
-#     "NetworkType": "IPV4",
-#     "Port": 3306,
-#     "PreferredBackupWindow": "07:26-07:56",
-#     "PreferredMaintenanceWindow": "tue:08:49-tue:09:19",
-#     "ReadReplicaIdentifiers": [],
-#     "ReaderEndpoint": "aurora-serverless-ephemeral-import.cluster-ro-cizses2inrh6.us-east-1.rds.amazonaws.com",
-#     "ServerlessV2ScalingConfiguration": {
-#       "MaxCapacity": 16,
-#       "MinCapacity": 0.5
-#     },
-#     "Status": "creating",
-#     "StorageEncrypted": true,
-#     "TagList": [],
-#     "VpcSecurityGroups": [
-#       {
-#         "Status": "active",
-#         "VpcSecurityGroupId": "sg-0e3b6e63ea5ef0eba"
-#       }
-#     ]
-#   }
-# }
