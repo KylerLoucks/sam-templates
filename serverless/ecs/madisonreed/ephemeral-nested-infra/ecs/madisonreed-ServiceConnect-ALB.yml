@@ -99,6 +99,11 @@ Parameters:
     Description: > 
       URI of the ECR image used for MySQL Task Definition. 
       e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
+  
+  pMysqlEbsSnapshotId:
+    Type: String
+    Description: >
+      SnapshotId of the EBS Volume to use for MySQL ECS /var/lib/mysql Data (ex: snap-06934e13d7d90fae2)
 
   pMongoEcrImageUri:
     Type: String
@@ -1755,5 +1760,9 @@ Outputs:
   websiteUrl:
     Description: Application URL endpoint
     Value: !Sub www.${pAppName}.${pHostedZoneName} # http://madisonreed.${pAppName}.cloudmap.internal
+
+  mysqlEbsSnapshotId:
+    Description: SnapshotId of the EBS volume that houses MySQL database data
+    Value: !Ref pMysqlEbsSnapshotId
 
   
