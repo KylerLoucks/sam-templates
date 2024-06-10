@@ -254,6 +254,22 @@ Resources:
                 - ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
       Policies:
+        # Ecs Exec into Fargate containers https://aws.amazon.com/blogs/containers/new-using-amazon-ecs-exec-access-your-containers-fargate-ec2/
+        # aws ecs execute-command --region us-east-1 --cluster <cluster-name> --task <task-id> --container mysql --command "/bin/bash"
+        # Also requires `ssmmessages` Interface VPC endpoint: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-exec.html#ecs-exec-troubleshooting
+        # Requires the SSM Session Manager plugin for the AWS CLI (https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
+        - PolicyName: EcsExec
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowEcsExec
+                Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: "*"
         - PolicyName: CloudWatchLogs
           PolicyDocument: 
             Version: 2012-10-17
