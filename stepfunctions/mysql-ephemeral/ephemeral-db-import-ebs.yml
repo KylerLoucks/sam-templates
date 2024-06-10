@@ -22,6 +22,11 @@ Parameters:
     Description: CIDR range of the VPC (e.g. 10.20.0.0/16)
     Default: 10.20.0.0/16
 
+  pSnapshotRetainAmount:
+    Type: Number
+    Description: Amount of MySQL Snapshots to keep
+    Default: 10
+
 Resources:
 
 
@@ -372,6 +377,65 @@ Resources:
                   Fn::Sub: "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:*"
 
 
+  lambdaRoleCleanSnapshots:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+      Policies:
+        - PolicyName: XRAYAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xxray:PutTelemetryRecords
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeSnapshots
+                  - ec2:DeleteSnapshot
+                Resource: "*"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+
+  cleanSnapshotsLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt lambdaRoleCleanSnapshots.Arn
+      Timeout: 120
+      MemorySize: 128
+      Runtime: python3.10
+      Environment: 
+        Variables:
+          - SNAPSHOT_RETAIN_AMOUNT: !Ref pSnapshotRetainAmount
+      Architectures:
+        - x86_64
+      Handler: app.lambda_handler
+      CodeUri: lambdas/cleanUpOldSnapshots/
+      Events:
+        CronSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 2 ? * 7 *) # Run once per week (Saturday 2 AM UTC)
+            Enabled: true
+            # Input: '{"key": value}'
+
+  cleanSnapshotsLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${cleanSnapshotsLambda}
+      RetentionInDays: 14
+
 
   lambdaRole:
     Type: AWS::IAM::Role
@@ -415,7 +479,7 @@ Resources:
     Type: AWS::Logs::LogGroup
     Properties:
       LogGroupName: !Sub /aws/lambda/${getDatePatternLambda}
-      RetentionInDays: 30
+      RetentionInDays: 14
 
 
   runInstanceRole:
@@ -455,10 +519,10 @@ Resources:
         - !Ref runInstanceRole
 
   # RDS Aurora SG. Use this for both EC2 and Serverless Cluster
-  auroraSecurityGroup:
+  ec2SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Security Group for MYSQL/Aurora
+      GroupDescription: Security Group for ephemeral MySQL import EC2
       VpcId: !Ref pVpcId
       SecurityGroupIngress:
         - IpProtocol: tcp
@@ -467,9 +531,9 @@ Resources:
           CidrIp: !Ref pVpcCidr
       Tags:
         - Key: Name
-          Value: EphemeralAuroraMySQLImport
+          Value: EphemeralMySQLImport
 
-  auroraMysqlServerlessImportStateMachine:
+  MySQLImportStateMachine:
     Type: AWS::Serverless::StateMachine
     Properties:
       Definition:
@@ -505,7 +569,7 @@ Resources:
               IamInstanceProfile: 
                 Arn: !GetAtt runInstanceProfile.Arn
               SecurityGroupIds:
-                - !GetAtt auroraSecurityGroup.GroupId
+                - !GetAtt ec2SecurityGroup.GroupId
               SubnetId: !Ref pPrivateSubnet1a
               MaxCount: 1
               MinCount: 1
