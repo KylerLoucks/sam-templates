@@ -444,6 +444,12 @@ Resources:
               awslogs-group: !Ref mysqlLogGroup
               awslogs-region: !Sub ${AWS::Region}
               awslogs-stream-prefix: ecs
+          MountPoints:
+            - SourceVolume: mysql
+              ContainerPath: /var/lib/mysql # Must use volume that is pre-populated with mysql data. Otherwise, this location will be empty.
+      Volumes:
+        - Name: mysql
+          ConfiguredAtLaunch: true # Configure additional EBS volumes at launch
 
 
   # MONGO
@@ -989,6 +995,13 @@ Resources:
         - RegistryArn: !GetAtt mysqlServiceDiscoveryService.Arn
           Port: !Ref pMySQLPort
       TaskDefinition: !Ref mysqlTaskDefinition
+      VolumeConfigurations: 
+        - Name: mysql # Must match the name defined in the `Volume` object of the Task Definition
+          ManagedEBSVolume:
+            RoleArn: !GetAtt ecsInfrastructureRole.Arn
+            VolumeType: gp3
+            FilesystemType: ext4 # Specify the same filesystem type that the volume was using when the snapshot was created.
+            SnapshotId: !Ref pMysqlEbsSnapshotId # Here we can specify the Snapshot of an EBS volume to use.
       Tags: 
         - Key: managed-by
           Value: SAM
