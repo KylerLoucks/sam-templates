@@ -947,6 +947,25 @@ Resources:
         - Key: ephemeral:app
           Value: !Ref pAppName
   
+  # Role used for managing ECS EBS Volume creation for ECS Tasks
+  # You can view the EBS volumes used per task in the EBS Volumes Console
+  # https://docs.aws.amazon.com/AmazonECS/latest/developerguide/infrastructure_IAM_role.html
+  ecsInfrastructureRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs.amazonaws.com
+            Action: sts:AssumeRole
+      # Allows ec2:CreateVolume for the specified task
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSInfrastructureRolePolicyForVolumes
+
   mysqlService:
     Type: AWS::ECS::Service
     Properties:
