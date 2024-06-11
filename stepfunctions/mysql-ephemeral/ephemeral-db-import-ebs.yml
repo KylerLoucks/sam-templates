@@ -712,14 +712,26 @@ Resources:
                   - "30"
                 shell:
                   - Shell  # Execute Linux Shell commands
+            Catch:
+              - ErrorEquals:
+                - States.ALL
+                ResultPath: $.errorInfo
+                Next: TerminateInstanceOnFail
             Next: DescribeImportInstanceVolume
             ResultPath: $.runImportInstanceScript
 
-            # Turns out I need to add this stuff to the script in order for users to connect to the mounted ecs vol:
-            # /etc/mysql/my.cnf:
-            # [mysqld]
-            # bind-address = 0.0.0.0
-            # 'mysql -u root -proot -e "CREATE USER 'root'@'%' IDENTIFIED BY 'root';"'
+          TerminateInstanceOnFail:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:ec2:terminateInstances
+            Parameters:
+              InstanceIds.$: States.Array($.runInstances.Instances[0].InstanceId)
+            Next: FailState
+            ResultPath: null
+
+          FailState:
+            Type: Fail
+            ErrorPath: $.errorInfo.Error
+            CausePath: $.errorInfo.Cause
 
           DescribeImportInstanceVolume:
             Type: Task
@@ -792,7 +804,7 @@ Resources:
         CronSchedule:
           Type: Schedule
           Properties:
-            Schedule: cron(0 8 1 1 ? *)
+            Schedule: cron(59 23 * * ? *)
             Enabled: False
 
 
