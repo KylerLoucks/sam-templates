@@ -766,7 +766,7 @@ Resources:
   
           WaitForSnapshotCreation:
             Type: Wait
-            Seconds: 30
+            Seconds: 300
             Next: CheckSnapshotStatus
 
           # Describe the Ebs snapshot to see if its in the available state
@@ -805,7 +805,7 @@ Resources:
           Type: Schedule
           Properties:
             Schedule: cron(59 23 * * ? *)
-            Enabled: False
+            Enabled: True
 
 
   stateMachineExecutionRole:
