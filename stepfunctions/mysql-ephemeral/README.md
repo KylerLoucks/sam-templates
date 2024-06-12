@@ -32,6 +32,28 @@ Now, you can create as many ephemeral Aurora Clusters as you want.
 # Usage (Ephemeral EBS volumes)
 Deploy the `ephemeral-db-import-ebs.yml` Step Function template
 
+The Step Function is ran on a schedule. This schedule is defined under the `Resources.MySQLImportStateMachine.Events.Schedule` block as shown below:
+
+```yml
+Resources:
+    ...
+
+    MySQLImportStateMachine:
+      ...
+      Events:
+        CronSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(59 23 * * ? *)
+            Enabled: True
+```
+
+## Snapshot retention
+This template also deploys a Lambda function used to expire old snapshots to save on AWS costs. The code for this Lambda is located under [/lambdas/cleanUpOldSnapshots/app.py] 
+
+To change how many snapshots are retained when the function triggers, modify the following parameter inside the `template.yml` file and then re-deploy this template.
+
+
 The Step Function that is included in this template will run an EC2 instance that has another EBS volume mounted at `/var/lib/mysql`.
 It will perform these functions:
 
@@ -44,3 +66,14 @@ It will perform these functions:
 The purpose of this is so that we can use the snapshot of this EBS volume for ECS fargate MySQL containers. (See `ebs-at-launch-fargate-mysql.yml` for an example of this.)
 
 
+# Deploying
+
+```bash
+sam build -t ephemeral-db-import-ebs.yml
+
+sam deploy -t ephemeral-db-import-ebs.yml \
+    --resolve-s3 \
+    --capabilities CAPABILITY_NAMED_IAM \
+    --confirm-changeset \
+    --stack-name MySQLEphemeralSnapshotStateMachine
+```
