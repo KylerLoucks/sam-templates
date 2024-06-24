@@ -1,12 +1,12 @@
 
 import boto3
 import os
-
+import json
 
 ec2 = boto3.client('ec2')
 
 # Amount of snapshots to retain
-SNAPSHOT_RETAIN_AMOUNT = os.environ['SNAPSHOT_RETAIN_AMOUNT']
+SNAPSHOT_RETAIN_AMOUNT = int(os.environ['SNAPSHOT_RETAIN_AMOUNT'])
 
 def lambda_handler(event, context):
     
@@ -22,6 +22,8 @@ def lambda_handler(event, context):
 
     # Sort snapshots by start time in descending order
     snapshots.sort(key=lambda x: x['StartTime'], reverse=True)
+
+    print(f"Sorted the following snapshots: {json.dumps({'snapshots': snapshots})}")
 
     # Get snapshots to delete (all except the amount specified)
     snapshots_to_delete = snapshots[SNAPSHOT_RETAIN_AMOUNT:]
