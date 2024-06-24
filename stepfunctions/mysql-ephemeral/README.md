@@ -1,7 +1,7 @@
-# Ephemeral Aurora Serverlss V2 Clusters
-The templates described in this README will provide the ability to create ephemeral Aurora Clusters
+# Ephemeral MySQL
+The templates described in this README will provide the ability to create ephemeral Aurora Clusters or Ephemeral EBS volumes that can be used for ECS MySQL tasks.
 
-# Usage (Ephemeral Aurora Serverless)
+# Usage (Ephemeral Aurora V2 Serverless)
 
 Deploy the `ephemeral-db-import-rds.yml` Step Function template
 
@@ -30,6 +30,12 @@ Now, you can create as many ephemeral Aurora Clusters as you want.
 
 
 # Usage (Ephemeral EBS volumes)
+
+## Step Functions Workflow
+<p align="center">
+  <img alt="diagram" src="readme-images/stepfunctions_diagram.png" width="1024px">
+</p>
+
 Deploy the `ephemeral-db-import-ebs.yml` Step Function template
 
 The Step Function is ran on a schedule. This schedule is defined under the `Resources.MySQLImportStateMachine.Events.Schedule` block as shown below:
