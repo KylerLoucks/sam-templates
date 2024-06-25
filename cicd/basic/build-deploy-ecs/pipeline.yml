@@ -523,7 +523,7 @@ Resources:
               Configuration:
                 ClusterName: !Ref pEcsClusterName
                 ServiceName: !Ref pEcsServiceName 
-                FileName: imagedefinitions.json # name of the artifact to to for updating the ecs task defintion
+                FileName: imagedefinitions.json # name of the artifact file output for updating the ecs task defintion
               RunOder: 1
                 
                  
