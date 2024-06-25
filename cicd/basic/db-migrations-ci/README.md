@@ -1,3 +1,7 @@
+# Overview
+
+Creates CodePipeline + CodeBuild inside the VPC for CodeBuild to be able to connect to RDS databases.
+
 # Prerequisites
 
 Before you begin, ensure you have the following prerequisites installed:

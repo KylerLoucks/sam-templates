@@ -1,8 +1,7 @@
 AWSTemplateFormatVersion: 2010-09-09
 Transform: AWS::Serverless-2016-10-31
 Description: >
-  Github V2 Source action, perform schema migrations for MySQL/Mongo databases
-  Demonstrates adding CodeBuild into a VPC and passing Secrets Manager secrets to allow connecting to MySQL RDS DB.
+  Github V2 Source action, perform db migrations for RDS MySQL databases
 
 
 Parameters:
@@ -22,6 +21,7 @@ Parameters:
   pVpcId:
     Type: AWS::EC2::VPC::Id
     Description: ID of the Virtual Private Network (VPC)
+  # Specify the subnet ids for the private subnets the database resides in.
   pPrivateSubnetId1:
     Type: String
   pPrivateSubnetId2:
@@ -79,7 +79,7 @@ Parameters:
 
   pMySQLSecretName:
     Type: String
-    Description: ID of the AWS secret that contains 'username' and 'password' for MySQL RDS DB. This Secret is managed by RDS.
+    Description: ID of the AWS secret that contains 'username' and 'password' for MySQL RDS DB
     Default: rds!db-bbfcc315-bd36-4f2e-a67c-34e236665b09
 
 Metadata:
@@ -193,6 +193,7 @@ Resources:
                   - ssm:GetParameters*
                 Resource: 
                   - "*"
+        # Required to grab secret values from the RDS MySQL managed Secret
         - PolicyName: SecretsManager
           PolicyDocument:
             Version: 2012-10-17
@@ -250,7 +251,7 @@ Resources:
 
           # MySQL DB Envs. (See mr_modules/config/<db-name>_database.json for env vars naming) 
           - Name: DB_USERNAME
-            Value: !Sub ${pMySQLSecretName}:username # uses <secret-name>:<secret-key> naming convention
+            Value: !Sub ${pMySQLSecretName}:username
             Type: SECRETS_MANAGER
           - Name: DB_PASSWORD
             Value: !Sub ${pMySQLSecretName}:password
