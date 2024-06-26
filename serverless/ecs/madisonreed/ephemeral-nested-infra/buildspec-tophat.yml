@@ -17,6 +17,8 @@ phases:
       - IMAGE_TAG=${COMMIT_HASH:=latest}
       - NODE_PATH=$(pwd)/mr_modules
       - NODE_ENV=ecs
+      # Try to pull the latest image for caching and faster builds
+      - docker pull $REPOSITORY_URI:latest || true
   build:
     commands:
       - echo Build started on $(date)
@@ -28,7 +30,7 @@ phases:
       # - npm run gulp-build-raven # needed for tophat? only raven?
       - echo Building the Docker images...
       - |
-        docker build -f docker/tophat/Dockerfile -t $REPOSITORY_URI:latest . \
+        docker build --cache-from=$REPOSITORY_URI:latest -f docker/tophat/Dockerfile -t $REPOSITORY_URI:latest . \
           --build-arg AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION \
           --build-arg ACCOUNT_ID=$ACCOUNT_ID \
           --build-arg BASE_IMAGE_REPO_NAME=$BASE_IMAGE_REPO_NAME \

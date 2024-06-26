@@ -847,7 +847,6 @@ Resources:
       - mongoService
       - mysqlService
       - redisService
-      - topHatService
       - apiServerService
       - socketioService
     Type: AWS::ECS::Service

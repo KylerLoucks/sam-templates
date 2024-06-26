@@ -1,7 +1,7 @@
 AWSTemplateFormatVersion: 2010-09-09
 Transform: AWS::Serverless-2016-10-31
 Description: > 
-  Github V2 Source action, Build ECR Images, and deploy with SAM CLI
+  Creates a CodePipeline for Ephemeral Environments. Uses Github V2 Source action, Build ECR Images, and deploy with SAM CLI
 
 
 Parameters:
@@ -221,6 +221,7 @@ Resources:
                   - ecr:InitiateLayerUpload
                   - ecr:BatchCheckLayerAvailability
                   - ecr:PutImage
+                  - ecr:GetDownloadUrlForLayer
                 Resource:
                   - !GetAtt ecrWebsiteRepo.Arn
                   - !GetAtt ecrApiServerRepo.Arn
@@ -334,6 +335,10 @@ Resources:
         Type: CODEPIPELINE
         BuildSpec: !Ref pLabelPRBuildSpecPath
       TimeoutInMinutes: 60
+      Cache:
+        Type: LOCAL
+        Modes:
+          - LOCAL_SOURCE_CACHE # Caches .git metadata so subsequent runs only pull change in commits
 
   codeBuildLabelPRLogGroup:
     Type: AWS::Logs::LogGroup
@@ -369,6 +374,10 @@ Resources:
         Type: CODEPIPELINE
         BuildSpec: !Ref pPilkoBuildSpecPath
       TimeoutInMinutes: 60
+      Cache:
+        Type: LOCAL
+        Modes:
+          - LOCAL_SOURCE_CACHE # Caches .git metadata so subsequent runs only pull change in commits
 
   codeBuildPilkoLogGroup:
     Type: AWS::Logs::LogGroup
@@ -413,6 +422,10 @@ Resources:
         Type: CODEPIPELINE
         BuildSpec: !Ref pDeployBuildSpecPath
       TimeoutInMinutes: 180
+      Cache:
+        Type: LOCAL
+        Modes:
+          - LOCAL_SOURCE_CACHE # Caches .git metadata so subsequent runs only pull change in commits
 
   codeBuildDeployLogGroup:
     Type: AWS::Logs::LogGroup
@@ -457,6 +470,12 @@ Resources:
         Type: CODEPIPELINE
         BuildSpec: !Ref pTophatBuildSpecPath
       TimeoutInMinutes: 60
+      Cache:
+        Type: LOCAL
+        Modes:
+          - LOCAL_CUSTOM_CACHE
+          - LOCAL_SOURCE_CACHE # Caches .git metadata so subsequent runs only pull change in commits
+          - LOCAL_DOCKER_LAYER_CACHE
 
   codeBuildTophatLogGroup:
     Type: AWS::Logs::LogGroup
@@ -501,6 +520,12 @@ Resources:
         Type: CODEPIPELINE
         BuildSpec: !Ref pWebsiteBuildSpecPath
       TimeoutInMinutes: 60
+      Cache:
+        Type: LOCAL
+        Modes:
+          - LOCAL_CUSTOM_CACHE
+          - LOCAL_SOURCE_CACHE # Caches .git metadata so subsequent runs only pull change in commits
+          - LOCAL_DOCKER_LAYER_CACHE
 
   codeBuildWebsiteLogGroup:
     Type: AWS::Logs::LogGroup
@@ -545,6 +570,12 @@ Resources:
         Type: CODEPIPELINE
         BuildSpec: !Ref pApiServerBuildSpecPath
       TimeoutInMinutes: 60
+      Cache:
+        Type: LOCAL
+        Modes:
+          - LOCAL_CUSTOM_CACHE
+          - LOCAL_SOURCE_CACHE # Caches .git metadata so subsequent runs only pull change in commits
+          - LOCAL_DOCKER_LAYER_CACHE
 
   codeBuildApiServerLogGroup:
     Type: AWS::Logs::LogGroup

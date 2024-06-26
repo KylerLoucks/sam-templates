@@ -3,7 +3,6 @@ env:
   git-credential-helper: yes
   exported-variables:
     - IMAGE_TAG
-    - MYSQL_IMAGE_TAG
     - MONGO_IMAGE_TAG
     - SNAPSHOT_ID
 
@@ -20,34 +19,27 @@ phases:
 
       - MONGO_REPOSITORY_URI=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/mongo-ephemeral
 
+      # Define the name to give the ECS ephemeral environment stack
       - STACK_NAME="${APP_NAME}-ephemeral"
+
+      # Grab the MySQL Snapshot Id that was used on the last deploy by checking the stack outputs
       - OUTPUT_KEY="mysqlEbsSnapshotId"
-
-        # Get the stack outputs
-      - SNAPSHOT_ID=$(aws cloudformation describe-stacks --stack-name "$STACK_NAME" --query "Stacks[0].Outputs[?OutputKey=='$OUTPUT_KEY'].OutputValue" --output text 2>/dev/null)
-
+      - echo "Attempting to fetch stack details for ${STACK_NAME} with output key ${OUTPUT_KEY}"
+      - SNAPSHOT_ID=$(aws cloudformation describe-stacks --stack-name "${STACK_NAME}" --query "Stacks[0].Outputs[?OutputKey=='${OUTPUT_KEY}'].OutputValue" --output text 2>/dev/null || echo "")
       - |
-        # Check if the describe-stacks command was successful
-        if [ $? -ne 0 ]; then
-            echo "Stack $STACK_NAME does not exist or there was an error fetching the stack details. Using Latest MySQL SnapshotId"
+        # Check if the SnapshotId was found
+        if [ -z "$SNAPSHOT_ID" ]; then
+            echo "No output with key $OUTPUT_KEY found in stack $STACK_NAME."
             # Grab the latest snapshot
             SNAPSHOT_ID=$(aws ec2 describe-snapshots --filters Name=tag-key,Values=ephemeral-mysql --query "Snapshots[].[SnapshotId,StartTime]" --output json | jq -r 'sort_by(.[1]) | last | .[0]')
             echo "Using Latest MySQL EBS SnapshotId: $SNAPSHOT_ID"
         else
-            # Check if the SnapshotId was found
-            if [ -z "$SNAPSHOT_ID" ]; then
-                echo "No output with key $OUTPUT_KEY found in stack $STACK_NAME."
-                # Grab the latest snapshot
-                SNAPSHOT_ID=$(aws ec2 describe-snapshots --filters Name=tag-key,Values=ephemeral-mysql --query "Snapshots[].[SnapshotId,StartTime]" --output json | jq -r 'sort_by(.[1]) | last | .[0]')
-                echo "Using Latest MySQL EBS SnapshotId: $SNAPSHOT_ID"
-            else
-                echo "SnapshotId found. Continuing to use the previous snapshot used: $SNAPSHOT_ID"
-            fi
+            echo "SnapshotId found. Continuing to use the previous snapshot used: $SNAPSHOT_ID"
         fi
 
-      # Do the same for Mongo
+      # Grab the Mongo image tag that was used on the previous deploy
       - MONGO_FULL_IMAGE_URI=$(aws ecs describe-task-definition --task-definition ${APP_NAME}-mongo --query "taskDefinition.containerDefinitions[?name=='mongo'].image" --output text 2>/dev/null || echo "")
-      # Extract the tag from the image URI if it exists
+      # Extract the tag from the task definition if it exists. Otherwise, use the most recent tag from ECR
       - |
         if [[ "$MONGO_FULL_IMAGE_URI" == *":"* ]]; then
           MONGO_IMAGE_TAG=$(echo $MONGO_FULL_IMAGE_URI | sed 's/.*://')
@@ -76,7 +68,7 @@ phases:
     commands:
       - echo Build completed on `date`
 
-      # Deploy ECS
+      # Deploy ECS stack
       - |
         sam deploy -t ephemeralenv/ecs/madisonreed-ServiceConnect-ALB.yml \
           --resolve-s3 \
