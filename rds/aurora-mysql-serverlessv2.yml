@@ -43,7 +43,7 @@ Parameters:
   pKmsKeyId:
     Type: String
     Default: ''
-    Description: (Optional) Customer Managed KMS Key Id/Alias
+    Description: (Optional) Customer Managed KMS Key ID
 
 Conditions:
   CondUseKmsKey: !Not [ !Equals [ !Ref pKmsKeyId, '' ] ]
@@ -75,11 +75,14 @@ Resources:
       EngineMode: provisioned
       MasterUsername: !Ref pDBUsername
       ManageMasterUserPassword: true
-      KmsKeyId:
-        !If 
-          - CondUseKmsKey
-          - !Ref pKmsKeyId
-          - !Ref AWS::NoValue
+      KmsKeyId: !If 
+        - CondUseKmsKey
+        - !Ref pKmsKeyId
+        - !Ref AWS::NoValue
+      StorageEncrypted: !If
+        - CondUseKmsKey
+        - true
+        - false
       BackupRetentionPeriod: !Ref pBackupRetentionPeriodDays
       VpcSecurityGroupIds:
         - !GetAtt AuroraSecurityGroup.GroupId
