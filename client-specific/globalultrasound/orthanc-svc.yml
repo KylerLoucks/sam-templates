@@ -1,0 +1,526 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Deploys a service into an ECS cluster.
+
+Parameters:
+
+# ECS Settings
+  
+  pStackName:
+    Type: String
+    Description: Name of the stack exporting the required values
+
+  # pAlbListenerHttps:
+  #   Type: String
+  #   Description: Alb Listener HTTPS to expose the service
+
+  # pAutoScalingRole:
+  #   Type: String
+  #   Description: IAM Service Role for Autoscaling  
+
+  pDesiredCount:
+    Type: Number
+    Default: 1
+    Description: Number of 'service' tasks ECS runs at all times
+  
+  pMaxTasks:
+    Type: Number
+    Default: 10
+    Description: Maximum number of tasks ECS can run
+
+  pMinTasks:
+    Type: Number
+    Default: 1
+    Description: Minimum number of tasks ECS can run
+
+  pBuildTag:
+    Type: String
+    Default: latest
+    Description: Commit ID to use from ECR Repo
+
+  pServicePrefix:
+    Type: String
+    Description: Name of ECS Service
+    Default: orthanc-server
+
+  pContainerPort:
+    Type: Number
+    Description: The port exposed to the EC2 instance from the container
+    Default: 8042
+
+  pContainerMemory:
+    Type: Number
+    Description: The amount (in MiB) of memory to present to the container
+    Default: 512
+
+  pContainerCpu:
+    Type: Number
+    Description: The amount of CPU to present to the container
+    Default: 256
+
+  pHostPort:
+    Type: Number
+    Default: 0
+    Description: The port exposed on the ECS instance - set to 0 for dynamic port selection
+
+  pPortProtocol:
+    Type: String
+    Default: tcp
+    AllowedValues:
+      - tcp
+      - udp
+    Description: Port Mappings Protocol
+
+  # pTaskRole:
+  #   Type: String
+  #   Description: (Optional) An IAM role to give the service's containers if the code within needs to access other AWS resources like S3 buckets, DynamoDB tables, etc
+
+  pImageVersion:
+    Type: String
+    Description: "The version tag of the container image."
+    Default: "22.6.1"
+  
+  pEcrRepo:
+    Type: String
+    Description: "The ECR repository name."
+    Default: "gusi-orthanc"
+
+  pFargateClusterName:
+    Type: String
+    Description: "The name of the Fargate Cluster from the exported value"
+    Default: "gusi-cluster"
+
+
+# Target Group
+  pHostname01:
+    Type: String
+    Description: Hostname to expose the service
+    Default: orthanc
+  
+  pHealthCheckPath:
+    Type: String
+    Description: Health check path
+    Default: /
+  
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+
+  pSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: "List of subnet IDs for the ECS service"
+
+  pEnableTgStickySession:
+    Type: String
+    Description: Enable Target Group Sticky Session
+    Default: false
+    AllowedValues:
+      - true
+      - false
+
+  pTgStickyDuration:
+    Type: Number
+    Description: Session cookie duration in seconds
+    Default: 86400  # 1 day
+    MinValue: 1
+    MaxValue: 604800 # 7 Days
+
+
+
+# Environment
+  pEnvironmentTag:
+    Type: String
+    Description: Environment type for default resource tagging
+    AllowedValues:
+      - production
+      - staging
+      - sandbox
+      - test
+      - development
+      - qa
+    Default: development
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterGroups:
+      - Label:
+          default: ECR Settings
+        # Parameters:
+        #   - pImageUri
+      - Label:
+          default: ECS Service Settings
+        Parameters:
+          - pServicePrefix
+          # - pAutoScalingRole
+          - pDesiredCount
+          - pMaxTasks
+          - pMinTasks
+          - pContainerPort
+          - pContainerMemory
+          - pContainerCpu
+          - pHostPort
+          - pPortProtocol
+          - pBuildTag
+          # - pTaskRole
+      - Label:
+          default: Task Definition Settings
+        Parameters:
+          - pEnvironmentTag
+      - Label:
+          default: Load Balancer Settings
+        Parameters:
+          - pHostname01
+          - pAlbListenerHttps
+          - pHealthCheckPath
+          - pVpcId
+          - pEnableTgStickySession
+          - pTgStickyDuration
+      - Label:
+          default: Environment
+        Parameters:
+          - pEnvironmentTag
+    ParameterLabels:
+    #   pImageUri:
+    #     default: Existing ECR Repository URI
+      pServicePrefix:
+        default: ECS Service Name Prefix
+      # pAutoScalingRole:
+      #   default: IAM Service Role for Autoscaling
+      pMaxTasks:
+        default: ECS Service Max Tasks
+      pMinTasks:
+        default: ECS Service Min Tasks
+      pContainerPort:
+        default: ECS Container Port
+      pContainerMemory:
+        default: Container RAM needed
+      pContainerCpu:
+        default: Container CPU needed
+      pHostPort:
+        default: ECS ASG Host Port
+      pPortProtocol:
+        default: ECS Container Port Mappings Protocol
+      pBuildTag:
+        default: ECR Image Build Tag
+      pHostname01:
+        default: ALB Hostname
+      pAlbListenerHttps:
+        default: ALB HTTPS Listener ARN
+      pHealthCheckPath:
+        default: TG Health Check Path
+      pEnvironmentTag:
+        default: Environment Tag
+
+# Conditions:
+#   CondHasCustomRole: !Not [ !Equals [!Ref pTaskRole, ""] ]
+
+Resources:
+
+  # IAM Role for ECS Task Execution
+  ecsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: OrthancECSExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/SecretsManagerReadWrite
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole
+        - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+      Policies:
+        - PolicyName: Auth-AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameters
+                  - secretsmanager:GetSecretValue
+                  - kms:Decrypt
+                Resource: "*"
+
+
+# IAM Role for Auto Scaling
+  autoScalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AutoScalingRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: application-autoscaling.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceAutoscaleRole
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole
+      Policies:
+        - PolicyName: AutoScalingPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - autoscaling:DescribeScalingActivities
+                  - autoscaling:DescribeScalingGroups
+                  - autoscaling:DescribeScalingPolicies
+                  - autoscaling:DescribeScheduledActions
+                  - autoscaling:PutScalingPolicy
+                  - autoscaling:PutScheduledAction
+                Resource: '*'
+        - PolicyName: ELBAccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:RegisterTargets
+                  - elasticloadbalancing:DeregisterTargets
+                  - elasticloadbalancing:DescribeTargetHealth
+                Resource: "*"
+  serviceSecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: Allow all traffic from self and ALB Security Group
+        VpcId: !Ref pVpcId
+
+  # Allow everything that has this security group attached
+  serviceSelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt serviceSecurityGroup.GroupId
+      IpProtocol: -1
+      FromPort: -1
+      ToPort: -1
+      SourceSecurityGroupId: !GetAtt serviceSecurityGroup.GroupId
+
+  serviceVpcIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt serviceSecurityGroup.GroupId
+      IpProtocol: -1  # Allows all protocols
+      FromPort: -1    # Allows all ports
+      ToPort: -1      # Allows all ports
+      CidrIp: 10.2.0.0/16
+
+## ECS service and service scaling.
+
+  ecsService:
+    Type: AWS::ECS::Service
+    DependsOn: ecsExecutionRole
+    Properties:
+      Cluster: !Ref pFargateClusterName
+      DesiredCount: !Ref pDesiredCount
+      TaskDefinition: !Ref ecsTaskDefinition
+      LaunchType: FARGATE
+      ServiceName : !Sub ${pServicePrefix}-service
+      # PlacementStrategies:
+      #   - Type: spread
+      #     Field: attribute:ecs.availability-zone
+      # LoadBalancers:
+      #   - ContainerName: !Sub ${pServicePrefix}-service
+      #     ContainerPort: !Ref pContainerPort
+      #     TargetGroupArn: !Ref targetGroup443
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Ref pSubnetIds
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+      # ServiceRegistries:
+      #   - RegistryArn: !ImportValue 
+      #       Fn::Sub: '${pClusterStackName}:ServiceDiscoveryServiceArn'
+
+
+  ecsServiceScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    DependsOn: ecsService
+    Properties:
+      MaxCapacity: !Ref pMaxTasks
+      MinCapacity: !Ref pMinTasks
+      ResourceId: !Sub "service/${pFargateClusterName}/${pServicePrefix}-service"
+      RoleARN: !GetAtt autoScalingRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+
+  ecsServiceScaleUpPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    DependsOn: ecsServiceScalingTarget
+    Properties:
+        PolicyName: scale-up
+        PolicyType: StepScaling
+        ScalingTargetId: !Ref ecsServiceScalingTarget
+        StepScalingPolicyConfiguration:
+            AdjustmentType: PercentChangeInCapacity
+            Cooldown: 60
+            MetricAggregationType: Average
+            StepAdjustments:
+              - MetricIntervalLowerBound: 0
+                ScalingAdjustment: 100
+
+  alarmEcsServiceScaleUp:
+    Type: AWS::CloudWatch::Alarm
+    DependsOn: ecsServiceScaleUpPolicy
+    Properties:
+        EvaluationPeriods: 1
+        Statistic: Average
+        Threshold: 80
+        AlarmName: !Sub ${pServicePrefix}-service-high-cpu
+        AlarmDescription: !Sub Alarm if ${pServicePrefix}-service is running HIGH on CPU
+        Period: 60
+        AlarmActions:
+          - !Ref ecsServiceScaleUpPolicy
+        Namespace: AWS/ECS
+        Dimensions:
+          - Name: ClusterName
+            Value: !Ref pFargateClusterName
+          - Name: ServiceName
+            Value: !Sub ${pServicePrefix}-service
+        ComparisonOperator: GreaterThanThreshold
+        MetricName: CPUUtilization
+
+  ecsServiceScaleDownPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    DependsOn: ecsServiceScalingTarget
+    Properties:
+        PolicyName: scale-down
+        PolicyType: StepScaling
+        ScalingTargetId: !Ref ecsServiceScalingTarget
+        StepScalingPolicyConfiguration:
+            AdjustmentType: PercentChangeInCapacity
+            Cooldown: 300
+            MetricAggregationType: Average
+            StepAdjustments:
+              - MetricIntervalUpperBound: 0
+                ScalingAdjustment: -25
+
+  alarmEcsServiceScaleDown:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+        EvaluationPeriods: 1
+        Statistic: Average
+        Threshold: 60
+        AlarmName: !Sub ${pServicePrefix}-service-low-cpu
+        AlarmDescription: !Sub Alarm if ${pServicePrefix}-service is running LOW on CPU
+        Period: 60
+        OKActions:
+          - !Ref ecsServiceScaleDownPolicy
+        Namespace: AWS/ECS
+        Dimensions:
+          - Name: ClusterName
+            Value: !Ref pFargateClusterName
+          - Name: ServiceName
+            Value: !Sub ${pServicePrefix}-service
+        ComparisonOperator: GreaterThanThreshold
+        MetricName: CPUUtilization
+
+
+  ecsTaskDefinitionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub ${pServicePrefix}-service-log-group
+      RetentionInDays: 60
+
+
+## Task Definition
+  ecsTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${pServicePrefix}-service
+      Cpu: !Ref pContainerCpu
+      Memory: !Ref pContainerMemory
+      ExecutionRoleArn: !GetAtt ecsExecutionRole.Arn
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+      - FARGATE
+      ContainerDefinitions:
+        - Name: !Sub ${pServicePrefix}-service
+          Cpu: !Ref pContainerCpu
+          Memory: !Ref pContainerMemory
+          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${pEcrRepo}:${pImageVersion}'
+          PortMappings:
+            - ContainerPort: !Ref pContainerPort
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Sub ${pServicePrefix}-service-log-group
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Sub ${pServicePrefix}-service
+
+# ALB Resources
+
+
+  # albListenerRuleHttps01:
+  #   Type: AWS::ElasticLoadBalancingV2::ListenerRule
+  #   Properties:
+  #     Priority: 15
+  #     ListenerArn: !Ref pAlbListenerHttps
+  #     Actions:
+  #       - TargetGroupArn: !Ref targetGroup443
+  #         Type: forward
+  #     Conditions:
+  #       - Field: host-header
+  #         Values:
+  #           - !Sub ${pHostname01}.dev.globalultrasoundinstitute.com
+
+  targetGroup443:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    UpdateReplacePolicy: Delete
+    Properties:
+      Name: !Sub ${pServicePrefix}-TG-HTTPS
+      Port: !Ref pContainerPort
+      Protocol: HTTP
+      Matcher:
+        HttpCode: 200-499
+      HealthyThresholdCount: 4
+      UnhealthyThresholdCount: 4
+      HealthCheckTimeoutSeconds: 5
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: !Ref pHealthCheckPath
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: HTTP
+      TargetType: ip
+      VpcId: !Ref pVpcId
+      TargetGroupAttributes:
+        - Key: stickiness.enabled
+          Value: !Ref pEnableTgStickySession
+        - Key: stickiness.lb_cookie.duration_seconds
+          Value: !Ref pTgStickyDuration
+        - Key: stickiness.type
+          Value: lb_cookie
+        - Key: deregistration_delay.timeout_seconds
+          Value: "180"
+      Tags:
+        - Key: Name
+          Value: !Sub ${pServicePrefix}-TG-HTTPS
+        - Key: controlled-by
+          Value: !Sub cloudformation-${AWS::StackName}
+        - Key: environment
+          Value: !Ref pEnvironmentTag
+
+Outputs:
+  TaskDefinitionArn:
+    Description: "The ARN of the ECS Task Definition"
+    Value: !Ref ecsTaskDefinition
+    Export:
+      Name: !Sub '${AWS::StackName}-TaskDefinitionArn'
+
+  ServiceArn:
+    Description: "The ARN of the ECS Service"
+    Value: !Ref ecsService
+    Export:
+      Name: !Sub '${AWS::StackName}-ServiceArn'
+      
+  LogGroupName:
+    Description: "The name of the CloudWatch Log Group"
+    Value: !Ref ecsTaskDefinitionLogGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-LogGroupName'

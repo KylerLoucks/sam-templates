@@ -1,0 +1,198 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >
+  Deploys WordPress on ECS Fargate using an existing ECS Cluster and Service Discovery Namespace with a MySQL RDS instance.
+
+Parameters:
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the Virtual Private Network (VPC)
+  pSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: List of Subnet IDs for the ECS tasks
+  pStackName:
+    Type: String
+    Description: Name of the stack exporting the required values
+  DBUsername:
+    Type: String
+    Description: Username for the MySQL database
+    NoEcho: true
+  ServiceDiscoveryNamespaceId:
+    Type: String
+    Description: ID of the Service Discovery namespace
+  pCPU:
+    Type: Number
+    Description: "The number of CPUs for the instance or service."
+    Default: "256"
+  pMemory:
+    Type: Number
+    Description: "The number of CPUs for the instance or service."
+    Default: "512"
+  pImageVersion:
+    Type: String
+    Description: "The version tag of the WordPress container image."
+    Default: "6.2.2-php8.0"
+  pAllocatedStorage:
+    Type: Number
+    Description: "The allocated storage size (in GB) for the RDS instance."
+    Default: 20
+    MinValue: 5
+    MaxValue: 1024
+  pDBInstanceClass:
+    Type: String
+    Description: "The instance type for the RDS instance."
+    Default: db.t3.micro
+    AllowedValues:
+      - db.t3.micro
+      - db.t3.small
+      - db.t3.medium
+      - db.m5.large
+      - db.m5.xlarge
+
+
+Resources:
+  # IAM Role for ECS Task Execution
+  ecsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: ECSExecutionRole
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  # Security group for MySQL
+  MySQLSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow MySQL access
+      VpcId: !Ref pVpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: 0.0.0.0/0
+
+  # Secrets Manager Secret for MySQL password
+  MySQLSecret:
+    Type: AWS::SecretsManager::Secret
+    Properties:
+      Name: mysql-db-secret
+      Description: MySQL database password for WordPress
+      GenerateSecretString:
+        SecretStringTemplate: '{"username":"${DBUsername}"}'
+        GenerateStringKey: "password"
+        PasswordLength: 16
+        ExcludeCharacters: '"@/\\'
+
+  # MySQL RDS instance
+  MySQLDBInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBInstanceIdentifier: wordpress-db
+      AllocatedStorage: !Ref pAllocatedStorage
+      DBInstanceClass: !Ref pDBInstanceClass
+      Engine: mysql
+      MasterUsername: !Ref DBUsername
+      ManageMasterUserPassword: true
+      VPCSecurityGroups:
+        - !Ref MySQLSecurityGroup
+      DBSubnetGroupName: !Ref DBSubnetGroup
+
+  # DB Subnet Group
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for RDS instance
+      SubnetIds: !Ref pSubnetIds
+
+  # ECS Task Definition for WordPress
+  wordpressTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: wordpress
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      Cpu: !Ref pCPU
+      Memory: !Ref pMemory
+      ExecutionRoleArn: !GetAtt ecsExecutionRole.Arn
+      ContainerDefinitions:
+        - Name: wordpress
+          Image: "wordpress:${pImageVersion}"
+          Essential: true
+          PortMappings:
+            - ContainerPort: 80
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: wordpress
+          Environment:
+            - Name: WORDPRESS_DB_HOST
+              Value: !GetAtt MySQLDBInstance.Endpoint.Address
+            - Name: WORDPRESS_DB_USER
+              Value: !Ref DBUsername
+            - Name: WORDPRESS_DB_PASSWORD
+              Value: !Sub '{{resolve:secretsmanager:${MySQLSecret}:SecretString:password}}'
+            - Name: WORDPRESS_DB_NAME
+              Value: wordpress
+
+  # CloudWatch Log Group for the container logs
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/wordpress
+      RetentionInDays: 7
+
+  # ECS Service for WordPress
+  wordpressService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !ImportValue 
+        Fn::Sub: '${pStackName}:FargateClusterArn'
+      ServiceName: wordpress-service
+      TaskDefinition: !Ref wordpressTaskDefinition
+      DesiredCount: 1
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Ref pSubnetIds
+          AssignPublicIp: ENABLED
+      ServiceRegistries:
+        - RegistryArn: !ImportValue 
+            Fn::Sub: '${pStackName}:ServiceDiscoveryServiceArn'
+
+
+
+Outputs:
+  ServiceUrl:
+    Description: URL of the WordPress service
+    Value: !Sub 'http://wordpress-service.${ServiceDiscoveryNamespaceId}.cloudmap.internal'
+    Export:
+      Name: !Sub '${AWS::StackName}:ServiceUrl'
+
+  ECSServiceName:
+    Description: Service Name
+    Value: !Ref wordpressService
+
+  MySQLDBEndpoint:
+    Description: Endpoint of the MySQL DB Instance
+    Value: !GetAtt MySQLDBInstance.Endpoint.Address
+    Export:
+      Name: !Sub '${AWS::StackName}:MySQLDBEndpoint'
+  MySQLDBSecretArn:
+    Description: ARN of the Secrets Manager secret for the MySQL DB password
+    Value: !Ref MySQLSecret
+    Export:
+      Name: !Sub '${AWS::StackName}:MySQLDBSecretArn'
+
