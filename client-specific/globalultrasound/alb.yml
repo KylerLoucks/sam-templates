@@ -67,7 +67,7 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
       IpAddressType: ipv4
-      Scheme: internet-facing
+      Scheme: internal #internet-facing
       SecurityGroups:
         - !GetAtt albSecurityGroup.GroupId
       Subnets: !Ref pSubnetIds
@@ -78,40 +78,40 @@ Resources:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties: 
       DefaultActions: 
+        # - Type: "fixed-response"
+        #   FixedResponseConfig:
+        #     StatusCode: "503"
+        #     ContentType: "text/plain"
+        #     MessageBody: "You have reached an invalid domain."
+        # - Type: forward
+        #   TargetGroupArn: !Ref laravelTg
+
+        - Type: redirect
+          RedirectConfig: 
+            Port: 443
+            Protocol: HTTPS
+            StatusCode: HTTP_301
+      LoadBalancerArn: !Ref loadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  httpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties: 
+      Certificates: 
+        - CertificateArn: !Ref pACMCertificateArn
+      DefaultActions: 
         - Type: "fixed-response"
           FixedResponseConfig:
             StatusCode: "503"
             ContentType: "text/plain"
             MessageBody: "You have reached an invalid domain."
         # - Type: forward
-        #   TargetGroupArn: !Ref laravelTg
-
-        # - Type: redirect
-        #   RedirectConfig: 
-        #     Port: 443
-        #     Protocol: HTTPS
-        #     StatusCode: HTTP_301
+        #   TargetGroupArn: !Ref wordpressTg
       LoadBalancerArn: !Ref loadBalancer
-      Port: 80
-      Protocol: HTTP
-
-  # httpsListener:
-  #   Type: AWS::ElasticLoadBalancingV2::Listener
-  #   Properties: 
-  #     Certificates: 
-  #       - CertificateArn: !Ref pACMCertificateArn
-  #     DefaultActions: 
-  #       # - Type: "fixed-response"
-  #       #   FixedResponseConfig:
-  #       #     StatusCode: "503"
-  #       #     ContentType: "text/plain"
-  #       #     MessageBody: "You have reached an invalid domain."
-  #       - Type: forward
-  #         TargetGroupArn: !Ref wordpressTg
-  #     LoadBalancerArn: !Ref loadBalancer
-  #     Port: 443
-  #     Protocol: HTTPS
-  #     SslPolicy: ELBSecurityPolicy-2016-08
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-2016-08
 
   # ==============================
   #         Target Groups
@@ -228,7 +228,7 @@ Resources:
   laravelRule:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
     Properties:
-      ListenerArn: !Ref httpListener
+      ListenerArn: !Ref httpsListener
       Priority: 3
       Actions:
         - Type: forward
@@ -245,7 +245,7 @@ Resources:
   orthancRule:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
     Properties:
-      ListenerArn: !Ref httpListener
+      ListenerArn: !Ref httpsListener
       Priority: 4
       Actions:
         - Type: forward
