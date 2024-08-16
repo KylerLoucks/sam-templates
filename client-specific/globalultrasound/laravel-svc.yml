@@ -85,6 +85,47 @@ Resources:
         - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
         - arn:aws:iam::aws:policy/SecretsManagerReadWrite
 
+  taskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: EcsExec
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowEcsExec
+                Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: "*"
+        - PolicyName: CloudWatchLogs
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowCreateLogGroup
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Sid: AllowLogStreams
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/*:*"
+
   # ECS Task Definition for Laravel
   laravelTaskDefinition:
     Type: AWS::ECS::TaskDefinition
@@ -99,6 +140,7 @@ Resources:
       Cpu: !Ref pCPU
       Memory: !Ref pMemory
       ExecutionRoleArn: !GetAtt ecsExecutionRole.Arn
+      TaskRoleArn: !GetAtt  taskRole.Arn
       ContainerDefinitions:
         - Name: laravel-container
           Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${pEcrRepo}:${pImageVersion}
@@ -155,6 +197,8 @@ Resources:
             - - !ImportValue 
                 Fn::Sub: laravel-tg-${pAlbStackName}
       DesiredCount: 1
+      EnableExecuteCommand: true
+      EnableECSManagedTags: true
       LaunchType: FARGATE
       NetworkConfiguration:
         AwsvpcConfiguration:
