@@ -111,6 +111,11 @@ Parameters:
       URI of the ECR image used for Mongo Task Definition. 
       e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
 
+  pMongoEbsSnapshotId:
+    Type: String
+    Description: >
+      SnapshotId of the EBS Volume to use for MongoDB ECS /data/db Data (ex: snap-06934e13d7d90fae2)
+
 
 Resources:
 
@@ -398,8 +403,8 @@ Resources:
       Family: !Sub ${pAppName}-redis
       ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
       TaskRoleArn: !GetAtt taskRole.Arn
-      Cpu: 4096
-      Memory: 8192
+      Cpu: 512
+      Memory: 1024
       RequiresCompatibilities:
         - FARGATE
       NetworkMode: awsvpc
@@ -432,8 +437,8 @@ Resources:
       Family: !Sub ${pAppName}-mysql
       ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
       TaskRoleArn: !GetAtt taskRole.Arn
-      Cpu: 4096
-      Memory: 8192
+      Cpu: 512
+      Memory: 1024
       RequiresCompatibilities:
         - FARGATE
       NetworkMode: awsvpc
@@ -441,7 +446,7 @@ Resources:
         CpuArchitecture: X86_64
         OperatingSystemFamily: LINUX
       EphemeralStorage:
-        SizeInGiB: 200
+        SizeInGiB: 30
         
       ContainerDefinitions:
         - Name: mysql
@@ -500,6 +505,12 @@ Resources:
               awslogs-group: !Ref mongoLogGroup
               awslogs-region: !Sub ${AWS::Region}
               awslogs-stream-prefix: ecs
+          MountPoints:
+            - SourceVolume: mongo
+              ContainerPath: /data/db # Must use volume that is pre-populated with mysql data. Otherwise, this location will be empty.
+      Volumes:
+        - Name: mongo
+          ConfiguredAtLaunch: true # Configure additional EBS volumes at launch
 
   # API SERVER
   apiServerTaskDefinition:
@@ -1090,6 +1101,13 @@ Resources:
         - RegistryArn: !GetAtt mongoServiceDiscoveryService.Arn
           Port: !Ref pMongoPort
       TaskDefinition: !Ref mongoTaskDefinition
+      VolumeConfigurations: 
+        - Name: mongo # Must match the name defined in the `Volume` object of the Task Definition
+          ManagedEBSVolume:
+            RoleArn: !GetAtt ecsInfrastructureRole.Arn
+            VolumeType: gp3
+            FilesystemType: ext4 # Specify the same filesystem type that the volume was using when the snapshot was created.
+            SnapshotId: !Ref pMongoEbsSnapshotId # Here we can specify the Snapshot of an EBS volume to use.
       Tags: 
         - Key: managed-by
           Value: SAM
@@ -1837,5 +1855,9 @@ Outputs:
   mysqlEbsSnapshotId:
     Description: SnapshotId of the EBS volume that houses MySQL database data
     Value: !Ref pMysqlEbsSnapshotId
+
+  mongoEbsSnapshotId:
+    Description: SnapshotId of the EBS volume that houses MongoDB database data
+    Value: !Ref pMongoEbsSnapshotId
 
   
