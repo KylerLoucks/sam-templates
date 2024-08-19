@@ -15,7 +15,7 @@ def lambda_handler(event, context):
         Filters=[
             {
                 'Name': 'tag-key',
-                'Values': ['ephemeral-mysql']
+                'Values': ['ephemeral-mongo']
             }
         ]
     )['Snapshots']
