@@ -47,7 +47,7 @@ phases:
             echo "No output with key $MONGO_OUTPUT_KEY found in stack $STACK_NAME."
             # Grab the latest snapshot
             MONGO_SNAPSHOT_ID=$(aws ec2 describe-snapshots --filters Name=tag-key,Values=ephemeral-mongo --query "Snapshots[].[SnapshotId,StartTime]" --output json | jq -r 'sort_by(.[1]) | last | .[0]')
-            echo "Using Latest MySQL EBS SnapshotId: $MONGO_SNAPSHOT_ID"
+            echo "Using Latest Mongo EBS SnapshotId: $MONGO_SNAPSHOT_ID"
         else
             echo "SnapshotId found. Continuing to use the previous snapshot used: $MONGO_SNAPSHOT_ID"
         fi

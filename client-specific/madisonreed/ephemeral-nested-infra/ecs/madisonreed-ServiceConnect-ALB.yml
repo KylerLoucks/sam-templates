@@ -332,8 +332,8 @@ Resources:
       Family: !Sub ${pAppName}-website
       ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
       TaskRoleArn: !GetAtt taskRole.Arn
-      Cpu: 4096
-      Memory: 8192
+      Cpu: 512
+      Memory: 1024
       RequiresCompatibilities:
         - FARGATE
       NetworkMode: awsvpc
@@ -489,7 +489,7 @@ Resources:
         CpuArchitecture: X86_64
         OperatingSystemFamily: LINUX
       EphemeralStorage:
-        SizeInGiB: 80
+        SizeInGiB: 30
         
       ContainerDefinitions:
         - Name: mongo
@@ -1806,30 +1806,30 @@ Resources:
         - Key: ephemeral:app
           Value: !Ref pAppName
 
-  # Autoscaling for Connection Tester!
-  AutoScalingTarget:
-    Type: AWS::ApplicationAutoScaling::ScalableTarget
-    Properties:
-      MaxCapacity: 2
-      MinCapacity: 1
-      ResourceId: !Join ["/", [service, !Ref fargateCluster, !GetAtt connTestService.Name]]
-      RoleARN: !GetAtt ECSServiceAutoScalingRole.Arn
-      ScalableDimension: ecs:service:DesiredCount
-      ServiceNamespace: ecs
+  # # Autoscaling for Connection Tester!
+  # AutoScalingTarget:
+  #   Type: AWS::ApplicationAutoScaling::ScalableTarget
+  #   Properties:
+  #     MaxCapacity: 2
+  #     MinCapacity: 1
+  #     ResourceId: !Join ["/", [service, !Ref fargateCluster, !GetAtt connTestService.Name]]
+  #     RoleARN: !GetAtt ECSServiceAutoScalingRole.Arn
+  #     ScalableDimension: ecs:service:DesiredCount
+  #     ServiceNamespace: ecs
 
-  # Scale based on CPU usage metric
-  AutoScalingPolicy:
-    Type: AWS::ApplicationAutoScaling::ScalingPolicy
-    Properties:
-      PolicyName: ServiceAutoScalingPolicy
-      PolicyType: TargetTrackingScaling
-      ScalingTargetId: !Ref AutoScalingTarget
-      TargetTrackingScalingPolicyConfiguration:
-        PredefinedMetricSpecification:
-          PredefinedMetricType: ECSServiceAverageCPUUtilization
-        ScaleInCooldown: 10
-        ScaleOutCooldown: 10
-        TargetValue: 70
+  # # Scale based on CPU usage metric
+  # AutoScalingPolicy:
+  #   Type: AWS::ApplicationAutoScaling::ScalingPolicy
+  #   Properties:
+  #     PolicyName: ServiceAutoScalingPolicy
+  #     PolicyType: TargetTrackingScaling
+  #     ScalingTargetId: !Ref AutoScalingTarget
+  #     TargetTrackingScalingPolicyConfiguration:
+  #       PredefinedMetricSpecification:
+  #         PredefinedMetricType: ECSServiceAverageCPUUtilization
+  #       ScaleInCooldown: 10
+  #       ScaleOutCooldown: 10
+  #       TargetValue: 70
 
 
   # Used to be able to connect via VPN and DNS route to the Web UI (DNS record could be stale)
