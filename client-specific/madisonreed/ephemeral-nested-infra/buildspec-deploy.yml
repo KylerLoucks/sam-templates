@@ -98,7 +98,7 @@ phases:
               pTopHatEcrImageUri=${TOPHAT_REPOSITORY_URI}:${IMAGE_TAG} \
               pSocketioEcrImageUri=${TOPHAT_REPOSITORY_URI}:${IMAGE_TAG} \
               pApiServerEcrImageUri=${APISERVER_REPOSITORY_URI}:${IMAGE_TAG} \
-              pMongoEcrImageUri=public.ecr.aws/docker/library/mongo:5.0.26 \
+              pMongoEcrImageUri=public.ecr.aws/docker/library/mongo:7.0 \
               pMysqlEcrImageUri=mysql:8.0 \
               pMysqlEbsSnapshotId=${MYSQL_SNAPSHOT_ID} \
               pMongoEbsSnapshotId=${MONGO_SNAPSHOT_ID} \
