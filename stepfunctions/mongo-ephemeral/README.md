@@ -9,3 +9,18 @@ Show databases:
 ```zsh
 show dbs
 ```
+
+
+# Deploying
+
+```zsh
+sam build -t ephemeral-db-mongo-ebs.yml
+```
+
+```zsh
+sam deploy -t ephemeral-db-mongo-ebs.yml \
+    --resolve-s3 \
+    --capabilities CAPABILITY_NAMED_IAM \
+    --confirm-changeset \
+    --stack-name MongoEphemeralSnapshotStateMachine
+```

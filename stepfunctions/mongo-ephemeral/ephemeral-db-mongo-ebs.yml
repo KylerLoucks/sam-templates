@@ -1,13 +1,13 @@
 AWSTemplateFormatVersion: 2010-09-09
 Transform: AWS::Serverless-2016-10-31
-Description: State Machine to Create Scheduled Snapshots of an EBS volume used for MySQL ECS Fargate Containers
+Description: State Machine to Create Scheduled Snapshots of an EBS volume used for Mongo ECS Fargate Containers
 
 
-# This Template will create a Step Function that will create an EBS volume that holds MySQL data.
+# This Template will create a Step Function that will create an EBS volume that holds MongoDB data.
 # The volume will be snapshot and maintained by the 'cleanUpOldSnapshots' Lambda function.
 
-# Use the following command to grab the most recent snapshot with the tag 'ephemeral-mysql'
-# aws ec2 describe-snapshots --filters Name=tag-key,Values=ephemeral-mysql --query "Snapshots[].[SnapshotId,StartTime]" --output json | jq -r 'sort_by(.[1]) | last | .[0]'
+# Use the following command to grab the most recent snapshot with the tag 'ephemeral-mongo'
+# aws ec2 describe-snapshots --filters Name=tag-key,Values=ephemeral-mongo --query "Snapshots[].[SnapshotId,StartTime]" --output json | jq -r 'sort_by(.[1]) | last | .[0]'
 
 
 
@@ -542,7 +542,7 @@ Resources:
         - Key: Name
           Value: EphemeralMongoLImport
 
-  MySQLImportStateMachine:
+  MongoImportStateMachine:
     Type: AWS::Serverless::StateMachine
     Properties:
       Definition:
@@ -574,7 +574,7 @@ Resources:
             Resource: arn:aws:states:::aws-sdk:ec2:runInstances
             Parameters:
               ImageId: !Ref pUbuntuImageId
-              InstanceType: t3.large
+              InstanceType: t3.medium
               IamInstanceProfile: 
                 Arn: !GetAtt runInstanceProfile.Arn
               SecurityGroupIds:
@@ -595,16 +595,18 @@ Resources:
                     - Key: ephemeral-mongo
                       Value.$: States.Format('{}', $.lambda_date_result.Payload.datePattern)
               BlockDeviceMappings:
+                # Root volume
                 - DeviceName: /dev/sda1
                   Ebs:
-                    VolumeSize: 100
+                    VolumeSize: 30
                     DeleteOnTermination: true
                     VolumeType: gp3
                     Iops: 3000
                     Encrypted: true
+                # /data/db volume
                 - DeviceName: /dev/xvdf
                   Ebs:
-                    VolumeSize: 80
+                    VolumeSize: 20
                     DeleteOnTermination: false
                     VolumeType: gp3
                     Iops: 3000
@@ -652,13 +654,13 @@ Resources:
                 # Need to use States.Array so we can pass state input with Commands.$
                 # TLDR of this script: 
                 # 1. create temp mounting dir for the new Ebs volume
-                # 2. copy the contents of the base mysql data as to not break mysql when we move the new mount back to var/lib/mysql
+                # 2. copy the contents of the base mongo data as to not break mongo when we move the new mount back to /data/db
                 # 3. import database dump
                 # NOTE: if script fails, it could be due to instance root volume running out of storage. Verify /dev/root with `df -h` cmd
                 Commands:
                   - LOG_FILE=/home/ubuntu/automation.log
                   - BACKUP_NAME="mongo5Sanitized"
-                  - RESTORE_DATE=$(date -v-1d "+%Y%m%d")
+                  - RESTORE_DATE=$(date --date="1 days ago" "+%Y%m%d")
                   - BACKUP_NAME_DATE="${BACKUP_NAME}_${RESTORE_DATE}"
                   - DB_DUMP_BUCKET="mr-mongo-atlas-sanitized-backup"
                   # Install mongodb-org
@@ -672,8 +674,8 @@ Resources:
                   # Update mongo.conf to use proper dbPath and bindIP so we can connect & verify db import worked
                   - mkdir -p /data/db
                   - chown -R mongodb:mongodb /data/db
-                  - sed -i 's|^  dbPath:.*|  dbPath: /data/db |' /etc/mongod.conf
-                  - sed -i 's/^  bindIp:.*/  bindIp: 0.0.0.0/' /etc/mongod.conf
+                  - "sed -i 's|^  dbPath:.*|  dbPath: /data/db |' /etc/mongod.conf"
+                  - "sed -i 's/^  bindIp:.*/  bindIp: 0.0.0.0/' /etc/mongod.conf"
                   # Install AWS CLI
                   - apt install -y unzip >> $LOG_FILE 2>&1
                   - apt install -y jq >> $LOG_FILE 2>&1
@@ -689,7 +691,7 @@ Resources:
                   - umount /mnt/tmpdata
                   - mount /dev/nvme1n1 /data/db
                   - echo "Mounted to /data/db" >> $LOG_FILE
-                  - systemctl start mongodb
+                  - systemctl start mongod
                   # Download Mongo dump S3 files
                   - S3_FILES=$(aws s3api list-objects-v2 --bucket $DB_DUMP_BUCKET --prefix "${BACKUP_NAME_DATE}" --query "reverse(sort_by(Contents, &LastModified))[].Key" --output text)
                   - for FILE in $S3_FILES; do
@@ -698,17 +700,13 @@ Resources:
                   - done
                   - echo "Restoring MongoDB dumps..." >> $LOG_FILE
                   - for file in ./dumpfiles/*; do
-                  -   case "$file" in
-                  -     '*.tar)'
-                  -       echo "Restoring dump ${file} into MongoDB..." >> $LOG_FILE
-                  -       if mongorestore --archive=$file --gzip --writeConcern '{w:0}' --numInsertionWorkersPerCollection 5; then
-                  -         echo "Restored ${file} successfully." >> $LOG_FILE
-                  -       else
-                  -         echo "Error restoring ${file}. Exiting..." >> $LOG_FILE
-                  -         exit 1
-                  -       fi
-                  -       ;;
-                  -   esac
+                  -   echo "Restoring dump ${file} into MongoDB..." >> $LOG_FILE
+                  -   if mongorestore --archive=$file --gzip --writeConcern '{w:0}' --numInsertionWorkersPerCollection 5; then
+                  -     echo "Restored ${file} successfully." >> $LOG_FILE
+                  -   else
+                  -     echo "Error restoring ${file}. Exiting..." >> $LOG_FILE
+                  -     exit 1
+                  -   fi
                   - done
                   - echo "Script completed." >> $LOG_FILE
 
@@ -722,85 +720,85 @@ Resources:
               - ErrorEquals:
                 - States.ALL
                 ResultPath: $.errorInfo
-                Next: EndSuccess #TerminateInstanceOnFail
-            Next: EndSuccess #DescribeImportInstanceVolume
+                Next: TerminateInstanceOnFail #EndSuccess
+            Next: DescribeImportInstanceVolume #EndSuccess
             ResultPath: $.runImportInstanceScript
 
-          # TerminateInstanceOnFail:
-          #   Type: Task
-          #   Resource: arn:aws:states:::aws-sdk:ec2:terminateInstances
-          #   Parameters:
-          #     InstanceIds.$: States.Array($.runInstances.Instances[0].InstanceId)
-          #   Next: FailState
-          #   ResultPath: null
+          TerminateInstanceOnFail:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:ec2:terminateInstances
+            Parameters:
+              InstanceIds.$: States.Array($.runInstances.Instances[0].InstanceId)
+            Next: FailState
+            ResultPath: null
 
-          # FailState:
-          #   Type: Fail
-          #   ErrorPath: $.errorInfo.Error
-          #   CausePath: $.errorInfo.Cause
+          FailState:
+            Type: Fail
+            ErrorPath: $.errorInfo.Error
+            CausePath: $.errorInfo.Cause
 
-          # DescribeImportInstanceVolume:
-          #   Type: Task
-          #   Resource: arn:aws:states:::aws-sdk:ec2:describeInstances
-          #   Parameters:
-          #     InstanceIds.$: States.Array($.runInstances.Instances[0].InstanceId)
-          #   ResultPath: $.describeImportInstance
-          #   Next: TerminateInstance
+          DescribeImportInstanceVolume:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:ec2:describeInstances
+            Parameters:
+              InstanceIds.$: States.Array($.runInstances.Instances[0].InstanceId)
+            ResultPath: $.describeImportInstance
+            Next: TerminateInstance
 
-          # TerminateInstance:
-          #   Type: Task
-          #   Resource: arn:aws:states:::aws-sdk:ec2:terminateInstances
-          #   Parameters:
-          #     InstanceIds.$: States.Array($.runInstances.Instances[0].InstanceId)
-          #   Next: SnapshotEbsVolume
-          #   ResultPath: null
+          TerminateInstance:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:ec2:terminateInstances
+            Parameters:
+              InstanceIds.$: States.Array($.runInstances.Instances[0].InstanceId)
+            Next: SnapshotEbsVolume
+            ResultPath: null
           
-          # SnapshotEbsVolume:
-          #   Type: Task
-          #   Resource: arn:aws:states:::aws-sdk:ec2:createSnapshot
-          #   Parameters:
-          #     VolumeId.$: $.describeImportInstance.Reservations[0].Instances[0].BlockDeviceMappings[1].Ebs.VolumeId
-          #     TagSpecifications:
-          #       - ResourceType: snapshot
-          #         Tags:
-          #           - Key: Name
-          #             Value.$: States.Format('ephemeral-mongo-{}', $.lambda_date_result.Payload.datePattern)
-          #           - Key: ephemeral-mongo
-          #             Value.$: States.Format('{}', $.lambda_date_result.Payload.datePattern)
-          #   ResultPath: $.snapshotEbsVolume
-          #   Next: WaitForSnapshotCreation
+          SnapshotEbsVolume:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:ec2:createSnapshot
+            Parameters:
+              VolumeId.$: $.describeImportInstance.Reservations[0].Instances[0].BlockDeviceMappings[1].Ebs.VolumeId
+              TagSpecifications:
+                - ResourceType: snapshot
+                  Tags:
+                    - Key: Name
+                      Value.$: States.Format('ephemeral-mongo-{}', $.lambda_date_result.Payload.datePattern)
+                    - Key: ephemeral-mongo
+                      Value.$: States.Format('{}', $.lambda_date_result.Payload.datePattern)
+            ResultPath: $.snapshotEbsVolume
+            Next: WaitForSnapshotCreation
   
-          # WaitForSnapshotCreation:
-          #   Type: Wait
-          #   Seconds: 300
-          #   Next: CheckSnapshotStatus
+          WaitForSnapshotCreation:
+            Type: Wait
+            Seconds: 300
+            Next: CheckSnapshotStatus
 
-          # # Describe the Ebs snapshot to see if its in the available state
-          # CheckSnapshotStatus:
-          #   Type: Task
-          #   Resource: arn:aws:states:::aws-sdk:ec2:describeSnapshots
-          #   Parameters:
-          #     SnapshotIds.$: States.Array($.snapshotEbsVolume.SnapshotId)
-          #   Next: IsSnapshotAvailable
-          #   ResultPath: $.snapshotStatusResult
+          # Describe the Ebs snapshot to see if its in the available state
+          CheckSnapshotStatus:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:ec2:describeSnapshots
+            Parameters:
+              SnapshotIds.$: States.Array($.snapshotEbsVolume.SnapshotId)
+            Next: IsSnapshotAvailable
+            ResultPath: $.snapshotStatusResult
 
-          # # If snapshot is available, move to delete the cluster
-          # IsSnapshotAvailable:
-          #   Type: Choice
-          #   Choices:
-          #     - Variable: $.snapshotStatusResult.Snapshots[0].State
-          #       StringEquals: completed
-          #       Next: DeleteVolume
-          #   Default: WaitForSnapshotCreation
+          # If snapshot is available, move to delete the cluster
+          IsSnapshotAvailable:
+            Type: Choice
+            Choices:
+              - Variable: $.snapshotStatusResult.Snapshots[0].State
+                StringEquals: completed
+                Next: DeleteVolume
+            Default: WaitForSnapshotCreation
           
-          # # Delete the volume now that we have a snapshot of it.
-          # DeleteVolume:
-          #   Type: Task
-          #   Resource: arn:aws:states:::aws-sdk:ec2:deleteVolume
-          #   Parameters:
-          #     VolumeId.$: $.describeImportInstance.Reservations[0].Instances[0].BlockDeviceMappings[1].Ebs.VolumeId
-          #   ResultPath: null
-          #   Next: EndSuccess
+          # Delete the volume now that we have a snapshot of it.
+          DeleteVolume:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:ec2:deleteVolume
+            Parameters:
+              VolumeId.$: $.describeImportInstance.Reservations[0].Instances[0].BlockDeviceMappings[1].Ebs.VolumeId
+            ResultPath: null
+            Next: EndSuccess
           
           EndSuccess:
             Type: Succeed
@@ -811,7 +809,7 @@ Resources:
           Type: Schedule
           Properties:
             Schedule: cron(59 23 * * ? *)
-            Enabled: False
+            Enabled: True
 
 
   stateMachineExecutionRole:
