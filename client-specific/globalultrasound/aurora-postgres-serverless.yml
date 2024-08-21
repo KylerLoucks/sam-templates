@@ -12,6 +12,11 @@ Parameters:
     Description:
       List of Private SubnetIds in the Virtual Private Cloud (VPC) to use for the Database
 
+  pDBname:
+    Type: String
+    Default: gusi_orthanc
+    Description: Database name
+
   pDBUsername:
     Type: String
     Default: master
@@ -70,6 +75,8 @@ Resources:
   AuroraCluster:
     Type: AWS::RDS::DBCluster
     Properties:
+      DatabaseName: !Ref pDBname
+      Port: 5432
       Engine: aurora-postgresql
       EngineVersion: 13.12
       EngineMode: provisioned
