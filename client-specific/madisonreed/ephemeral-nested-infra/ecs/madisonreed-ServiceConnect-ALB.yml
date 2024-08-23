@@ -1883,6 +1883,153 @@ Resources:
       ScalableDimension: ecs:service:DesiredCount
       ServiceNamespace: ecs
 
+  AutoScalingTargetWebsite:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 1
+      MinCapacity: 1
+      ScheduledActions:
+        - ScheduledActionName: schedule-scale-to-zero
+          Schedule: cron(0 23 * * ? *) # This cron expression schedules the scaling to 0 at 11 PM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 0
+            MinCapacity: 0
+        - ScheduledActionName: schedule-scale-up
+          Schedule: cron(0 7 * * ? *) # Schedules the scaling back up to one task at 7 AM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 1
+            MinCapacity: 1
+      ResourceId: !Join ["/", [service, !Ref fargateCluster, !GetAtt websiteService.Name]]
+      RoleARN: !GetAtt autoScalingRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  AutoScalingTargetApiServer:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 1
+      MinCapacity: 1
+      ScheduledActions:
+        - ScheduledActionName: schedule-scale-to-zero
+          Schedule: cron(0 23 * * ? *) # This cron expression schedules the scaling to 0 at 11 PM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 0
+            MinCapacity: 0
+        - ScheduledActionName: schedule-scale-up
+          Schedule: cron(0 7 * * ? *) # Schedules the scaling back up to one task at 7 AM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 1
+            MinCapacity: 1
+      ResourceId: !Join ["/", [service, !Ref fargateCluster, !GetAtt apiServerService.Name]]
+      RoleARN: !GetAtt autoScalingRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  AutoScalingTargetSocketio:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 1
+      MinCapacity: 1
+      ScheduledActions:
+        - ScheduledActionName: schedule-scale-to-zero
+          Schedule: cron(0 23 * * ? *) # This cron expression schedules the scaling to 0 at 11 PM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 0
+            MinCapacity: 0
+        - ScheduledActionName: schedule-scale-up
+          Schedule: cron(0 7 * * ? *) # Schedules the scaling back up to one task at 7 AM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 1
+            MinCapacity: 1
+      ResourceId: !Join ["/", [service, !Ref fargateCluster, !GetAtt socketioService.Name]]
+      RoleARN: !GetAtt autoScalingRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  AutoScalingTargetTophat:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 1
+      MinCapacity: 1
+      ScheduledActions:
+        - ScheduledActionName: schedule-scale-to-zero
+          Schedule: cron(0 23 * * ? *) # This cron expression schedules the scaling to 0 at 11 PM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 0
+            MinCapacity: 0
+        - ScheduledActionName: schedule-scale-up
+          Schedule: cron(0 7 * * ? *) # Schedules the scaling back up to one task at 7 AM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 1
+            MinCapacity: 1
+      ResourceId: !Join ["/", [service, !Ref fargateCluster, !GetAtt tophatService.Name]]
+      RoleARN: !GetAtt autoScalingRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  AutoScalingTargetRedis:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 1
+      MinCapacity: 1
+      ScheduledActions:
+        - ScheduledActionName: schedule-scale-to-zero
+          Schedule: cron(0 23 * * ? *) # This cron expression schedules the scaling to 0 at 11 PM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 0
+            MinCapacity: 0
+        - ScheduledActionName: schedule-scale-up
+          Schedule: cron(0 7 * * ? *) # Schedules the scaling back up to one task at 7 AM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 1
+            MinCapacity: 1
+      ResourceId: !Join ["/", [service, !Ref fargateCluster, !GetAtt redisService.Name]]
+      RoleARN: !GetAtt autoScalingRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  AutoScalingTargetMongo:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 1
+      MinCapacity: 1
+      ScheduledActions:
+        - ScheduledActionName: schedule-scale-to-zero
+          Schedule: cron(0 23 * * ? *) # This cron expression schedules the scaling to 0 at 11 PM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 0
+            MinCapacity: 0
+        - ScheduledActionName: schedule-scale-up
+          Schedule: cron(0 7 * * ? *) # Schedules the scaling back up to one task at 7 AM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 1
+            MinCapacity: 1
+      ResourceId: !Join ["/", [service, !Ref fargateCluster, !GetAtt mongoService.Name]]
+      RoleARN: !GetAtt autoScalingRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  AutoScalingTargetMysql:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 1
+      MinCapacity: 1
+      ScheduledActions:
+        - ScheduledActionName: schedule-scale-to-zero
+          Schedule: cron(0 23 * * ? *) # This cron expression schedules the scaling to 0 at 11 PM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 0
+            MinCapacity: 0
+        - ScheduledActionName: schedule-scale-up
+          Schedule: cron(0 7 * * ? *) # Schedules the scaling back up to one task at 7 AM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 1
+            MinCapacity: 1
+      ResourceId: !Join ["/", [service, !Ref fargateCluster, !GetAtt mysqlService.Name]]
+      RoleARN: !GetAtt autoScalingRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
   # # Scale based on CPU usage metric
   # AutoScalingPolicy:
   #   Type: AWS::ApplicationAutoScaling::ScalingPolicy
