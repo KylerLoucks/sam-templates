@@ -39,6 +39,16 @@ Parameters:
     Description: The ECR repository name.
     Default: gusi-laravel
 
+  pMaxTasks:
+    Type: Number
+    Default: 10
+    Description: Maximum number of tasks ECS can run
+
+  pMinTasks:
+    Type: Number
+    Default: 1
+    Description: Minimum number of tasks ECS can run
+
 Resources:
 
   # Security Group
@@ -209,6 +219,131 @@ Resources:
       ServiceRegistries:
         - RegistryArn: !ImportValue 
             Fn::Sub: ${pClusterStackName}:ServiceDiscoveryServiceArn
+
+# IAM Role for Auto Scaling
+  autoScalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AutoScalingRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: application-autoscaling.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceAutoscaleRole
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole
+      Policies:
+        - PolicyName: AutoScalingPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - autoscaling:DescribeScalingActivities
+                  - autoscaling:DescribeScalingGroups
+                  - autoscaling:DescribeScalingPolicies
+                  - autoscaling:DescribeScheduledActions
+                  - autoscaling:PutScalingPolicy
+                  - autoscaling:PutScheduledAction
+                Resource: "*"
+        - PolicyName: ELBAccessPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:RegisterTargets
+                  - elasticloadbalancing:DeregisterTargets
+                  - elasticloadbalancing:DescribeTargetHealth
+                Resource: "*"
+
+
+  ecsServiceScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    DependsOn: ecsService
+    Properties:
+      MaxCapacity: !Ref pMaxTasks
+      MinCapacity: !Ref pMinTasks
+      ResourceId: !Sub "service/${pFargateClusterName}/laravel-service"
+      RoleARN: !GetAtt autoScalingRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+
+  ecsServiceScaleUpPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    DependsOn: ecsServiceScalingTarget
+    Properties:
+        PolicyName: scale-up
+        PolicyType: StepScaling
+        ScalingTargetId: !Ref ecsServiceScalingTarget
+        StepScalingPolicyConfiguration:
+            AdjustmentType: PercentChangeInCapacity
+            Cooldown: 60
+            MetricAggregationType: Average
+            StepAdjustments:
+              - MetricIntervalLowerBound: 0
+                ScalingAdjustment: 100
+
+  alarmEcsServiceScaleUp:
+    Type: AWS::CloudWatch::Alarm
+    DependsOn: ecsServiceScaleUpPolicy
+    Properties:
+        EvaluationPeriods: 1
+        Statistic: Average
+        Threshold: 80
+        AlarmName: !Sub ${pServicePrefix}-service-high-cpu
+        AlarmDescription: !Sub Alarm if laravel-service is running HIGH on CPU
+        Period: 60
+        AlarmActions:
+          - !Ref ecsServiceScaleUpPolicy
+        Namespace: AWS/ECS
+        Dimensions:
+          - Name: ClusterName
+            Value: !Ref pFargateClusterName
+          - Name: ServiceName
+            Value: !Sub laravel-service
+        ComparisonOperator: GreaterThanThreshold
+        MetricName: CPUUtilization
+
+  ecsServiceScaleDownPolicy:
+    Type: AWS::ApplicationAutoScaling::ScalingPolicy
+    DependsOn: ecsServiceScalingTarget
+    Properties:
+        PolicyName: scale-down
+        PolicyType: StepScaling
+        ScalingTargetId: !Ref ecsServiceScalingTarget
+        StepScalingPolicyConfiguration:
+            AdjustmentType: PercentChangeInCapacity
+            Cooldown: 300
+            MetricAggregationType: Average
+            StepAdjustments:
+              - MetricIntervalUpperBound: 0
+                ScalingAdjustment: -25
+
+  alarmEcsServiceScaleDown:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+        EvaluationPeriods: 1
+        Statistic: Average
+        Threshold: 60
+        AlarmName: laravel-service-low-cpu
+        AlarmDescription: Alarm if laravel-service is running LOW on CPU
+        Period: 60
+        OKActions:
+          - !Ref ecsServiceScaleDownPolicy
+        Namespace: AWS/ECS
+        Dimensions:
+          - Name: ClusterName
+            Value: !ImportValue 
+              Fn::Sub: ${pClusterStackName}:FargateClusterName
+          - Name: ServiceName
+            Value: laravel-service
+        ComparisonOperator: GreaterThanThreshold
+        MetricName: CPUUtilization
 
 Outputs:
   EcsImageVersion:
