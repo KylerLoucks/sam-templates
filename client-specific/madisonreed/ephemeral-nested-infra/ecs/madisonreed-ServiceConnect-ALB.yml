@@ -1806,32 +1806,6 @@ Resources:
         - Key: ephemeral:app
           Value: !Ref pAppName
 
-  # # Autoscaling for Connection Tester!
-  # AutoScalingTarget:
-  #   Type: AWS::ApplicationAutoScaling::ScalableTarget
-  #   Properties:
-  #     MaxCapacity: 2
-  #     MinCapacity: 1
-  #     ResourceId: !Join ["/", [service, !Ref fargateCluster, !GetAtt connTestService.Name]]
-  #     RoleARN: !GetAtt ECSServiceAutoScalingRole.Arn
-  #     ScalableDimension: ecs:service:DesiredCount
-  #     ServiceNamespace: ecs
-
-  # # Scale based on CPU usage metric
-  # AutoScalingPolicy:
-  #   Type: AWS::ApplicationAutoScaling::ScalingPolicy
-  #   Properties:
-  #     PolicyName: ServiceAutoScalingPolicy
-  #     PolicyType: TargetTrackingScaling
-  #     ScalingTargetId: !Ref AutoScalingTarget
-  #     TargetTrackingScalingPolicyConfiguration:
-  #       PredefinedMetricSpecification:
-  #         PredefinedMetricType: ECSServiceAverageCPUUtilization
-  #       ScaleInCooldown: 10
-  #       ScaleOutCooldown: 10
-  #       TargetValue: 70
-
-
   # Used to be able to connect via VPN and DNS route to the Web UI (DNS record could be stale)
   connTestServiceDiscoveryService:
     Type: AWS::ServiceDiscovery::Service
@@ -1846,6 +1820,82 @@ Resources:
             TTL: 60
         RoutingPolicy: MULTIVALUE
       NamespaceId: !GetAtt serviceDiscoveryNameSpace.Id
+
+  autoScalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: AutoScalingRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: application-autoscaling.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceAutoscaleRole
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole
+      Policies:
+        - PolicyName: AutoScalingPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - autoscaling:DescribeScalingActivities
+                  - autoscaling:DescribeScalingGroups
+                  - autoscaling:DescribeScalingPolicies
+                  - autoscaling:DescribeScheduledActions
+                  - autoscaling:PutScalingPolicy
+                  - autoscaling:PutScheduledAction
+                Resource: "*"
+        - PolicyName: ELBAccessPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:RegisterTargets
+                  - elasticloadbalancing:DeregisterTargets
+                  - elasticloadbalancing:DescribeTargetHealth
+                Resource: "*"
+
+
+  # Scheduled Autoscaling for Connection Tester!
+  AutoScalingTarget:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 1
+      MinCapacity: 1
+      ScheduledActions:
+        - ScheduledActionName: schedule-scale-to-zero
+          Schedule: cron(0 23 * * ? *) # This cron expression schedules the scaling to 0 at 11 PM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 0
+            MinCapacity: 0
+        - ScheduledActionName: schedule-scale-up
+          Schedule: cron(0 7 * * ? *) # Schedules the scaling back up to one task at 7 AM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 1
+            MinCapacity: 1
+      ResourceId: !Join ["/", [service, !Ref fargateCluster, !GetAtt connTestService.Name]]
+      RoleARN: !GetAtt autoScalingRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  # # Scale based on CPU usage metric
+  # AutoScalingPolicy:
+  #   Type: AWS::ApplicationAutoScaling::ScalingPolicy
+  #   Properties:
+  #     PolicyName: ServiceAutoScalingPolicy
+  #     PolicyType: TargetTrackingScaling
+  #     ScalingTargetId: !Ref AutoScalingTarget
+  #     TargetTrackingScalingPolicyConfiguration:
+  #       PredefinedMetricSpecification:
+  #         PredefinedMetricType: ECSServiceAverageCPUUtilization
+  #       ScaleInCooldown: 10
+  #       ScaleOutCooldown: 10
+  #       TargetValue: 70
 
 Outputs:
   websiteUrl:
