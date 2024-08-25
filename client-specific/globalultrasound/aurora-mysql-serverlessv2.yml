@@ -17,6 +17,11 @@ Parameters:
     Default: master
     Description: Database Admin Username
   
+  pDBname:
+    Type: String
+    Default: wordpress
+    Description: Database name
+
   pBackupRetentionPeriodDays:
     Type: Number
     Default: 7
@@ -73,6 +78,7 @@ Resources:
       Engine: aurora-mysql
       EngineVersion: 8.0.mysql_aurora.3.07.1
       EngineMode: provisioned
+      DatabaseName: !Ref pDBname
       MasterUsername: !Ref pDBUsername
       ManageMasterUserPassword: true
       KmsKeyId: !If 
@@ -95,6 +101,75 @@ Resources:
         - Key: Name
           Value: Aurora MySQL Serverless
 
+
+  DBProxyRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: rds.amazonaws.com
+            Action: "sts:AssumeRole"
+      Policies:
+        - PolicyName: DecryptSecrets
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: "DecryptSecrets"
+                Effect: "Allow"
+                Action: "kms:Decrypt"
+                Resource: "arn:aws:kms:*:*:key/*"
+                Condition:
+                  StringEquals:
+                    "kms:ViaService": !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
+
+              - Sid: "ListSecrets"
+                Effect: "Allow"
+                Action:
+                  - "secretsmanager:ListSecrets"
+                  - "secretsmanager:GetRandomPassword"
+                Resource: "*"
+
+              - Sid: "GetSecrets"
+                Effect: "Allow"
+                Action:
+                  - "secretsmanager:ListSecretVersionIds"
+                  - "secretsmanager:GetSecretValue"
+                  - "secretsmanager:GetResourcePolicy"
+                  - "secretsmanager:DescribeSecret"
+                Resource: !GetAtt AuroraCluster.MasterUserSecret.SecretArn
+
+  # RDS Proxy
+  DBProxy:
+    Type: AWS::RDS::DBProxy
+    Properties:
+      DebugLogging: true
+      DBProxyName: mysql-proxy
+      EngineFamily: MYSQL
+      IdleClientTimeout: 120
+      RequireTLS: false
+      RoleArn:
+        !GetAtt DBProxyRole.Arn
+      Auth:
+        - {AuthScheme: SECRETS, SecretArn: !GetAtt AuroraCluster.MasterUserSecret.SecretArn, IAMAuth: DISABLED}
+      VpcSubnetIds:
+        Fn::Split: [",", !Ref pPrivateSubnetIds]
+      VpcSecurityGroupIds:
+        - !GetAtt AuroraSecurityGroup.GroupId
+
+  ProxyTargetGroup:
+    Type: AWS::RDS::DBProxyTargetGroup
+    Properties:
+      DBProxyName: !Ref DBProxy
+      DBInstanceIdentifiers: [!Ref AuroraClusterWriterInstance]
+      TargetGroupName: default
+      ConnectionPoolConfigurationInfo:
+          MaxConnectionsPercent: 100
+          MaxIdleConnectionsPercent: 50
+          ConnectionBorrowTimeout: 120
+
   # DB Subnet Group
   DBSubnetGroup:
     Type: AWS::RDS::DBSubnetGroup
@@ -111,6 +186,13 @@ Resources:
 
 
 Outputs:
+
+  ClusterProxyEndpoint:
+    Description: The endpoint address of the Aurora Proxy
+    Value: !GetAtt DBProxy.Endpoint
+    Export:
+      Name: !Sub ${AWS::StackName}:RdsProxyEndpoint
+
   ClusterWriterEndpoint:
     Description: The endpoint address of the Aurora cluster
     Value: !GetAtt AuroraCluster.Endpoint.Address
