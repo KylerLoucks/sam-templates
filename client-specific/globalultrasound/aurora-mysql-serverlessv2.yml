@@ -111,34 +111,34 @@ Resources:
           - Effect: Allow
             Principal:
               Service: rds.amazonaws.com
-            Action: "sts:AssumeRole"
+            Action: sts:AssumeRole
       Policies:
         - PolicyName: DecryptSecrets
           PolicyDocument:
-            Version: "2012-10-17"
+            Version: 2012-10-17
             Statement:
-              - Sid: "DecryptSecrets"
-                Effect: "Allow"
-                Action: "kms:Decrypt"
-                Resource: "arn:aws:kms:*:*:key/*"
+              - Sid: DecryptSecrets
+                Effect: Allow
+                Action: kms:Decrypt
+                Resource: arn:aws:kms:*:*:key/*
                 Condition:
                   StringEquals:
-                    "kms:ViaService": !Sub "secretsmanager.${AWS::Region}.amazonaws.com"
+                    kms:ViaService: !Sub secretsmanager.${AWS::Region}.amazonaws.com
 
-              - Sid: "ListSecrets"
-                Effect: "Allow"
+              - Sid: ListSecrets
+                Effect: Allow
                 Action:
-                  - "secretsmanager:ListSecrets"
-                  - "secretsmanager:GetRandomPassword"
+                  - secretsmanager:ListSecrets
+                  - secretsmanager:GetRandomPassword
                 Resource: "*"
 
-              - Sid: "GetSecrets"
-                Effect: "Allow"
+              - Sid: GetSecrets
+                Effect: Allow
                 Action:
-                  - "secretsmanager:ListSecretVersionIds"
-                  - "secretsmanager:GetSecretValue"
-                  - "secretsmanager:GetResourcePolicy"
-                  - "secretsmanager:DescribeSecret"
+                  - secretsmanager:ListSecretVersionIds
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:GetResourcePolicy
+                  - secretsmanager:DescribeSecret
                 Resource: !GetAtt AuroraCluster.MasterUserSecret.SecretArn
 
   # RDS Proxy
