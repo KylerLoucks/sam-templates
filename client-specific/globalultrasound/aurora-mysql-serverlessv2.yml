@@ -154,8 +154,7 @@ Resources:
         !GetAtt DBProxyRole.Arn
       Auth:
         - {AuthScheme: SECRETS, SecretArn: !GetAtt AuroraCluster.MasterUserSecret.SecretArn, IAMAuth: DISABLED}
-      VpcSubnetIds:
-        Fn::Split: [",", !Ref pPrivateSubnetIds]
+      VpcSubnetIds: !Ref pPrivateSubnetIds
       VpcSecurityGroupIds:
         - !GetAtt AuroraSecurityGroup.GroupId
 
