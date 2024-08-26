@@ -1,0 +1,256 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >
+  Deploys Wordpress on ECS Fargate using an existing ECS Cluster and Service Discovery Namespace
+
+Parameters:
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the Virtual Private Network (VPC)
+  pSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: List of Subnet IDs for the ECS tasks
+  pMySQLDBStackName:
+    Type: String
+    Description: Name of the stack exporting the required values
+  pClusterStackName:
+    Type: String
+    Description: Name of the cluster stack exporting the required values
+  pAlbStackName:
+    Type: String
+    Description: The name of the ALB stack.
+  DBUsername:
+    Type: String
+    Description: Username for the MySQL database
+  pCPU:
+    Type: Number
+    Description: The number of CPUs for the instance or service.
+    Default: 256
+  pMemory:
+    Type: Number
+    Description: The number of CPUs for the instance or service.
+    Default: 512
+  pImageVersion:
+    Type: String
+    Description: The version tag of the container image.
+    Default: latest
+  pEcrRepo:
+    Type: String
+    Description: The ECR repository name.
+    Default: gusi-wordpress
+
+Resources:
+
+  # Security Group
+  serviceSecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: Allow all traffic from self and ALB Security Group
+        VpcId: !Ref pVpcId
+
+  # Allow everything that has this security group attached
+  serviceSelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt serviceSecurityGroup.GroupId
+      IpProtocol: -1
+      FromPort: -1
+      ToPort: -1
+      SourceSecurityGroupId: !GetAtt serviceSecurityGroup.GroupId
+
+  serviceVpcIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt serviceSecurityGroup.GroupId
+      IpProtocol: -1  # Allows all protocols
+      FromPort: -1    # Allows all ports
+      ToPort: -1      # Allows all ports
+      CidrIp: 10.2.0.0/16
+
+  # IAM Role for ECS Task Execution
+  ecsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/SecretsManagerReadWrite
+
+  taskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: EcsExec
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowEcsExec
+                Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: "*"
+        - PolicyName: CloudWatchLogs
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowCreateLogGroup
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Sid: AllowLogStreams
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/*:*"
+
+  # ECS Task Definition for wordpress
+  wordpressTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: wordpress
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform: 
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      Cpu: !Ref pCPU
+      Memory: !Ref pMemory
+      ExecutionRoleArn: !GetAtt ecsExecutionRole.Arn
+      TaskRoleArn: !GetAtt  taskRole.Arn
+      ContainerDefinitions:
+        - Name: wordpress-container
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${pEcrRepo}:${pImageVersion}
+          Essential: true
+          PortMappings:
+            - ContainerPort: 80
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: wordpress
+          Environment:
+            - Name: WORDPRESS_DB_HOST
+              Value: !ImportValue 
+                Fn::Sub: ${pMySQLDBStackName}:RdsProxyEndpoint
+            - Name: WORDPRESS_DB_NAME
+              Value: wordpress
+            - Name: WORDPRESS_DB_USER
+              Value: !Ref DBUsername
+
+            # Are these needed?
+            - Name: DB_USERNAME
+              Value: !Ref DBUsername
+            - Name: DB_NAME
+              Value: wordpress
+            - Name: DB_HOST
+              Value: !ImportValue 
+                Fn::Sub: ${pMySQLDBStackName}:RdsProxyEndpoint
+            - Name: DB_HOST_SLAVE
+              Value: !ImportValue 
+                Fn::Sub: ${pMySQLDBStackName}:RdsProxyEndpoint
+            - Name: DB_CHARSET
+              Value: utf8
+
+
+            - Name: ABSPATH
+              Value: wp-settings.php
+
+            - Name: WP_AUTO_UPDATE_CORE
+              Value: false
+            - Name: WP_CACHE
+              Value: true
+            - Name: WP_MEMORY_LIMIT
+              Value: 1024M
+
+
+            # Are these needed?
+            - Name: SITE_URL
+              Value: https://globalultrasoundinstitute.com/
+            - Name: WP_API_URL
+              Value: https://globalultrasoundinstitute.com/wp-json/wp/v2/
+
+          Secrets:
+            - Name: WORDPRESS_DB_PASSWORD
+              ValueFrom: !Join 
+                - ''
+                - - !ImportValue 
+                    Fn::Sub: ${pMySQLDBStackName}:RdsSecretArn
+                  - ':password::'
+            - Name: DB_PASSWORD
+              ValueFrom: !Join 
+                - ''
+                - - !ImportValue 
+                    Fn::Sub: ${pMySQLDBStackName}:RdsSecretArn
+                  - ':password::'
+
+  # CloudWatch Log Group for the container logs
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/wordpress
+      RetentionInDays: 7
+
+  # ECS Service for Wordpress
+  wordpressService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !ImportValue 
+        Fn::Sub: ${pClusterStackName}:FargateClusterArn
+      ServiceName: wordpress-service
+      TaskDefinition: !Ref wordpressTaskDefinition
+      LoadBalancers:
+        - ContainerName: wordpress-container
+          ContainerPort: 80
+          TargetGroupArn: !Join 
+            - ''
+            - - !ImportValue 
+                Fn::Sub: wordpress-tg-${pAlbStackName}
+      DesiredCount: 1
+      EnableExecuteCommand: true
+      EnableECSManagedTags: true
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Ref pSubnetIds
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          AssignPublicIp: DISABLED
+      ServiceRegistries:
+        - RegistryArn: !ImportValue 
+            Fn::Sub: ${pClusterStackName}:ServiceDiscoveryServiceArn
+
+Outputs:
+  EcsImageVersion:
+    Description: ECS Image Version
+    Value: !Ref pImageVersion
+    Export:
+      Name: !Sub ${AWS::StackName}:EcsImageVersion
+
+  ECSServiceName:
+    Description: Service Name
+    Value: !Ref wordpressService
