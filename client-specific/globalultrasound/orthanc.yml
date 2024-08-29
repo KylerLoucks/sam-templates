@@ -1,5 +1,5 @@
 AWSTemplateFormatVersion: 2010-09-09
-Description: Deploys a service into an ECS cluster.
+Description: Deploys an Orthanc service into an ECS cluster.
 
 Parameters:
 
@@ -8,14 +8,12 @@ Parameters:
   pStackName:
     Type: String
     Description: Name of the stack exporting the required values
+    Default: gusi-cluster
 
-  # pAlbListenerHttps:
-  #   Type: String
-  #   Description: Alb Listener HTTPS to expose the service
-
-  # pAutoScalingRole:
-  #   Type: String
-  #   Description: IAM Service Role for Autoscaling  
+  pAlbStackName:
+    Type: String
+    Description: Name of the ECS cluster stack exporting the required values
+    Default: cluster-alb-gusi
 
   pDesiredCount:
     Type: Number
@@ -47,6 +45,11 @@ Parameters:
     Description: The port exposed to the EC2 instance from the container
     Default: 8042
 
+  pDicomPort:
+    Type: Number
+    Description: The port exposed to the EC2 instance from the container
+    Default: 4242
+
   pContainerMemory:
     Type: Number
     Description: The amount (in MiB) of memory to present to the container
@@ -70,14 +73,10 @@ Parameters:
       - udp
     Description: Port Mappings Protocol
 
-  # pTaskRole:
-  #   Type: String
-  #   Description: (Optional) An IAM role to give the service's containers if the code within needs to access other AWS resources like S3 buckets, DynamoDB tables, etc
-
   pImageVersion:
     Type: String
     Description: "The version tag of the container image."
-    Default: "22.6.1"
+    Default: "latest"
   
   pEcrRepo:
     Type: String
@@ -89,41 +88,49 @@ Parameters:
     Description: "The name of the Fargate Cluster from the exported value"
     Default: "gusi-cluster"
 
-
-# Target Group
   pHostname01:
     Type: String
     Description: Hostname to expose the service
     Default: orthanc
-  
-  pHealthCheckPath:
-    Type: String
-    Description: Health check path
-    Default: /
-  
+
   pVpcId:
     Type: AWS::EC2::VPC::Id
 
   pSubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
     Description: "List of subnet IDs for the ECS service"
-
-  pEnableTgStickySession:
+  
+  pNLBStackName:
     Type: String
-    Description: Enable Target Group Sticky Session
-    Default: false
+    Description: Name of the NLB stack exporting the required values
+    Default: orthanc-nlb
+
+  pCpuArchitecture:
+    Type: String
+    Description: Architecture of the CPU (e.g., ARM64, x64)
     AllowedValues:
-      - true
-      - false
+      - ARM64
+      - x64
+    Default: "ARM64"
 
-  pTgStickyDuration:
+  pPostgresStackName:
+    Type: String
+    Description: Name of the PostgreSQL stack exporting the required values
+
+  DBUsername:
+    Type: String
+    Description: Username for the PostgreSQL database
+    Default: master
+  
+  pDBPort:
     Type: Number
-    Description: Session cookie duration in seconds
-    Default: 86400  # 1 day
-    MinValue: 1
-    MaxValue: 604800 # 7 Days
-
-
+    Default: 5432
+    Description: The port on which the PostgreSQL database accepts connections.
+  
+  pDBname:
+    Type: String
+    Description: Name of the PosgreSQL DB name.
+    Default: gusi_orthanc
 
 # Environment
   pEnvironmentTag:
@@ -138,18 +145,25 @@ Parameters:
       - qa
     Default: development
 
+  pEFSVolumeName:
+    Type: String
+    Description: The name of the EFS Volume.
+    Default: "gusi"
+  
+  pFileSystemID:
+    Type: String
+    Description: The ID of the EFS System.
+    Default: "fs-09ba1106f7317fee0"
+
 Metadata:
   AWS::CloudFormation::Interface:
     ParameterGroups:
       - Label:
           default: ECR Settings
-        # Parameters:
-        #   - pImageUri
       - Label:
           default: ECS Service Settings
         Parameters:
           - pServicePrefix
-          # - pAutoScalingRole
           - pDesiredCount
           - pMaxTasks
           - pMinTasks
@@ -159,31 +173,17 @@ Metadata:
           - pHostPort
           - pPortProtocol
           - pBuildTag
-          # - pTaskRole
       - Label:
           default: Task Definition Settings
         Parameters:
           - pEnvironmentTag
       - Label:
-          default: Load Balancer Settings
-        Parameters:
-          - pHostname01
-          - pAlbListenerHttps
-          - pHealthCheckPath
-          - pVpcId
-          - pEnableTgStickySession
-          - pTgStickyDuration
-      - Label:
           default: Environment
         Parameters:
           - pEnvironmentTag
     ParameterLabels:
-    #   pImageUri:
-    #     default: Existing ECR Repository URI
       pServicePrefix:
         default: ECS Service Name Prefix
-      # pAutoScalingRole:
-      #   default: IAM Service Role for Autoscaling
       pMaxTasks:
         default: ECS Service Max Tasks
       pMinTasks:
@@ -194,26 +194,14 @@ Metadata:
         default: Container RAM needed
       pContainerCpu:
         default: Container CPU needed
-      pHostPort:
-        default: ECS ASG Host Port
       pPortProtocol:
         default: ECS Container Port Mappings Protocol
       pBuildTag:
         default: ECR Image Build Tag
-      pHostname01:
-        default: ALB Hostname
-      pAlbListenerHttps:
-        default: ALB HTTPS Listener ARN
-      pHealthCheckPath:
-        default: TG Health Check Path
       pEnvironmentTag:
         default: Environment Tag
 
-# Conditions:
-#   CondHasCustomRole: !Not [ !Equals [!Ref pTaskRole, ""] ]
-
 Resources:
-
   # IAM Role for ECS Task Execution
   ecsExecutionRole:
     Type: AWS::IAM::Role
@@ -244,6 +232,142 @@ Resources:
                   - secretsmanager:GetSecretValue
                   - kms:Decrypt
                 Resource: "*"
+  serviceSecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: Allow all traffic from self and ALB Security Group
+        VpcId: !Ref pVpcId
+  # Allow everything that has this security group attached
+  serviceSelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt serviceSecurityGroup.GroupId
+      IpProtocol: -1
+      FromPort: -1
+      ToPort: -1
+      SourceSecurityGroupId: !GetAtt serviceSecurityGroup.GroupId
+
+  serviceVpcIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt serviceSecurityGroup.GroupId
+      IpProtocol: -1  # Allows all protocols
+      FromPort: -1    # Allows all ports
+      ToPort: -1      # Allows all ports
+      CidrIp: 10.2.0.0/16
+
+## ECS service.
+
+  ecsService:
+    Type: AWS::ECS::Service
+    DependsOn: ecsExecutionRole
+    Properties:
+      LoadBalancers:
+        - ContainerName: !Sub ${pServicePrefix}-service
+          ContainerPort: !Ref pContainerPort
+          TargetGroupArn: !Join 
+            - ''
+            - - !ImportValue 
+                Fn::Sub: orthanc-tg-${pAlbStackName}
+        - ContainerName: !Sub ${pServicePrefix}-service
+          ContainerPort: !Ref pDicomPort
+          TargetGroupArn: !Join 
+            - ''
+            - - !ImportValue 
+                Fn::Sub: orthanc-tg-${pNLBStackName}
+      Cluster: !Ref pFargateClusterName
+      DesiredCount: !Ref pDesiredCount
+      TaskDefinition: !Ref ecsTaskDefinition
+      LaunchType: FARGATE
+      ServiceName : !Sub ${pServicePrefix}-service
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Ref pSubnetIds
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+
+  ecsTaskDefinitionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub ${pServicePrefix}-service-log-group
+      RetentionInDays: 60
+
+
+## Task Definition
+  ecsTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${pServicePrefix}-service
+      Cpu: !Ref pContainerCpu
+      Memory: !Ref pContainerMemory
+      ExecutionRoleArn: !GetAtt ecsExecutionRole.Arn
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+      - FARGATE
+      RuntimePlatform: 
+        CpuArchitecture: !Ref pCpuArchitecture
+        OperatingSystemFamily: LINUX
+      ContainerDefinitions:
+        - Name: !Sub ${pServicePrefix}-service
+          Cpu: !Ref pContainerCpu
+          Memory: !Ref pContainerMemory
+          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${pEcrRepo}:${pImageVersion}'
+          PortMappings:
+            - ContainerPort: !Ref pContainerPort
+            - ContainerPort: !Ref pDicomPort
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Sub ${pServicePrefix}-service-log-group
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Sub ${pServicePrefix}-service
+          Environment:
+            - Name: DB_HOST
+              Value: !ImportValue 
+                Fn::Sub: ${pPostgresStackName}:RdsWriterAddress
+            - Name: DB_PORT
+              Value: !Ref pDBPort
+            - Name: DB_DATABASE
+              Value: !Ref pDBname
+            - Name: DB_USERNAME
+              Value: !Ref DBUsername
+          Secrets:
+            - Name: DB_PASSWORD
+              ValueFrom: !Join 
+                - ''
+                - - !ImportValue 
+                    Fn::Sub: ${pPostgresStackName}:RdsSecretArn
+                  - ':password::'
+          MountPoints:
+          - ContainerPath: /var/www/html/wp-content/uploads
+            SourceVolume: !Ref pEFSVolumeName       
+
+      Volumes:
+        - Name: !Ref pEFSVolumeName
+          EFSVolumeConfiguration:
+            fileSystemId: !Ref pFileSystemID
+            rootDirectory: /
+            transitEncryption: ENABLED
+
+# Outbound rule for ECS service to EFS
+  serviceSecurityGroupEFSOutbound:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !GetAtt serviceSecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: 2049
+      ToPort: 2049
+      CidrIp: 0.0.0.0/0
+# Outbound rule for ECS service to all traffic
+  serviceSecurityGroupECROutbound:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !GetAtt serviceSecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: 443
+      ToPort: 443
+      CidrIp: 0.0.0.0/0
 
 
 # IAM Role for Auto Scaling
@@ -290,53 +414,6 @@ Resources:
       Properties:
         GroupDescription: Allow all traffic from self and ALB Security Group
         VpcId: !Ref pVpcId
-
-  # Allow everything that has this security group attached
-  serviceSelfIngress:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !GetAtt serviceSecurityGroup.GroupId
-      IpProtocol: -1
-      FromPort: -1
-      ToPort: -1
-      SourceSecurityGroupId: !GetAtt serviceSecurityGroup.GroupId
-
-  serviceVpcIngress:
-    Type: AWS::EC2::SecurityGroupIngress
-    Properties:
-      GroupId: !GetAtt serviceSecurityGroup.GroupId
-      IpProtocol: -1  # Allows all protocols
-      FromPort: -1    # Allows all ports
-      ToPort: -1      # Allows all ports
-      CidrIp: 10.2.0.0/16
-
-## ECS service and service scaling.
-
-  ecsService:
-    Type: AWS::ECS::Service
-    DependsOn: ecsExecutionRole
-    Properties:
-      Cluster: !Ref pFargateClusterName
-      DesiredCount: !Ref pDesiredCount
-      TaskDefinition: !Ref ecsTaskDefinition
-      LaunchType: FARGATE
-      ServiceName : !Sub ${pServicePrefix}-service
-      # PlacementStrategies:
-      #   - Type: spread
-      #     Field: attribute:ecs.availability-zone
-      # LoadBalancers:
-      #   - ContainerName: !Sub ${pServicePrefix}-service
-      #     ContainerPort: !Ref pContainerPort
-      #     TargetGroupArn: !Ref targetGroup443
-      NetworkConfiguration:
-        AwsvpcConfiguration:
-          Subnets: !Ref pSubnetIds
-          AssignPublicIp: ENABLED
-          SecurityGroups:
-            - !GetAtt serviceSecurityGroup.GroupId
-      # ServiceRegistries:
-      #   - RegistryArn: !ImportValue 
-      #       Fn::Sub: '${pClusterStackName}:ServiceDiscoveryServiceArn'
 
 
   ecsServiceScalingTarget:
@@ -422,89 +499,6 @@ Resources:
         ComparisonOperator: GreaterThanThreshold
         MetricName: CPUUtilization
 
-
-  ecsTaskDefinitionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub ${pServicePrefix}-service-log-group
-      RetentionInDays: 60
-
-
-## Task Definition
-  ecsTaskDefinition:
-    Type: AWS::ECS::TaskDefinition
-    Properties:
-      Family: !Sub ${pServicePrefix}-service
-      Cpu: !Ref pContainerCpu
-      Memory: !Ref pContainerMemory
-      ExecutionRoleArn: !GetAtt ecsExecutionRole.Arn
-      NetworkMode: awsvpc
-      RequiresCompatibilities:
-      - FARGATE
-      ContainerDefinitions:
-        - Name: !Sub ${pServicePrefix}-service
-          Cpu: !Ref pContainerCpu
-          Memory: !Ref pContainerMemory
-          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${pEcrRepo}:${pImageVersion}'
-          PortMappings:
-            - ContainerPort: !Ref pContainerPort
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Sub ${pServicePrefix}-service-log-group
-              awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: !Sub ${pServicePrefix}-service
-
-# ALB Resources
-
-
-  # albListenerRuleHttps01:
-  #   Type: AWS::ElasticLoadBalancingV2::ListenerRule
-  #   Properties:
-  #     Priority: 15
-  #     ListenerArn: !Ref pAlbListenerHttps
-  #     Actions:
-  #       - TargetGroupArn: !Ref targetGroup443
-  #         Type: forward
-  #     Conditions:
-  #       - Field: host-header
-  #         Values:
-  #           - !Sub ${pHostname01}.dev.globalultrasoundinstitute.com
-
-  targetGroup443:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
-    UpdateReplacePolicy: Delete
-    Properties:
-      Name: !Sub ${pServicePrefix}-TG-HTTPS
-      Port: !Ref pContainerPort
-      Protocol: HTTP
-      Matcher:
-        HttpCode: 200-499
-      HealthyThresholdCount: 4
-      UnhealthyThresholdCount: 4
-      HealthCheckTimeoutSeconds: 5
-      HealthCheckIntervalSeconds: 10
-      HealthCheckPath: !Ref pHealthCheckPath
-      HealthCheckPort: traffic-port
-      HealthCheckProtocol: HTTP
-      TargetType: ip
-      VpcId: !Ref pVpcId
-      TargetGroupAttributes:
-        - Key: stickiness.enabled
-          Value: !Ref pEnableTgStickySession
-        - Key: stickiness.lb_cookie.duration_seconds
-          Value: !Ref pTgStickyDuration
-        - Key: stickiness.type
-          Value: lb_cookie
-        - Key: deregistration_delay.timeout_seconds
-          Value: "180"
-      Tags:
-        - Key: Name
-          Value: !Sub ${pServicePrefix}-TG-HTTPS
-        - Key: controlled-by
-          Value: !Sub cloudformation-${AWS::StackName}
-        - Key: environment
-          Value: !Ref pEnvironmentTag
 
 Outputs:
   TaskDefinitionArn:
