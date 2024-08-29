@@ -184,7 +184,12 @@ Resources:
       DBClusterIdentifier: !Ref AuroraCluster
       DBInstanceClass: db.serverless
       Engine: aurora-mysql
-
+      EnablePerformanceInsights: true
+      PerformanceInsightsRetentionPeriod: 7 # Incurs cost if more than 7 days
+      PerformanceInsightsKMSKeyId: !If 
+        - CondUseKmsKey
+        - !Ref pKmsKeyId
+        - !Ref AWS::NoValue
 
 Outputs:
 
