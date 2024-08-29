@@ -39,12 +39,17 @@ Parameters:
   pLaravelDnsPrefix:
     Type: String
     Description: Laravel DNS Prefix
-    Default: laravel
+    Default: laraveldev
 
   pOrthancDnsPrefix:
     Type: String
     Description: Orthanc DNS Prefix
-    Default: orthanc
+    Default: orthancdev
+
+  pWordpressDnsPrefix:
+    Type: String
+    Description: Wordpress DNS Prefix
+    Default: wordpressdev
 
 Resources:
 
