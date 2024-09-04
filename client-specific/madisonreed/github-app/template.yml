@@ -61,6 +61,7 @@ Resources:
             - Effect: Allow
               Action:
                 - codepipeline:GetPipelineState
+                - codepipeline:PutApprovalResult
               Resource: '*'
             - Effect: Allow
               Action:
