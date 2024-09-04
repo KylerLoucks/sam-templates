@@ -1,0 +1,22 @@
+{
+    "Records": [
+        {
+            "EventSource": "aws:sns",
+            "EventVersion": "1.0",
+            "EventSubscriptionArn": "arn:aws:sns:us-east-1:174743933558:test-events-pipeline:f27a2598-f8a0-4b8c-ab9b-28743d8fc7fb",
+            "Sns": {
+                "Type": "Notification",
+                "MessageId": "1762a6c6-be3d-5798-946c-f9946ed0be7c",
+                "TopicArn": "arn:aws:sns:us-east-1:174743933558:test-events-pipeline",
+                "Subject": null,
+                "Message": "{\"account\":\"174743933558\",\"detailType\":\"CodePipeline Pipeline Execution State Change\",\"region\":\"us-east-1\",\"source\":\"aws.codepipeline\",\"time\":\"2024-09-04T21:18:24Z\",\"notificationRuleArn\":\"arn:aws:codestar-notifications:us-east-1:174743933558:notificationrule/2dc0ddc7e5d6c962af21ada123bc63e8c1fa230c\",\"detail\":{\"pipeline\":\"pr17387-pipeline\",\"execution-id\":\"8b4e6061-b2ad-41a1-94d6-dc6bd092caa3\",\"start-time\":\"2024-09-04T21:13:32.225Z\",\"state\":\"FAILED\",\"version\":2.0,\"pipeline-execution-attempt\":1.0},\"resources\":[\"arn:aws:codepipeline:us-east-1:174743933558:pr17387-pipeline\"],\"additionalAttributes\":{\"failedActionCount\":1,\"failedActions\":[{\"action\":\"ManualApproval\",\"additionalInformation\":\"Rejected by arn:aws:sts::174743933558:assumed-role/cloud303-support/kloucks\"}],\"failedStage\":\"Build\"}}",
+                "Timestamp": "2024-09-04T21:18:37.023Z",
+                "SignatureVersion": "1",
+                "Signature": "auWqs1VtKb26Cb9PVOVnSIZ0w3xo+AD1FO8KqCPCvrPmdpPEXsPFBnv+EZdaOIeR8VQmBpdwB8F6mSa8ACr8/4v/ESUrZUJuRm8xbgGbeFkLssH4Rnbbsqz9ZvVNHyYNF8HzUN5+LpkU40HlrnEIpUZ5W3nUKoHw0AWvkIKbUao60SUpZEZcbq8hM+kH9LMT9W2TlfPbtHxkJA6gJiqBtcSsNkf8ecZWc0uN40DXbGzn48FxDFAHEF9B9OV2+4pQvaT2/Tp45Ysw4LLcXmQepoE7FgEbNinUhyl8qo4ZHzGGkH7JfVN1BDcl4cqeGnrqSIdIORWCyvnZukA1LMf+cQ==",
+                "SigningCertUrl": "https://sns.us-east-1.amazonaws.com/SimpleNotificationService-60eadc530605d63b8e62a523676ef735.pem",
+                "UnsubscribeUrl": "https://sns.us-east-1.amazonaws.com/?Action=Unsubscribe&SubscriptionArn=arn:aws:sns:us-east-1:174743933558:test-events-pipeline:f27a2598-f8a0-4b8c-ab9b-28743d8fc7fb",
+                "MessageAttributes": {}
+            }
+        }
+    ]
+}
