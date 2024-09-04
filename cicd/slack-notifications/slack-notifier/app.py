@@ -8,6 +8,11 @@ client = boto3.client('codepipeline')
 
 REGION = os.environ['AWS_REGION']
 
+SOURCE_ICON = os.environ.get('SOURCE_ICON', '')
+APPROVAL_ICON = os.environ.get('APPROVAL_ICON', '')
+BUILD_ICON = os.environ.get('BUILD_ICON', '')
+DEPLOY_ICON = os.environ.get('DEPLOY_ICON', '')
+
 def handler(event, context):
     print(json.dumps(event))
 
@@ -60,7 +65,7 @@ def handler(event, context):
     
     if category == "Source":
         if state == "SUCCEEDED":
-            slack.send_message(status_icon=":loading:", color="#34bb13")
+            slack.send_message(status_icon=SOURCE_ICON, color="#34bb13")
         elif state == "FAILED":
             slack.execution_summary = event['detail']['execution-result']['external-execution-summary']
             slack.error_code = event['detail']['execution-result']['error-code']
@@ -70,9 +75,9 @@ def handler(event, context):
 
     if category == "Approval":
         if state == "STARTED":
-            slack.send_message(status_icon=":spiral_note_pad:", color="#34bb13")
+            slack.send_message(status_icon=APPROVAL_ICON, color="#34bb13")
         elif state == "SUCCEEDED":
-            slack.send_message(status_icon=":spiral_note_pad:", color="#34bb13")
+            slack.send_message(status_icon=APPROVAL_ICON, color="#34bb13")
         elif state == "FAILED":
             slack.execution_summary = event['detail']['execution-result']['external-execution-summary']
             slack.error_code = event['detail']['execution-result']['error-code']
@@ -80,9 +85,9 @@ def handler(event, context):
     
     if category == "Build":
         if state == "STARTED":
-            slack.send_message(status_icon=":hammer_and_wrench:", color="#34bb13")
+            slack.send_message(status_icon=BUILD_ICON, color="#34bb13")
         elif state == "SUCCEEDED":
-            slack.send_message(status_icon=":hammer_and_wrench:", color="#34bb13")
+            slack.send_message(status_icon=BUILD_ICON, color="#34bb13")
         elif state == "FAILED":
             slack.execution_summary = event['detail']['execution-result']['external-execution-summary']
             slack.error_code = event['detail']['execution-result']['error-code']
@@ -91,9 +96,9 @@ def handler(event, context):
     
     if category == "Deploy":
         if state == "STARTED":
-            slack.send_message(status_icon=":rocket:", color="#34bb13")
+            slack.send_message(status_icon=DEPLOY_ICON, color="#34bb13")
         elif state == "SUCCEEDED":
-            slack.send_message(status_icon=":rocket:", color="#34bb13")
+            slack.send_message(status_icon=DEPLOY_ICON, color="#34bb13")
         elif state == "FAILED":
             slack.execution_summary = event['detail']['execution-result']['external-execution-summary']
             slack.error_code = event['detail']['execution-result']['error-code']

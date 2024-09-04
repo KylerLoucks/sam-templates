@@ -11,6 +11,9 @@ from urllib.parse import urlparse, parse_qs
 class SlackNotifier():
     sts = boto3.client("sts")
     account_id = sts.get_caller_identity()["Account"]
+    slack_channel = os.environ['SLACK_CHANNEL']
+    display_name = os.environ.get('SLACK_DISPLAY_NAME', 'CI/CD Alerts')
+    display_icon = os.environ.get('SLACK_DISPLAY_ICON', ':incoming_envelope:')
 
     def __init__(self, region, pipeline_name, execution_id, commit_url, commit_message, commit_id, stage, action, state, category) -> None:
         self.webhook_url = os.environ['SLACK_WEBHOOK_URL']
@@ -55,9 +58,9 @@ class SlackNotifier():
             commit_message = f"{commit_message[:119]}..."
 
         message = {
-            "channel": "webhooks", # Override channel to send messages to
-            "username": "CI Helper", # Override display name
-            "icon_emoji": ":uh-oh-sooj:",
+            "channel": self.slack_channel, # Override channel to send messages to
+            "username": self.display_name, # Override display name
+            "icon_emoji": self.display_icon,
             "attachments": [
                 {
                     "fallback": f"{status_icon} *<{self.pipeline_link}|AWS CodePipeline | {self.region} | {self.account_id} >*", # Hyperlink
@@ -103,9 +106,9 @@ class SlackNotifier():
             commit_message = f"{commit_message[:119]}..."
         
         message = {
-            "channel": "webhooks", # Override channel to send messages to
-            "username": "CI Helper", # Override display name
-            "icon_emoji": ":uh-oh-sooj:",
+            "channel": self.slack_channel, # Override channel to send messages to
+            "username": self.display_name, # Override display name
+            "icon_emoji": self.display_icon,
             "attachments": [
                 {
                     "fallback": f"{status_icon} *<{self.pipeline_link}|AWS CodePipeline | {self.region} | {self.account_id} >*", # Hyperlink
