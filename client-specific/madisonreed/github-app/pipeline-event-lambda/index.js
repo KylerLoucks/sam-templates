@@ -1,0 +1,121 @@
+
+import {SSMClient, GetParameterCommand} from "@aws-sdk/client-ssm";
+import { CodePipelineClient, GetPipelineExecutionCommand } from "@aws-sdk/client-codepipeline";
+import { updateCheckRun, createCheckRun } from "./helperfunctions/checkRunFunction.js";
+import { getCheckRunIdForRef } from "./helperfunctions/getCheckRunIdForRef.js";
+import { initOctokit } from "./helperfunctions/initializeOctokit.js";
+
+const ssmClient = new SSMClient(); 
+
+async function getParameterFromStore(parameterName) {
+    const command = new GetParameterCommand({
+        Name: parameterName,
+        WithDecryption: true
+    });
+
+    try {
+        const response = await ssmClient.send(command);
+        return response.Parameter.Value;
+    } catch (error) {
+        console.error(`Error fetching parameter ${parameterName}:`, error);
+        throw error;
+    }
+}
+
+// Secrets and client Id generated during Github App creation.
+const privateKey = await getParameterFromStore("/development/GithubAppPrivateKey");
+const clientSecret = await getParameterFromStore("/development/GithubAppSecret");
+const client = new CodePipelineClient();
+const appId =  process.env.GITHUB_APP_ID;
+const clientId = process.env.GITHUB_CLIENT_ID;
+const name = "Ephemeral Pipeline";
+const installationOctokit = await initOctokit(appId, privateKey, clientId, clientSecret);
+
+export const handler = async (event) => {
+    console.log(JSON.stringify(event, null, 4));
+    try {
+        const executionId = event.detail['execution-id'];
+        const pipelineName = event.detail.pipeline;
+        let commit_message = null;
+        let commit_url = null;
+        let head_sha = null;
+        const command = new GetPipelineExecutionCommand({
+            pipelineName: pipelineName,
+            pipelineExecutionId: executionId
+        });
+        const response = await client.send(command);
+
+        // Revision summary isn't included until the Source stage Succeeds
+        const artifact_revisions = response.pipelineExecution.artifactRevisions;
+        if (artifact_revisions.length > 0) {
+            const revision_summary_str = artifact_revisions[0].revisionSummary;
+            const revision_summary = JSON.parse(revision_summary_str);
+            commit_message = revision_summary.CommitMessage;
+            head_sha = artifact_revisions[0].revisionId;
+            commit_url = artifact_revisions[0].revisionUrl;
+        } else {
+            console.log("No artifact revisions found");
+            return;
+        }
+
+        const category = event.detail.type.category;
+        const state = event.detail.state;
+        const stage = event.detail.stage;
+        const checkRunId = await getCheckRunIdForRef(installationOctokit, head_sha, name);
+        let summaryReason = null;
+        const externalExecutionSummary = event.detail['execution-result']?.['external-execution-summary'] || "No summary available";
+
+
+        // if (!checkRunId) return;
+
+        if (category === "Source" ) {
+            if (state === "FAILED") {
+                const generatedCheckRunId = await createCheckRun(installationOctokit, head_sha, name, "in_progress", "Pipeline Started", `Pipeline source has started. STAGE: ${stage}`, "Pipeline execution in progress");
+                summaryReason = externalExecutionSummary;
+                await updateCheckRun(installationOctokit, generatedCheckRunId, name, "completed", "Source Stage Failed", summaryReason, `Pipeline source failed. STAGE: ${stage}`, [], "failure");
+            } else if (state === "SUCCEEDED") {
+                await createCheckRun(installationOctokit, head_sha, name, "in_progress", "Pipeline Started", `Pipeline source succeeded. STAGE: ${stage}`, "Pipeline execution in progress");
+            }
+        }
+    
+        if (category === "Approval") {
+            if (state === "STARTED") {
+                await updateCheckRun(installationOctokit, checkRunId, name, "in_progress", "Approval Stage Started", "Pipeline approval has started", `Pipeline approval in progress. STAGE: ${stage}`, [{"label": "Approve", "description": "Approve the pipeline to continue", "identifier": "approve"}, {"label": "Reject", "description": "Reject the pipeline to stop", "identifier": "reject"}]);
+            } else if (state === "FAILED") {
+                summaryReason = externalExecutionSummary;
+                await updateCheckRun(installationOctokit, checkRunId, name, "completed", "Approval Stage Rejected", summaryReason, `Pipeline approval failed. STAGE: ${stage}`, [], "failure");
+            } else if (state === "SUCCEEDED") {
+                await updateCheckRun(installationOctokit, checkRunId, name, "in_progress", "Approval Stage Completed", `Pipeline approval has been completed. STAGE: ${stage}`, "Approval Stage Completed");
+            }
+        }
+        
+        if (category === "Build") {
+            if (state === "STARTED") {
+                await updateCheckRun(installationOctokit, checkRunId, name, "in_progress", "Build Stage Started", "Build stage has started", `Pipeline build has started. STAGE: ${stage}`);
+            } else if (state === "FAILED") {
+                summaryReason = externalExecutionSummary;
+                await updateCheckRun(installationOctokit, checkRunId, name, "completed", "Build Stage Failed", summaryReason, `Build stage failed. STAGE: ${stage}`, [], "failure");
+            }
+        }
+        
+        if (category === "Deploy") {
+            if (state === "STARTED") {
+                await updateCheckRun(installationOctokit, checkRunId, name, "in_progress", "Deploy Stage Started", "Deploy stage has started", `Pipeline deploy started. STAGE: ${stage}`, [{"label": "Approve", "description": "Approve the pipeline to continue", "identifier": "approve"}, {"label": "Reject", "description": "Reject the pipeline to stop", "identifier": "reject"}]);
+            } else if (state === "FAILED") {
+                summaryReason = externalExecutionSummary;
+                await updateCheckRun(installationOctokit, checkRunId, name, "completed", "Deploy Stage Failed", summaryReason, `Pipeline deploy failed. STAGE: ${stage}`, [], "failure");
+            }
+        }
+
+        return {
+            statusCode: 200,
+            body: JSON.stringify({ message: 'GitHub check execution succeeded' }),
+        };
+    } catch (error) {
+        console.error('Error:', error);
+        return {
+            statusCode: 500,
+            body: JSON.stringify({ message: 'Error executing GitHub check', error: error.message }),
+        };
+    }
+};

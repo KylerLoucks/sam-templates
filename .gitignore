@@ -244,4 +244,7 @@ $RECYCLE.BIN/
 # .aws-sam folder. Contains artifacts when running sam build
 **/.aws-sam
 
+# Node Modules
+**/node_modules
+
 # End of https://www.gitignore.io/api/osx,linux,python,windows,pycharm,visualstudiocode

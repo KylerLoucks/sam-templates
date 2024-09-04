@@ -1,0 +1,131 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: SAM Template for Lambda function with Function URL
+
+Parameters:
+  pGithubAppId:
+    Type: Number
+    Description: The ID of the GitHub App.
+    Default: 981792
+  pGithubClientId:
+    Type: String
+    Description: The client ID of the GitHub App.
+    Default: Iv23li8Ri5BviWszCSen
+  pGithubOwner:
+    Type: String
+    Description: The owner of the GitHub repository.
+    Default: MadisonReed
+  pGithubRepo:
+    Type: String
+    Description: The name of the GitHub repository.
+    Default: mr
+
+
+Resources:
+
+  # Handles receiving webhooks from the github app
+  WebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Runtime: nodejs20.x
+      CodeUri: ./webhook-lambda/
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins:
+            - '*'
+          AllowMethods:
+            - GET
+            - POST
+          AllowHeaders:
+            - '*'
+      Environment:
+        Variables:
+          GITHUB_APP_ID: !Ref pGithubAppId
+          GITHUB_OWNER: !Ref pGithubOwner
+          GITHUB_REPO: !Ref pGithubRepo
+          GITHUB_CLIENT_ID: !Ref pGithubClientId
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource: 
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/development/GithubAppPrivateKey
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/development/GithubAppSecret
+            - Effect: Allow
+              Action:
+                - ecs:List*
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - codepipeline:GetPipelineState
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - codepipeline:GetPipelineExecution
+              Resource: '*'
+
+
+  PipelineEventFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Runtime: nodejs20.x
+      CodeUri: ./pipeline-event-lambda/
+      Timeout: 30
+      Environment:
+        Variables:
+          GITHUB_APP_ID: !Ref 'pGithubAppId'
+          GITHUB_OWNER: !Ref 'pGithubOwner'
+          GITHUB_REPO: !Ref 'pGithubRepo'
+          GITHUB_CLIENT_ID: !Ref 'pGithubClientId'
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource: 
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/development/GithubAppPrivateKey
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/development/GithubAppSecret
+            - Effect: Allow
+              Action:
+                - codepipeline:GetPipelineExecution
+              Resource: '*'
+
+
+  EventBridgeRule:
+    Type: AWS::Events::Rule
+    Properties:
+      EventPattern:
+        source:
+          - aws.codepipeline
+        detail-type:
+          - CodePipeline Action Execution State Change
+        detail:
+          state:
+            - STARTED
+            - SUCCEEDED
+            - FAILED
+            - CANCELED
+          # change this as needed. Currently is used to filter for specific pipelines with the specified name prefix/suffix
+          pipeline:
+            - prefix: pr
+            - suffix: -pipeline
+      Targets:
+        - Arn: !GetAtt PipelineEventFunction.Arn
+          Id: PipelineEventFunctionTarget
+
+  EventBridgePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref PipelineEventFunction
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt EventBridgeRule.Arn
+  
+Outputs:
+  FunctionUrl:
+    Description: "Lambda Function URL"
+    Value: !GetAtt WebhookFunction.FunctionUrl
