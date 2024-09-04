@@ -33,6 +33,7 @@ const clientId = process.env.GITHUB_CLIENT_ID;
 const installationOctokit = await initOctokit(appId, privateKey, clientId, clientSecret);
 
 export const handler = async (event) => {
+    console.log(JSON.stringify(event, null, 4));
 
     const expectedSig = `sha256=${createHmac("sha256", clientSecret).update(event.body).digest("hex")}`;
     const currentSig = event.headers['x-hub-signature-256'];
@@ -59,20 +60,20 @@ export const handler = async (event) => {
         rejectPipeline(pipeline_name);
     }
 
-    if (event.body.requested_action.identifier == "teardown") {
+    if (event.body.requested_action.identifier == "hibernate") {
         scaleAllEcsServices(cluster_name, 0);
 
         updateCheckRun(
             installationOctokit,
             check_run_id,
             `Ephemeral Pipeline`,
-            `Pipeline started`,
-            `The pipeline has started.`,
-            'Approve or reject the pipeline run.',
+            `Scaled ALL ECS Tasks back to 0`,
+            `ECS Tasks are being scaled back to 0`,
+            'Mongo, MySQL, Redis, Tophat, ApiServer, and Website are all being scaled back to 0 running tasks.',
             "in_progress", 
             // Actions
             [
-                {"label": "Scale Up", "description": "Scale all ECS service tasks to up", "identifier": "scaleup"},
+                {"label": "Scale Up", "description": "Scale all ECS service tasks up", "identifier": "scaleup"},
             ]
         );
     }
@@ -84,13 +85,13 @@ export const handler = async (event) => {
             installationOctokit,
             check_run_id,
             `Ephemeral Pipeline`,
-            `Pipeline started`,
-            `The pipeline has started.`,
-            'Approve or reject the pipeline run.',
+            `Scaling ALL ECS Tasks up to a running state`,
+            `ECS Tasks are being scaled up to 1`,
+            'Mongo, MySQL, Redis, Tophat, ApiServer, and Website are all being scaled up to 1 running task.',
             "in_progress", 
             // Actions
             [
-                {"label": "Tear Down", "description": "Scale all ECS service tasks to 0", "identifier": "teardown"},
+                {"label": "Hibernate", "description": "Scale all ECS service tasks to 0", "identifier": "hibernate"},
             ]
         );
     }
