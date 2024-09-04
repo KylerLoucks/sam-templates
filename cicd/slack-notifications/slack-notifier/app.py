@@ -8,10 +8,10 @@ client = boto3.client('codepipeline')
 
 REGION = os.environ['AWS_REGION']
 
-SOURCE_ICON = os.environ.get('SOURCE_ICON', '')
-APPROVAL_ICON = os.environ.get('APPROVAL_ICON', '')
-BUILD_ICON = os.environ.get('BUILD_ICON', '')
-DEPLOY_ICON = os.environ.get('DEPLOY_ICON', '')
+SOURCE_ICON = os.environ.get('SOURCE_ICON', ':pushpin:')
+APPROVAL_ICON = os.environ.get('APPROVAL_ICON', ':spiral_note_pad:')
+BUILD_ICON = os.environ.get('BUILD_ICON', ':hammer_and_wrench:')
+DEPLOY_ICON = os.environ.get('DEPLOY_ICON', ':rocket:')
 
 def handler(event, context):
     print(json.dumps(event))
