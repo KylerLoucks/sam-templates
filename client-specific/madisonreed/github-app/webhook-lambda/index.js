@@ -51,15 +51,15 @@ export const handler = async (event) => {
     const cluster_name = `pr${pull_req_id}-cluster`
 
 
-    if (event.body.requestedAction == "approve") {
+    if (event.body.requested_action.identifier == "approve") {
         approvePipeline(pipeline_name);
     }
 
-    if (event.body.requestedAction == "reject") {
+    if (event.body.requested_action.identifier == "reject") {
         rejectPipeline(pipeline_name);
     }
 
-    if (event.body.requestedAction == "teardown") {
+    if (event.body.requested_action.identifier == "teardown") {
         scaleAllEcsServices(cluster_name, 0);
 
         updateCheckRun(
@@ -77,7 +77,7 @@ export const handler = async (event) => {
         );
     }
 
-    if (event.body.requestedAction == "scaleup") {
+    if (event.body.requested_action.identifier == "scaleup") {
         scaleAllEcsServices(cluster_name, 1);
         // update the check run to show different status
         updateCheckRun(
