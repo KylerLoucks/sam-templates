@@ -122,8 +122,8 @@ Resources:
   #         Target Groups
   # ==============================
   wordpressTg:
-    Type: AWS::ElasticLoadBalancingV2::TargetGroup
     UpdateReplacePolicy: Delete
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
       Name: wordpress-TG-HTTPS
       Port: !Ref pWordpressContainerPort
@@ -264,6 +264,23 @@ Resources:
             Values: 
               - !Sub ${pOrthancDnsPrefix}.${pDomainName}
 
+  wordpressRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref httpsListener
+      Priority: 5
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref wordpressTg
+      Conditions:
+        # - Field: path-pattern
+        #   PathPatternConfig:
+        #     Values: [/orthanc/*]
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub ${pWordpressDnsPrefix}.${pDomainName}
+
  # ==============================
   #        R53 Hosted Zone
   # ==============================
@@ -294,6 +311,11 @@ Resources:
             DNSName: !GetAtt loadBalancer.DNSName
             HostedZoneId: !GetAtt loadBalancer.CanonicalHostedZoneID
         - Name: !Sub ${pOrthancDnsPrefix}.${pDomainName}
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt loadBalancer.DNSName
+            HostedZoneId: !GetAtt loadBalancer.CanonicalHostedZoneID
+        - Name: !Sub ${pWordpressDnsPrefix}.${pDomainName}
           Type: A
           AliasTarget:
             DNSName: !GetAtt loadBalancer.DNSName

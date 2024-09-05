@@ -3,29 +3,18 @@ Description: >
   Deploys NLB for Orthanc
 
 Parameters:
+
   pVpcId:
     Type: AWS::EC2::VPC::Id
     Description: ID of the Virtual Private Network (VPC)
+
   pSubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
     Description: List of Public Subnet IDs for the Internet Facing Load Balancer
 
-  pDomainName:
-    Type: String
-    Description: Domain Name
-    Default: pacsorthanc.globalultrasoundinstitute.com
-
-  pOrthancContainerPort:
-    Type: Number
-    Description: Orthanc Container Port Number
-    Default: 4242
-
-  pCertificateArn:
-    Type: String
-    Description: ARN of the ACM certificate for HTTPS
-
 
 Resources:
+
   # Security Group for the NLB
   NLBSecurityGroup:
     Type: AWS::EC2::SecurityGroup
@@ -49,23 +38,23 @@ Resources:
       SecurityGroups:
         - !Ref NLBSecurityGroup
 
-  HttpsListener:
+  # Listener to redirect HTTP traffic to HTTPS
+  nlbListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     Properties: 
       DefaultActions: 
         - Type: forward
           TargetGroupArn: !Ref orthancTg
       LoadBalancerArn: !Ref DicomNlb
-      Port: 443
-      Protocol: TLS
-      Certificates:
-        - CertificateArn: !Ref pCertificateArn
+      Port: 104
+      Protocol: TCP
+
 
   orthancTg:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     Properties:
-      Name: orthanc-nlb-tg
-      Port: !Ref pDicomPort
+      Name: ECS-TargetGroup
+      Port: 4242
       Protocol: TCP
       TargetType: ip
       VpcId: !Ref pVpcId
@@ -73,10 +62,10 @@ Resources:
       HealthCheckPort: traffic-port
       Tags:
         - Key: Name
-          Value: orthanc-TG-DICOM
+          Value: orthanc-TG-HTTPS
         - Key: controlled-by
           Value: !Sub cloudformation-${AWS::StackName}
-  
+
 Outputs:
   nlbSecurityGroup:
     Description: Security Group for ALB
@@ -93,3 +82,8 @@ Outputs:
     Value: !Ref DicomNlb
     Export:
       Name: !Sub cluster-nlb-${AWS::StackName}
+  NlbTargetGroupArn:
+    Description: ARN of the Target Group for the NLB
+    Value: !Ref orthancTg
+    Export:
+      Name: !Sub nlb-target-group-arn-${AWS::StackName} 
