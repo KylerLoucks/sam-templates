@@ -94,37 +94,111 @@ Resources:
               Action:
                 - codepipeline:GetPipelineExecution
               Resource: '*'
+      Events:
 
+        # Used for when the pipeline starts.
+        # The commit_sha doesn't exist until source succeeded event.
+        SourceSucceededEvent:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source:
+                - aws.codepipeline
+              detail-type:
+                - CodePipeline Action Execution State Change
+              detail:
+                pipeline:
+                  - prefix: pr
+                  - suffix: -pipeline
+                state:
+                  - SUCCEEDED
+                type:
+                  category:
+                    - Source
 
-  EventBridgeRule:
-    Type: AWS::Events::Rule
-    Properties:
-      EventPattern:
-        source:
-          - aws.codepipeline
-        detail-type:
-          - CodePipeline Action Execution State Change
-        detail:
-          state:
-            - STARTED
-            - SUCCEEDED
-            - FAILED
-            - CANCELED
-          # change this as needed. Currently is used to filter for specific pipelines with the specified name prefix/suffix
-          pipeline:
-            - prefix: pr
-            - suffix: -pipeline
-      Targets:
-        - Arn: !GetAtt PipelineEventFunction.Arn
-          Id: PipelineEventFunctionTarget
+        # Filter specifically for manual approval start and failures
+        BuildEvent:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source:
+                - aws.codepipeline
+              detail-type:
+                - CodePipeline Action Execution State Change
+              detail:
+                pipeline:
+                  - prefix: pr
+                  - suffix: -pipeline
+                state:
+                  - STARTED
+                  # - SUCCEEDED
+                  # - FAILED
+                  # - CANCELED
+                type:
+                  category:
+                    - Build
 
-  EventBridgePermission:
-    Type: AWS::Lambda::Permission
-    Properties:
-      FunctionName: !Ref PipelineEventFunction
-      Action: lambda:InvokeFunction
-      Principal: events.amazonaws.com
-      SourceArn: !GetAtt EventBridgeRule.Arn
+        # Filter specifically for manual approval start and failures
+        ManualApprovalEvent:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source:
+                - aws.codepipeline
+              detail-type:
+                - CodePipeline Action Execution State Change
+              detail:
+                pipeline:
+                  - prefix: pr
+                  - suffix: -pipeline
+                state:
+                  - STARTED
+                  - SUCCEEDED
+                  - FAILED
+                  # - CANCELED
+                type:
+                  category:
+                    - Approval
+
+        # Filter specifically for manual approval start and failures
+        DeployEvent:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source:
+                - aws.codepipeline
+              detail-type:
+                - CodePipeline Action Execution State Change
+              detail:
+                pipeline:
+                  - prefix: pr
+                  - suffix: -pipeline
+                state:
+                  - STARTED
+                  # - SUCCEEDED
+                  # - FAILED
+                  # - CANCELED
+                type:
+                  category:
+                    - Deploy
+    
+        # Filter by Pipeline Execution Failed events
+        PipelineExecutionEvent:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source:
+                - aws.codepipeline
+              detail-type:
+                - CodePipeline Pipeline Execution State Change
+              detail:
+                state:
+                  - FAILED
+                  - SUCCEEDED
+                  - CANCELED
+                pipeline:
+                  - prefix: pr
+                  - suffix: -pipeline
   
 Outputs:
   FunctionUrl:
