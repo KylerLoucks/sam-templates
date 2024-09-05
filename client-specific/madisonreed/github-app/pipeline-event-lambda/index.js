@@ -93,7 +93,7 @@ export const handler = async (event) => {
                         summaryReason = externalExecutionSummary;
                         await updateCheckRun(installationOctokit, generatedCheckRunId, name, "completed", "Source Stage Failed", summaryReason, `Pipeline source failed. STAGE: ${stage}`, [], "failure");
                     } else if (state === "SUCCEEDED") {
-                        await createCheckRun(installationOctokit, head_sha, name, "in_progress", "Pipeline Started", `Pipeline source succeeded. STAGE: ${stage}`, "Pipeline execution in progress");
+                        await createCheckRun(installationOctokit, head_sha, name, "in_progress", "Pipeline Started", `Pipeline source succeeded.\n STAGE: ${stage}`, "Pipeline execution in progress");
                     }
                 }
 
@@ -102,9 +102,9 @@ export const handler = async (event) => {
                         await updateCheckRun(installationOctokit, checkRunId, name, "in_progress", "Approval Stage Started", "Pipeline approval has started", `Pipeline approval in progress. STAGE: ${stage}`, [{"label": "Approve", "description": "Approve the pipeline to continue", "identifier": "approve"}, {"label": "Reject", "description": "Reject the pipeline to stop", "identifier": "reject"}]);
                     } else if (state === "FAILED") {
                         summaryReason = externalExecutionSummary;
-                        await updateCheckRun(installationOctokit, checkRunId, name, "completed", "Approval Stage Rejected", summaryReason, `Pipeline approval failed. STAGE: ${stage}`, [], "failure");
+                        await updateCheckRun(installationOctokit, checkRunId, name, "completed", "Approval Stage Rejected", summaryReason, `Pipeline approval failed.\n ACTION: ${action}\n STAGE: ${stage}`, [], "failure");
                     } else if (state === "SUCCEEDED") {
-                        await updateCheckRun(installationOctokit, checkRunId, name, "in_progress", "Approval Stage Completed", `Pipeline approval has been completed. STAGE: ${stage}`, "Approval Stage Completed");
+                        await updateCheckRun(installationOctokit, checkRunId, name, "in_progress", "Approval Stage Completed", `Pipeline approval has been completed.\n ACTION: ${action}\n STAGE: ${stage}`, "Approval Stage Completed");
                     }
                 }
                 

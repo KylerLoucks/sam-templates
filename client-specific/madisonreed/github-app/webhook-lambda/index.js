@@ -1,8 +1,8 @@
 // this is for the lambda function that handles webhook events from Github Apps
-import { approvePipeline, rejectPipeline } from "./helperfunctions/pipelineHelper";
-import { scaleAllEcsServices } from "./ecs-helper";
-import { initOctokit } from "./helperfunctions/initializeOctokit";
-import { updateCheckRun } from "./checkrun-helper";
+import { approvePipeline, rejectPipeline } from "./helperfunctions/pipelineHelper.js";
+import { scaleAllEcsServices } from "./helperfunctions/ecsHelper.js";
+import { initOctokit } from "./helperfunctions/initializeOctokit.js";
+import { updateCheckRun } from "./helperfunctions/checkrunHelper.js";
 import { SSMClient, GetParameterCommand } from "@aws-sdk/client-ssm";
 import { createHmac } from "crypto";
 
@@ -42,6 +42,15 @@ export const handler = async (event) => {
         return {
             statusCode: 401,
             body: JSON.stringify({ message: 'Invalid signature' }),
+        };
+    }
+
+    // Exit the function execution if it wasn't triggered by a requested_action event (check run button)
+    if (!event.body?.requested_action?.identifier) {
+        console.log('No action identifier was specified in this webhook event. Returning...');
+        return {
+            statusCode: 401,
+            body: JSON.stringify({ message: 'No action identifier specified.' }),
         };
     }
 
