@@ -75,7 +75,7 @@ export const handler = async (event) => {
 
     if (body.requested_action.identifier == "hibernate") {
         console.log("Hibernating ECS services.");
-        scaleAllEcsServices(cluster_name, 0);
+        await scaleAllEcsServices(cluster_name, 0);
 
         await updateCheckRun(
             installationOctokit,
@@ -94,7 +94,7 @@ export const handler = async (event) => {
     }
 
     if (body.requested_action.identifier == "scaleup") {
-        scaleAllEcsServices(cluster_name, 1);
+        await scaleAllEcsServices(cluster_name, 1);
         // update the check run to show different status
         await updateCheckRun(
             installationOctokit,
