@@ -1862,19 +1862,19 @@ Resources:
 
 
   # Scheduled Autoscaling for Connection Tester!
-  AutoScalingTarget:
+  AutoScalingTargetConnTester:
     Type: AWS::ApplicationAutoScaling::ScalableTarget
     Properties:
       MaxCapacity: 1
       MinCapacity: 1
       ScheduledActions:
         - ScheduledActionName: schedule-scale-to-zero
-          Schedule: cron(0 23 * * ? *) # This cron expression schedules the scaling to 0 at 11 PM UTC every day
+          Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
           ScalableTargetAction:
             MaxCapacity: 0
             MinCapacity: 0
         - ScheduledActionName: schedule-scale-up
-          Schedule: cron(0 7 * * ? *) # Schedules the scaling back up to one task at 7 AM UTC every day
+          Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
           ScalableTargetAction:
             MaxCapacity: 1
             MinCapacity: 1
@@ -1890,12 +1890,12 @@ Resources:
       MinCapacity: 1
       ScheduledActions:
         - ScheduledActionName: schedule-scale-to-zero
-          Schedule: cron(0 23 * * ? *) # This cron expression schedules the scaling to 0 at 11 PM UTC every day
+          Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
           ScalableTargetAction:
             MaxCapacity: 0
             MinCapacity: 0
         - ScheduledActionName: schedule-scale-up
-          Schedule: cron(0 7 * * ? *) # Schedules the scaling back up to one task at 7 AM UTC every day
+          Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
           ScalableTargetAction:
             MaxCapacity: 1
             MinCapacity: 1
@@ -1911,12 +1911,12 @@ Resources:
       MinCapacity: 1
       ScheduledActions:
         - ScheduledActionName: schedule-scale-to-zero
-          Schedule: cron(0 23 * * ? *) # This cron expression schedules the scaling to 0 at 11 PM UTC every day
+          Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
           ScalableTargetAction:
             MaxCapacity: 0
             MinCapacity: 0
         - ScheduledActionName: schedule-scale-up
-          Schedule: cron(0 7 * * ? *) # Schedules the scaling back up to one task at 7 AM UTC every day
+          Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
           ScalableTargetAction:
             MaxCapacity: 1
             MinCapacity: 1
@@ -1932,12 +1932,12 @@ Resources:
       MinCapacity: 1
       ScheduledActions:
         - ScheduledActionName: schedule-scale-to-zero
-          Schedule: cron(0 23 * * ? *) # This cron expression schedules the scaling to 0 at 11 PM UTC every day
+          Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
           ScalableTargetAction:
             MaxCapacity: 0
             MinCapacity: 0
         - ScheduledActionName: schedule-scale-up
-          Schedule: cron(0 7 * * ? *) # Schedules the scaling back up to one task at 7 AM UTC every day
+          Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
           ScalableTargetAction:
             MaxCapacity: 1
             MinCapacity: 1
@@ -1953,12 +1953,12 @@ Resources:
       MinCapacity: 1
       ScheduledActions:
         - ScheduledActionName: schedule-scale-to-zero
-          Schedule: cron(0 23 * * ? *) # This cron expression schedules the scaling to 0 at 11 PM UTC every day
+          Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
           ScalableTargetAction:
             MaxCapacity: 0
             MinCapacity: 0
         - ScheduledActionName: schedule-scale-up
-          Schedule: cron(0 7 * * ? *) # Schedules the scaling back up to one task at 7 AM UTC every day
+          Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
           ScalableTargetAction:
             MaxCapacity: 1
             MinCapacity: 1
@@ -1974,12 +1974,12 @@ Resources:
       MinCapacity: 1
       ScheduledActions:
         - ScheduledActionName: schedule-scale-to-zero
-          Schedule: cron(0 23 * * ? *) # This cron expression schedules the scaling to 0 at 11 PM UTC every day
+          Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
           ScalableTargetAction:
             MaxCapacity: 0
             MinCapacity: 0
         - ScheduledActionName: schedule-scale-up
-          Schedule: cron(0 7 * * ? *) # Schedules the scaling back up to one task at 7 AM UTC every day
+          Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
           ScalableTargetAction:
             MaxCapacity: 1
             MinCapacity: 1
@@ -1995,12 +1995,12 @@ Resources:
       MinCapacity: 1
       ScheduledActions:
         - ScheduledActionName: schedule-scale-to-zero
-          Schedule: cron(0 23 * * ? *) # This cron expression schedules the scaling to 0 at 11 PM UTC every day
+          Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
           ScalableTargetAction:
             MaxCapacity: 0
             MinCapacity: 0
         - ScheduledActionName: schedule-scale-up
-          Schedule: cron(0 7 * * ? *) # Schedules the scaling back up to one task at 7 AM UTC every day
+          Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
           ScalableTargetAction:
             MaxCapacity: 1
             MinCapacity: 1
@@ -2016,12 +2016,12 @@ Resources:
       MinCapacity: 1
       ScheduledActions:
         - ScheduledActionName: schedule-scale-to-zero
-          Schedule: cron(0 23 * * ? *) # This cron expression schedules the scaling to 0 at 11 PM UTC every day
+          Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
           ScalableTargetAction:
             MaxCapacity: 0
             MinCapacity: 0
         - ScheduledActionName: schedule-scale-up
-          Schedule: cron(0 7 * * ? *) # Schedules the scaling back up to one task at 7 AM UTC every day
+          Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
           ScalableTargetAction:
             MaxCapacity: 1
             MinCapacity: 1

@@ -31,6 +31,8 @@ const clientId = process.env.GITHUB_CLIENT_ID;
 const name = "Ephemeral Pipeline";
 const installationOctokit = await initOctokit(appId, privateKey, clientId, clientSecret);
 
+const region = process.env.AWS_REGION;
+
 export const handler = async (event) => {
     console.log(JSON.stringify(event, null, 4));
 
@@ -72,7 +74,15 @@ export const handler = async (event) => {
 
         // Create check run if it doesn't already exist.
         if (!checkRunId) {
-            await createCheckRun(installationOctokit, head_sha, name, "in_progress", "Pipeline Started", `Pipeline source succeeded.\n STAGE: ${stage}`, "Pipeline execution in progress");
+            await createCheckRun(
+                installationOctokit,
+                head_sha,
+                name,
+                "in_progress",
+                "Pipeline Started",
+                `Pipeline source succeeded.\n ACTION: ${action}\n STAGE: ${stage}`,
+                `Pipeline execution in progress.\n [CodePipeline URL](https://${region}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${pipelineName}/view?region=${region})`
+            );
         }
         
         let summaryReason = null;
@@ -86,9 +96,31 @@ export const handler = async (event) => {
             case "CodePipeline Pipeline Execution State Change":
                 if (state == "FAILED") {
                     summaryReason = externalExecutionSummary;
-                    await updateCheckRun(installationOctokit, checkRunId, name, "completed", "Pipeline Failed.", summaryReason, `Pipeline execution failed.`, [], "failure");
+                    await updateCheckRun(
+                        installationOctokit,
+                        checkRunId,
+                        name,
+                        "completed",
+                        "Pipeline Failed.",
+                        summaryReason,
+                        `Pipeline execution failed.\n [CodePipeline URL](https://${region}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${pipelineName}/view?region=${region})`,
+                        [],
+                        "failure"
+                    );
                 } else if (state == "SUCCEEDED") {
-                    await updateCheckRun(installationOctokit, checkRunId, name, "completed", "Pipeline Succeeded.", "Pipeline run was a success!", `Pipeline execution was succesful.`, [{"label": "Hibernate", "description": "Scale all ECS service tasks to 0", "identifier": "hibernate"},], "success");
+                    await updateCheckRun(
+                        installationOctokit,
+                        checkRunId,
+                        name,
+                        "completed",
+                        "Pipeline Succeeded.",
+                        "Pipeline run was a success!",
+                        `Pipeline execution was succesful.\n [CodePipeline URL](https://${region}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${pipelineName}/view?region=${region})\n [Website](https://google.com)\n [Tophat](https://google.com)`,
+                        [
+                            {"label": "Hibernate", "description": "Scale all ECS service tasks to 0", "identifier": "hibernate"}
+                        ],
+                        "success"
+                    );
                 }
                 break;
 
@@ -109,30 +141,100 @@ export const handler = async (event) => {
 
                 if (category === "Approval") {
                     if (state === "STARTED") {
-                        await updateCheckRun(installationOctokit, checkRunId, name, "in_progress", "Approval Stage Started", "Pipeline approval has started", `Pipeline approval in progress.\n ACTION: ${action}\n STAGE: ${stage}`, [{"label": "Approve", "description": "Approve the pipeline to continue", "identifier": "approve"}, {"label": "Reject", "description": "Reject the pipeline to stop", "identifier": "reject"}]);
+                        await updateCheckRun(
+                            installationOctokit,
+                            checkRunId,
+                            name,
+                            "in_progress",
+                            "Approval Stage Started",
+                            "Pipeline approval has started",
+                            `Pipeline approval in progress.\n ACTION: ${action}\n STAGE: ${stage}\n [CodePipeline URL](https://${region}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${pipelineName}/view?region=${region})`,
+                            [
+                                {"label": "Approve", "description": "Approve the pipeline to continue", "identifier": "approve"},
+                                {"label": "Reject", "description": "Reject the pipeline to stop", "identifier": "reject"}
+                            ]
+                        );
                     } else if (state === "FAILED") {
                         summaryReason = externalExecutionSummary;
-                        await updateCheckRun(installationOctokit, checkRunId, name, "completed", "Approval Stage Rejected", summaryReason, `Pipeline approval failed.\n ACTION: ${action}\n STAGE: ${stage}`, [], "failure");
+                        await updateCheckRun(
+                            installationOctokit,
+                            checkRunId,
+                            name,
+                            "completed",
+                            "Approval Stage Rejected",
+                            summaryReason,
+                            `Pipeline approval failed.\n ACTION: ${action}\n STAGE: ${stage}\n [CodePipeline URL](https://${region}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${pipelineName}/view?region=${region})`,
+                            [],
+                            "failure"
+                        );
                     } else if (state === "SUCCEEDED") {
-                        await updateCheckRun(installationOctokit, checkRunId, name, "in_progress", "Approval Stage Completed", `Pipeline approval has been completed.\n ACTION: ${action}\n STAGE: ${stage}`, "Approval Stage Completed");
+                        await updateCheckRun(
+                            installationOctokit,
+                            checkRunId,
+                            name,
+                            "in_progress",
+                            "Approval Stage Completed",
+                            `Pipeline approval has been completed.\n ACTION: ${action}\n STAGE: ${stage}\n [CodePipeline URL](https://${region}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${pipelineName}/view?region=${region})`,
+                            "Approval Stage Completed"
+                        );
                     }
                 }
                 
                 if (category === "Build") {
                     if (state === "STARTED") {
-                        await updateCheckRun(installationOctokit, checkRunId, name, "in_progress", "Build Stage Started", `Build stage has started for ${action}`, `Pipeline build has started.\n ACTION: ${action}\n STAGE: ${stage}`);
+                        await updateCheckRun(
+                            installationOctokit, 
+                            checkRunId,
+                            name,
+                            "in_progress",
+                            "Build Stage Started",
+                            `Build stage has started for ${action}`,
+                            `Pipeline build has started.\n ACTION: ${action}\n STAGE: ${stage}\n [CodePipeline URL](https://${region}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${pipelineName}/view?region=${region})`
+                        );
                     } else if (state === "FAILED") {
                         summaryReason = externalExecutionSummary;
-                        await updateCheckRun(installationOctokit, checkRunId, name, "completed", "Build Stage Failed", summaryReason, `Build stage failed.\n ACTION: ${action}\n STAGE: ${stage}`, [], "failure");
+                        await updateCheckRun(
+                            installationOctokit,
+                            checkRunId,
+                            name,
+                            "completed",
+                            "Build Stage Failed",
+                            summaryReason,
+                            `Build stage failed.\n ACTION: ${action}\n STAGE: ${stage}\n [CodePipeline URL](https://${region}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${pipelineName}/view?region=${region})`,
+                            [],
+                            "failure"
+                        );
                     }
                 }
                 
                 if (category === "Deploy") {
                     if (state === "STARTED") {
-                        await updateCheckRun(installationOctokit, checkRunId, name, "in_progress", "Deploy Stage Started", "Deploy stage has started", `Pipeline deploy started. STAGE: ${stage}`, [{"label": "Approve", "description": "Approve the pipeline to continue", "identifier": "approve"}, {"label": "Reject", "description": "Reject the pipeline to stop", "identifier": "reject"}]);
+                        await updateCheckRun(
+                            installationOctokit,
+                            checkRunId,
+                            name,
+                            "in_progress",
+                            "Deploy Stage Started",
+                            "Deploy stage has started",
+                            `Pipeline deploy started.\n ACTION: ${action}\n STAGE: ${stage}\n [CodePipeline URL](https://${region}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${pipelineName}/view?region=${region})`,
+                            [
+                                {"label": "Approve", "description": "Approve the pipeline to continue", "identifier": "approve"},
+                                {"label": "Reject", "description": "Reject the pipeline to stop", "identifier": "reject"}
+                            ]
+                        );
                     } else if (state === "FAILED") {
                         summaryReason = externalExecutionSummary;
-                        await updateCheckRun(installationOctokit, checkRunId, name, "completed", "Deploy Stage Failed", summaryReason, `Pipeline deploy failed.\n ACTION: ${action}\n STAGE: ${stage}`, [], "failure");
+                        await updateCheckRun(
+                            installationOctokit,
+                            checkRunId,
+                            name,
+                            "completed",
+                            "Deploy Stage Failed",
+                            summaryReason,
+                            `Pipeline deploy failed.\n ACTION: ${action}\n STAGE: ${stage}\n [CodePipeline URL](https://${region}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${pipelineName}/view?region=${region})`,
+                            [],
+                            "failure"
+                        );
                     }
                 }
                 break;
