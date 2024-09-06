@@ -81,14 +81,15 @@ export const handler = async (event) => {
             installationOctokit,
             check_run_id,
             `Ephemeral Pipeline`,
+            "completed",
             `Scaled ALL ECS Tasks back to 0`,
             `ECS Tasks are being scaled back to 0`,
             'Mongo, MySQL, Redis, Tophat, ApiServer, and Website are all being scaled back to 0 running tasks.',
-            "in_progress", 
             // Actions
             [
                 {"label": "Scale Up", "description": "Scale all ECS service tasks up", "identifier": "scaleup"},
-            ]
+            ],
+            "success"
         );
     }
 
@@ -99,14 +100,15 @@ export const handler = async (event) => {
             installationOctokit,
             check_run_id,
             `Ephemeral Pipeline`,
+            "completed",
             `Scaling ALL ECS Tasks up to a running state`,
             `ECS Tasks are being scaled up to 1`,
             'Mongo, MySQL, Redis, Tophat, ApiServer, and Website are all being scaled up to 1 running task.',
-            "in_progress", 
             // Actions
             [
                 {"label": "Hibernate", "description": "Scale all ECS service tasks to 0", "identifier": "hibernate"},
-            ]
+            ],
+            "success"
         );
     }
 

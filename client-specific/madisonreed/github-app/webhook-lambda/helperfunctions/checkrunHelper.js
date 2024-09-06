@@ -1,6 +1,6 @@
 
 // you can grab the check run id from the webhook event payload
-export async function updateCheckRun(installationOctokit, check_run_id, status, name, title, summary, text, actions = [], conclusion = null) {
+export async function updateCheckRun(installationOctokit, check_run_id, name, status, title, summary, text, actions = [], conclusion = null) {
 
     const updateChecksPayload = {
         owner: process.env.GITHUB_OWNER,

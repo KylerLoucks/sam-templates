@@ -9,18 +9,29 @@ export async function scaleAllEcsServices(clusterName, desiredCount) {
         const listServicesCommand = new ListServicesCommand({ cluster: clusterName });
         const services = await ecsClient.send(listServicesCommand);
 
+        console.log(JSON.stringify(services));
+
         // Iterate over each service and scale down to 0
         for (const serviceArn of services.serviceArns) {
-            const updateServiceCommand = new UpdateServiceCommand({
-                cluster: clusterName,
-                service: serviceArn,
-                desiredCount: desiredCount
-            });
+            try {
+                console.log(`Attempting to scale service ${serviceArn} to ${desiredCount}`);
 
-            const result = await ecsClient.send(updateServiceCommand);
-            console.log(`Scaled down service: ${serviceArn} to ${desiredCount} tasks, ${result}`);
+                const updateServiceCommand = new UpdateServiceCommand({
+                    cluster: clusterName,
+                    service: serviceArn,
+                    desiredCount: desiredCount
+                });
+    
+                const result = await ecsClient.send(updateServiceCommand);
+                console.log(`Successfully scaled service: ${serviceArn} to ${desiredCount} tasks, ${result}`);
+            } catch (error) {
+                console.error(`Error scaling service: ${serviceArn}`, error);
+                // Continue the loop even if an error occurs
+                continue;
+            }
         }
     } catch (error) {
         console.error("Error scaling down services:", error);
+        throw error;
     }
 }

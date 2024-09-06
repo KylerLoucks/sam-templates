@@ -56,7 +56,8 @@ Resources:
                 - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/development/GithubAppSecret
             - Effect: Allow
               Action:
-                - ecs:List*
+                - ecs:ListServices
+                - ecs:UpdateService
               Resource: '*'
             - Effect: Allow
               Action:
