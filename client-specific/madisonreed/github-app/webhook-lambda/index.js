@@ -33,7 +33,7 @@ const clientId = process.env.GITHUB_CLIENT_ID;
 const installationOctokit = await initOctokit(appId, privateKey, clientId, clientSecret);
 
 export const handler = async (event) => {
-    console.log(JSON.stringify(event, null, 4));
+    // console.log(JSON.stringify(event, null, 4));
 
     const expectedSig = `sha256=${createHmac("sha256", clientSecret).update(event.body).digest("hex")}`;
     const currentSig = event.headers['x-hub-signature-256'];
@@ -45,8 +45,12 @@ export const handler = async (event) => {
         };
     }
 
+    const body = JSON.parse(event.body); // parse the stringified body in the event payload
+    console.log(JSON.stringify(body, null, 4));
+    console.log(`Requested Action: ${body.requested_action.identifier}`);
+
     // Exit the function execution if it wasn't triggered by a requested_action event (check run button)
-    if (!event.body?.requested_action?.identifier) {
+    if (!body?.requested_action?.identifier) {
         console.log('No action identifier was specified in this webhook event. Returning...');
         return {
             statusCode: 401,
@@ -54,22 +58,22 @@ export const handler = async (event) => {
         };
     }
 
-    const check_run_id = event.body.check_run.id;
-    const pull_req_id = event.body.check_run.check_suite.pull_requests[0].number
+    const check_run_id = body.check_run.id;
+    const pull_req_id = body.check_run.check_suite.pull_requests[0].number
 
     const pipeline_name = `pr${pull_req_id}-pipeline`
     const cluster_name = `pr${pull_req_id}-cluster`
 
 
-    if (event.body.requested_action.identifier == "approve") {
+    if (body.requested_action.identifier == "approve") {
         approvePipeline(pipeline_name);
     }
 
-    if (event.body.requested_action.identifier == "reject") {
+    if (body.requested_action.identifier == "reject") {
         rejectPipeline(pipeline_name);
     }
 
-    if (event.body.requested_action.identifier == "hibernate") {
+    if (body.requested_action.identifier == "hibernate") {
         scaleAllEcsServices(cluster_name, 0);
 
         updateCheckRun(
@@ -87,7 +91,7 @@ export const handler = async (event) => {
         );
     }
 
-    if (event.body.requested_action.identifier == "scaleup") {
+    if (body.requested_action.identifier == "scaleup") {
         scaleAllEcsServices(cluster_name, 1);
         // update the check run to show different status
         updateCheckRun(

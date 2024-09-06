@@ -49,6 +49,7 @@ export async function approvePipeline(pipelineName) {
 
 export async function rejectPipeline(pipelineName) {
     try {
+        const client = new CodePipelineClient();
         // Fetch the current state of the pipeline
         const pipelineState = await client.send(new GetPipelineStateCommand({ name: pipelineName }));
         

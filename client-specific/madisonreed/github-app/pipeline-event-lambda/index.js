@@ -34,7 +34,7 @@ const installationOctokit = await initOctokit(appId, privateKey, clientId, clien
 export const handler = async (event) => {
     console.log(JSON.stringify(event, null, 4));
 
-    sleep(5000);
+    // sleep(5000);
     
     try {
         const executionId = event.detail['execution-id'];
@@ -69,17 +69,26 @@ export const handler = async (event) => {
         const stage = event.detail?.stage || null;
         const action = event.detail?.action || null;
         const checkRunId = await getCheckRunIdForRef(installationOctokit, head_sha, name);
+
+        // Create check run if it doesn't already exist.
+        if (!checkRunId) {
+            await createCheckRun(installationOctokit, head_sha, name, "in_progress", "Pipeline Started", `Pipeline source succeeded.\n STAGE: ${stage}`, "Pipeline execution in progress");
+        }
+        
         let summaryReason = null;
         const externalExecutionSummary = event.detail['execution-result']?.['external-execution-summary'] || "No summary available. Check CodePipeline Console.";
 
         switch (event['detail-type']) {
             // Catches when the pipeline fully finishes or any time it fails
+
+            // TODO: Use octokit to grab the pull request id to gather the commit sha and use it during pipeline START event
+            // TODO: instead of using "artifact revisions" to gather commit info as its unreliable until the pipeline is fully started.
             case "CodePipeline Pipeline Execution State Change":
                 if (state == "FAILED") {
                     summaryReason = externalExecutionSummary;
                     await updateCheckRun(installationOctokit, checkRunId, name, "completed", "Pipeline Failed.", summaryReason, `Pipeline execution failed.`, [], "failure");
                 } else if (state == "SUCCEEDED") {
-                    await updateCheckRun(installationOctokit, checkRunId, name, "completed", "Pipeline Succeeded.", "Pipeline run was a success!", `Pipeline execution was succesful.`, [], "success");
+                    await updateCheckRun(installationOctokit, checkRunId, name, "completed", "Pipeline Succeeded.", "Pipeline run was a success!", `Pipeline execution was succesful.`, [{"label": "Hibernate", "description": "Scale all ECS service tasks to 0", "identifier": "hibernate"},], "success");
                 }
                 break;
 
@@ -87,19 +96,20 @@ export const handler = async (event) => {
             case "CodePipeline Action Execution State Change":
                 const category = event.detail.type.category;
 
-                if (category === "Source" ) {
-                    if (state === "FAILED") {
-                        const generatedCheckRunId = await createCheckRun(installationOctokit, head_sha, name, "in_progress", "Pipeline Started", `Pipeline source has started. STAGE: ${stage}`, "Pipeline execution in progress");
-                        summaryReason = externalExecutionSummary;
-                        await updateCheckRun(installationOctokit, generatedCheckRunId, name, "completed", "Source Stage Failed", summaryReason, `Pipeline source failed. STAGE: ${stage}`, [], "failure");
-                    } else if (state === "SUCCEEDED") {
-                        await createCheckRun(installationOctokit, head_sha, name, "in_progress", "Pipeline Started", `Pipeline source succeeded.\n STAGE: ${stage}`, "Pipeline execution in progress");
-                    }
-                }
+                // Commenting this for now since events are not showing in sequential order.
+                // if (category === "Source" ) {
+                //     if (state === "FAILED") {
+                //         const generatedCheckRunId = await createCheckRun(installationOctokit, head_sha, name, "in_progress", "Pipeline Started", `Pipeline source has started. STAGE: ${stage}`, "Pipeline execution in progress");
+                //         summaryReason = externalExecutionSummary;
+                //         await updateCheckRun(installationOctokit, generatedCheckRunId, name, "completed", "Source Stage Failed", summaryReason, `Pipeline source failed. STAGE: ${stage}`, [], "failure");
+                //     } else if (state === "SUCCEEDED") {
+                //         await createCheckRun(installationOctokit, head_sha, name, "in_progress", "Pipeline Started", `Pipeline source succeeded.\n STAGE: ${stage}`, "Pipeline execution in progress");
+                //     }
+                // }
 
                 if (category === "Approval") {
                     if (state === "STARTED") {
-                        await updateCheckRun(installationOctokit, checkRunId, name, "in_progress", "Approval Stage Started", "Pipeline approval has started", `Pipeline approval in progress. STAGE: ${stage}`, [{"label": "Approve", "description": "Approve the pipeline to continue", "identifier": "approve"}, {"label": "Reject", "description": "Reject the pipeline to stop", "identifier": "reject"}]);
+                        await updateCheckRun(installationOctokit, checkRunId, name, "in_progress", "Approval Stage Started", "Pipeline approval has started", `Pipeline approval in progress.\n ACTION: ${action}\n STAGE: ${stage}`, [{"label": "Approve", "description": "Approve the pipeline to continue", "identifier": "approve"}, {"label": "Reject", "description": "Reject the pipeline to stop", "identifier": "reject"}]);
                     } else if (state === "FAILED") {
                         summaryReason = externalExecutionSummary;
                         await updateCheckRun(installationOctokit, checkRunId, name, "completed", "Approval Stage Rejected", summaryReason, `Pipeline approval failed.\n ACTION: ${action}\n STAGE: ${stage}`, [], "failure");
