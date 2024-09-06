@@ -66,17 +66,18 @@ export const handler = async (event) => {
 
 
     if (body.requested_action.identifier == "approve") {
-        approvePipeline(pipeline_name);
+        await approvePipeline(pipeline_name);
     }
 
     if (body.requested_action.identifier == "reject") {
-        rejectPipeline(pipeline_name);
+        await rejectPipeline(pipeline_name);
     }
 
     if (body.requested_action.identifier == "hibernate") {
+        console.log("Hibernating ECS services.");
         scaleAllEcsServices(cluster_name, 0);
 
-        updateCheckRun(
+        await updateCheckRun(
             installationOctokit,
             check_run_id,
             `Ephemeral Pipeline`,
@@ -94,7 +95,7 @@ export const handler = async (event) => {
     if (body.requested_action.identifier == "scaleup") {
         scaleAllEcsServices(cluster_name, 1);
         // update the check run to show different status
-        updateCheckRun(
+        await updateCheckRun(
             installationOctokit,
             check_run_id,
             `Ephemeral Pipeline`,
