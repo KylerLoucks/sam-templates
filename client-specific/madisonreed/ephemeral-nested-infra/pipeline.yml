@@ -301,6 +301,7 @@ Resources:
                   - events:*
                   - servicediscovery:*
                   - acm:*
+                  - application-autoscaling:*
                 Resource: "*"
 
 
