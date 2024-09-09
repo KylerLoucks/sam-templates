@@ -84,7 +84,7 @@ export const handler = async (event) => {
             "completed",
             `Scaled ALL ECS Tasks back to 0`,
             `ECS Tasks are being scaled back to 0`,
-            'Mongo, MySQL, Redis, Tophat, ApiServer, and Website are all being scaled back to 0 running tasks.',
+            `Mongo, MySQL, Redis, Tophat, ApiServer, and Website are all being scaled back to 0 running tasks.\n [Website](https://pr${pull_req_id}.madisonreed.com)\n [Tophat](https://tophat.pr${pull_req_id}.madisonreed.com)`,
             // Actions
             [
                 {"label": "Scale Up", "description": "Scale all ECS service tasks up", "identifier": "scaleup"},
