@@ -1681,146 +1681,6 @@ Resources:
             HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID
             DNSName: !GetAtt ecsLoadBalancer.DNSName
 
-  # ==================================================
-  # =============== Connection Tester! ===============
-  # ==================================================
-
-  connTestTaskDefinition:
-    Type: AWS::ECS::TaskDefinition
-    Properties:
-      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
-      TaskRoleArn: !GetAtt taskRole.Arn
-      Cpu: 512
-      Memory: 1024
-      RequiresCompatibilities:
-        - FARGATE
-      NetworkMode: awsvpc
-      RuntimePlatform:
-        CpuArchitecture: X86_64
-        OperatingSystemFamily: LINUX
-
-      ContainerDefinitions:
-        - Name: conntest
-          # changes to the Image will cause a new deployment to the ECS service, replacing the old deployment.
-          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/connectiontest
-          PortMappings:
-            - Name: conntest
-              ContainerPort: !Ref pWebsitePort
-              Protocol: tcp # tcp | udp
-              AppProtocol: http
-          Environment:
-            # REDIS
-            - Name: REDIS_HOST
-              Value: !Sub redis.${pAppName}.cloudmap.internal # Reference Cloud Map Namespace
-            - Name: REDIS_PORT
-              Value: !Ref pRedisPort
-
-            # MYSQL
-            - Name: MYSQL_HOST
-              Value: !Sub mysql.${pAppName}.cloudmap.internal
-            - Name: MYSQL_PORT
-              Value: !Ref pMySQLPort
-            - Name: MYSQL_USER
-              Value: root
-            - Name: MYSQL_PASSWORD
-              Value: root
-            - Name: MYSQL_DB
-              Value: tophat
-
-            # MONGO
-            - Name: MONGO_HOST
-              Value: !Sub mongo.${pAppName}.cloudmap.internal
-            - Name: MONGO_PORT
-              Value: !Ref pMongoPort
-
-
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Ref connTestLogGroup
-              awslogs-region: !Sub ${AWS::Region}
-              awslogs-stream-prefix: ecs
-
-  connTestLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub /ecs/conntest/${pAppName}
-      RetentionInDays: 7
-
-
-  connTestService:
-    # Dependency is required due to the fact that we must deploy backwards 
-    # from a traditional deployment (database > API > Web UI)
-    DependsOn:
-      - redisService
-      - mongoService
-      - mysqlService
-    Type: AWS::ECS::Service
-    Properties:
-      Cluster: !Ref fargateCluster
-      ServiceName: conntest
-      DeploymentController: 
-        Type: ECS
-      DesiredCount: 1
-      EnableECSManagedTags: true
-      EnableExecuteCommand: true
-      LaunchType: FARGATE
-      # Allows the ability for updates to create a new task before draining the old task.
-      # https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_DeploymentConfiguration.html
-      DeploymentConfiguration:
-        MinimumHealthyPercent: 100
-        MaximumPercent: 200
-      NetworkConfiguration: 
-        AwsvpcConfiguration:
-          AssignPublicIp: DISABLED
-          SecurityGroups:
-            - !GetAtt serviceSecurityGroup.GroupId
-          Subnets: 
-            - !Ref pPrivateSubnetId1
-            - !Ref pPrivateSubnetId2
-      PlatformVersion: LATEST
-      PropagateTags: SERVICE
-      # Expose containers running on this Service to Cloud Map Service Connect.
-      # Allows using Cloud Map to connect ECS Services between/within clusters without ELBs
-      ServiceConnectConfiguration:
-        Enabled: true
-        Services:
-          - PortName: conntest
-            ClientAliases:
-              - Port: !Ref pWebsitePort
-        # Service Connect Agent logs location
-        LogConfiguration:
-          LogDriver: awslogs
-          Options:
-            awslogs-group: !Ref connTestLogGroup
-            awslogs-region: !Sub ${AWS::Region}
-            awslogs-stream-prefix: service-connect-agent
-      # Used to connect via Route53 record for Private DNS (VPN only)
-      ServiceRegistries: 
-        - RegistryArn: !GetAtt connTestServiceDiscoveryService.Arn
-          Port: !Ref pWebsitePort
-      TaskDefinition: !Ref connTestTaskDefinition
-      Tags: 
-        - Key: managed-by
-          Value: SAM
-        - Key: ephemeral:app
-          Value: !Ref pAppName
-
-  # Used to be able to connect via VPN and DNS route to the Web UI (DNS record could be stale)
-  connTestServiceDiscoveryService:
-    Type: AWS::ServiceDiscovery::Service
-    Properties:
-      Name: connectiontest # Name must be unique from what is given for ECS service 'ServiceConnectConfiguration.PortName'. 
-      Description: Service discovery for connection test service
-      DnsConfig:
-        DnsRecords:
-          - Type: A
-            TTL: 60
-          - Type: SRV
-            TTL: 60
-        RoutingPolicy: MULTIVALUE
-      NamespaceId: !GetAtt serviceDiscoveryNameSpace.Id
-
   autoScalingRole:
     Type: AWS::IAM::Role
     Properties:
@@ -1859,29 +1719,6 @@ Resources:
                   - elasticloadbalancing:DeregisterTargets
                   - elasticloadbalancing:DescribeTargetHealth
                 Resource: "*"
-
-
-  # Scheduled Autoscaling for Connection Tester!
-  AutoScalingTargetConnTester:
-    Type: AWS::ApplicationAutoScaling::ScalableTarget
-    Properties:
-      MaxCapacity: 1
-      MinCapacity: 1
-      ScheduledActions:
-        - ScheduledActionName: schedule-scale-to-zero
-          Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
-          ScalableTargetAction:
-            MaxCapacity: 0
-            MinCapacity: 0
-        - ScheduledActionName: schedule-scale-up
-          Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
-          ScalableTargetAction:
-            MaxCapacity: 1
-            MinCapacity: 1
-      ResourceId: !Join ["/", [service, !Ref fargateCluster, !GetAtt connTestService.Name]]
-      RoleARN: !GetAtt autoScalingRole.Arn
-      ScalableDimension: ecs:service:DesiredCount
-      ServiceNamespace: ecs
 
   AutoScalingTargetWebsite:
     Type: AWS::ApplicationAutoScaling::ScalableTarget
@@ -1962,7 +1799,7 @@ Resources:
           ScalableTargetAction:
             MaxCapacity: 1
             MinCapacity: 1
-      ResourceId: !Join ["/", [service, !Ref fargateCluster, !GetAtt tophatService.Name]]
+      ResourceId: !Join ["/", [service, !Ref fargateCluster, !GetAtt topHatService.Name]]
       RoleARN: !GetAtt autoScalingRole.Arn
       ScalableDimension: ecs:service:DesiredCount
       ServiceNamespace: ecs
@@ -2043,6 +1880,170 @@ Resources:
   #       ScaleInCooldown: 10
   #       ScaleOutCooldown: 10
   #       TargetValue: 70
+
+
+  # ==================================================
+  # =============== Connection Tester! ===============
+  # ==================================================
+
+  # connTestTaskDefinition:
+  #   Type: AWS::ECS::TaskDefinition
+  #   Properties:
+  #     ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
+  #     TaskRoleArn: !GetAtt taskRole.Arn
+  #     Cpu: 512
+  #     Memory: 1024
+  #     RequiresCompatibilities:
+  #       - FARGATE
+  #     NetworkMode: awsvpc
+  #     RuntimePlatform:
+  #       CpuArchitecture: X86_64
+  #       OperatingSystemFamily: LINUX
+
+  #     ContainerDefinitions:
+  #       - Name: conntest
+  #         # changes to the Image will cause a new deployment to the ECS service, replacing the old deployment.
+  #         Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/connectiontest
+  #         PortMappings:
+  #           - Name: conntest
+  #             ContainerPort: !Ref pWebsitePort
+  #             Protocol: tcp # tcp | udp
+  #             AppProtocol: http
+  #         Environment:
+  #           # REDIS
+  #           - Name: REDIS_HOST
+  #             Value: !Sub redis.${pAppName}.cloudmap.internal # Reference Cloud Map Namespace
+  #           - Name: REDIS_PORT
+  #             Value: !Ref pRedisPort
+
+  #           # MYSQL
+  #           - Name: MYSQL_HOST
+  #             Value: !Sub mysql.${pAppName}.cloudmap.internal
+  #           - Name: MYSQL_PORT
+  #             Value: !Ref pMySQLPort
+  #           - Name: MYSQL_USER
+  #             Value: root
+  #           - Name: MYSQL_PASSWORD
+  #             Value: root
+  #           - Name: MYSQL_DB
+  #             Value: tophat
+
+  #           # MONGO
+  #           - Name: MONGO_HOST
+  #             Value: !Sub mongo.${pAppName}.cloudmap.internal
+  #           - Name: MONGO_PORT
+  #             Value: !Ref pMongoPort
+
+
+  #         LogConfiguration:
+  #           LogDriver: awslogs
+  #           Options:
+  #             awslogs-group: !Ref connTestLogGroup
+  #             awslogs-region: !Sub ${AWS::Region}
+  #             awslogs-stream-prefix: ecs
+
+  # connTestLogGroup:
+  #   Type: AWS::Logs::LogGroup
+  #   Properties:
+  #     LogGroupName: !Sub /ecs/conntest/${pAppName}
+  #     RetentionInDays: 7
+
+
+  # connTestService:
+  #   # Dependency is required due to the fact that we must deploy backwards 
+  #   # from a traditional deployment (database > API > Web UI)
+  #   DependsOn:
+  #     - redisService
+  #     - mongoService
+  #     - mysqlService
+  #   Type: AWS::ECS::Service
+  #   Properties:
+  #     Cluster: !Ref fargateCluster
+  #     ServiceName: conntest
+  #     DeploymentController: 
+  #       Type: ECS
+  #     DesiredCount: 1
+  #     EnableECSManagedTags: true
+  #     EnableExecuteCommand: true
+  #     LaunchType: FARGATE
+  #     # Allows the ability for updates to create a new task before draining the old task.
+  #     # https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_DeploymentConfiguration.html
+  #     DeploymentConfiguration:
+  #       MinimumHealthyPercent: 100
+  #       MaximumPercent: 200
+  #     NetworkConfiguration: 
+  #       AwsvpcConfiguration:
+  #         AssignPublicIp: DISABLED
+  #         SecurityGroups:
+  #           - !GetAtt serviceSecurityGroup.GroupId
+  #         Subnets: 
+  #           - !Ref pPrivateSubnetId1
+  #           - !Ref pPrivateSubnetId2
+  #     PlatformVersion: LATEST
+  #     PropagateTags: SERVICE
+  #     # Expose containers running on this Service to Cloud Map Service Connect.
+  #     # Allows using Cloud Map to connect ECS Services between/within clusters without ELBs
+  #     ServiceConnectConfiguration:
+  #       Enabled: true
+  #       Services:
+  #         - PortName: conntest
+  #           ClientAliases:
+  #             - Port: !Ref pWebsitePort
+  #       # Service Connect Agent logs location
+  #       LogConfiguration:
+  #         LogDriver: awslogs
+  #         Options:
+  #           awslogs-group: !Ref connTestLogGroup
+  #           awslogs-region: !Sub ${AWS::Region}
+  #           awslogs-stream-prefix: service-connect-agent
+  #     # Used to connect via Route53 record for Private DNS (VPN only)
+  #     ServiceRegistries: 
+  #       - RegistryArn: !GetAtt connTestServiceDiscoveryService.Arn
+  #         Port: !Ref pWebsitePort
+  #     TaskDefinition: !Ref connTestTaskDefinition
+  #     Tags: 
+  #       - Key: managed-by
+  #         Value: SAM
+  #       - Key: ephemeral:app
+  #         Value: !Ref pAppName
+
+  # Used to be able to connect via VPN and DNS route to the Web UI (DNS record could be stale)
+  # connTestServiceDiscoveryService:
+  #   Type: AWS::ServiceDiscovery::Service
+  #   Properties:
+  #     Name: connectiontest # Name must be unique from what is given for ECS service 'ServiceConnectConfiguration.PortName'. 
+  #     Description: Service discovery for connection test service
+  #     DnsConfig:
+  #       DnsRecords:
+  #         - Type: A
+  #           TTL: 60
+  #         - Type: SRV
+  #           TTL: 60
+  #       RoutingPolicy: MULTIVALUE
+  #     NamespaceId: !GetAtt serviceDiscoveryNameSpace.Id
+
+
+  # # Scheduled Autoscaling for Connection Tester!
+  # AutoScalingTargetConnTester:
+  #   Type: AWS::ApplicationAutoScaling::ScalableTarget
+  #   Properties:
+  #     MaxCapacity: 1
+  #     MinCapacity: 1
+  #     ScheduledActions:
+  #       - ScheduledActionName: schedule-scale-to-zero
+  #         Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
+  #         ScalableTargetAction:
+  #           MaxCapacity: 0
+  #           MinCapacity: 0
+  #       - ScheduledActionName: schedule-scale-up
+  #         Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
+  #         ScalableTargetAction:
+  #           MaxCapacity: 1
+  #           MinCapacity: 1
+  #     ResourceId: !Join ["/", [service, !Ref fargateCluster, !GetAtt connTestService.Name]]
+  #     RoleARN: !GetAtt autoScalingRole.Arn
+  #     ScalableDimension: ecs:service:DesiredCount
+  #     ServiceNamespace: ecs
 
 Outputs:
   websiteUrl:
