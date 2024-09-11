@@ -117,7 +117,7 @@ export const handler = async (event) => {
                         "completed",
                         "Pipeline Succeeded.",
                         "Pipeline run was a success!",
-                        `Pipeline execution was succesful.\n [CodePipeline URL](https://${region}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${pipelineName}/view?region=${region})\n [Website](https://${pipelineNamePrefix}.madisonreed.com)\n [Tophat](https://tophat.${pipelineNamePrefix}.madisonreed.com)`,
+                        `Pipeline execution was succesful.\n [CodePipeline URL](https://${region}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${pipelineName}/view?region=${region})\n [Website](https://${pipelineNamePrefix}.dev.mdsnrdfd.com)\n [Tophat](https://tophat.${pipelineNamePrefix}.dev.mdsnrdfd.com)`,
                         [
                             {"label": "Hibernate", "description": "Scale all ECS service tasks to 0", "identifier": "hibernate"}
                         ],
