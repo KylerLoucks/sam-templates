@@ -41,6 +41,8 @@ export const handler = async (event) => {
     try {
         const executionId = event.detail['execution-id'];
         const pipelineName = event.detail.pipeline;
+        // prefix is needed for creating URLs to tophat and website (e.g pr17387)
+        const pipelineNamePrefix = pipelineName.split("-")[0];
         let commit_message = null;
         let commit_url = null;
         let head_sha = null;
@@ -115,7 +117,7 @@ export const handler = async (event) => {
                         "completed",
                         "Pipeline Succeeded.",
                         "Pipeline run was a success!",
-                        `Pipeline execution was succesful.\n [CodePipeline URL](https://${region}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${pipelineName}/view?region=${region})\n [Website](https://google.com)\n [Tophat](https://google.com)`,
+                        `Pipeline execution was succesful.\n [CodePipeline URL](https://${region}.console.aws.amazon.com/codesuite/codepipeline/pipelines/${pipelineName}/view?region=${region})\n [Website](https://${pipelineNamePrefix}.madisonreed.com)\n [Tophat](https://tophat.${pipelineNamePrefix}.madisonreed.com)`,
                         [
                             {"label": "Hibernate", "description": "Scale all ECS service tasks to 0", "identifier": "hibernate"}
                         ],
