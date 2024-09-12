@@ -1,0 +1,21 @@
+version = 0.1
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.local_start_api.parameters]
+force_image_build = true
+
+
+
+
+[default.deploy.parameters]
+stack_name = "rest-api-test"
+resolve_s3 = true
+s3_prefix = "rest-api-test"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = "pStageName=\"staging\""
+image_repositories = []
