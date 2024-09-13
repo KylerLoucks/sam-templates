@@ -5,7 +5,7 @@ export const handler = async (event, context, callback) => {
 
     const response = {
       statusCode: 200,
-      body: JSON.stringify('Hello from Lambda v1!'),
+      body: JSON.stringify('Hello from Lambda v12!'),
       // headers: {
       //     'Access-Control-Allow-Headers': 'Authorization',
       //     'Access-Control-Allow-Origin': '*',

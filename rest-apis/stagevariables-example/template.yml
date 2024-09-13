@@ -1,11 +1,6 @@
 AWSTemplateFormatVersion: 2010-09-09
 Transform: AWS::Serverless-2016-10-31
 
-Parameters:
-  pStageName:
-    Type: String
-    Default: dev
-
 Resources:
   # MyApi:
   #   Type: AWS::Serverless::Api
@@ -27,37 +22,37 @@ Resources:
 
 
   # Rest API
-  # ApiGatewayApi:
-  #   Type: AWS::ApiGateway::RestApi
-  #   Properties:
-  #     Name: REST-API
-  #     Description: REST API
+  ApiGatewayApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: REST-API
+      Description: REST API
 
 # DefinitionBody example (Using swagger)
 # https://github.com/awslabs/aws-api-gateway-developer-portal/blob/main/cloudformation/template.yaml
-  ApiGatewayApi:
-    Type: AWS::Serverless::Api
-    Properties:
-      StageName: prod
-      # AccessLogSetting:
-      #   DestinationArn: !GetAtt AccessLogGroup.Arn
-      #   Format: '{ "requestId": "$context.requestId", "ip": "$context.identity.sourceIp", "caller": "$context.identity.caller", "requestTime": "$context.requestTimeEpoch", "httpMethod": "$context.httpMethod", "resourcePath": "$context.resourcePath", "status": "$context.status", "protocol": "$context.protocol", "responseLength": "$context.responseLength" }'
-      # MethodSettings:
-      #   - HttpMethod: "*"
-      #     ResourcePath: /*
-      #     LoggingLevel: INFO
+  # ApiGatewayApi:
+  #   Type: AWS::Serverless::Api
+  #   Properties:
+  #     StageName: prod
+  #     # AccessLogSetting:
+  #     #   DestinationArn: !GetAtt AccessLogGroup.Arn
+  #     #   Format: '{ "requestId": "$context.requestId", "ip": "$context.identity.sourceIp", "caller": "$context.identity.caller", "requestTime": "$context.requestTimeEpoch", "httpMethod": "$context.httpMethod", "resourcePath": "$context.resourcePath", "status": "$context.status", "protocol": "$context.protocol", "responseLength": "$context.responseLength" }'
+  #     # MethodSettings:
+  #     #   - HttpMethod: "*"
+  #     #     ResourcePath: /*
+  #     #     LoggingLevel: INFO
 
-      # AlwaysDeploy: true # Setting this will make it always deploy to every stage available (not good for production workloads)
+  #     # AlwaysDeploy: true # Setting this will make it always deploy to every stage available (not good for production workloads)
 
-      # Stage Variables
-      Variables:
-        lambdaAlias: 1
+  #     # Stage Variables
+  #     Variables:
+  #       lambdaAlias: live
 
-      Cors:
-        AllowMethods: "'POST, GET, OPTIONS'"
-        AllowHeaders: "'Authorization'"
-        AllowOrigin: "'*'"
-        MaxAge: "'600'"
+  #     Cors:
+  #       AllowMethods: "'POST, GET, OPTIONS'"
+  #       AllowHeaders: "'Authorization'"
+  #       AllowOrigin: "'*'"
+  #       MaxAge: "'600'"
       # Auth:
       #   Authorizers:
       #     LambdaAuthorizer:
@@ -85,8 +80,17 @@ Resources:
       #           - application/json
       #         responses: {}
       #         x-amazon-apigateway-integration:
-      #           uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:testingapi/invocations
-      #           # !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${HelloFunction.Arn}:${stageVariables.lambdaAlias}/invocations
+      #           # uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:testingapi/invocations
+      #           uri: !Join
+      #             - ''
+      #             - - 'arn:aws:apigateway:'
+      #               - !Ref 'AWS::Region'
+      #               - ':lambda:path/2015-03-31/functions/'
+      #               - !GetAtt HelloFunction.Arn
+      #               - ':'
+      #               - '$'
+      #               - '{stageVariables.lambdaAlias}'
+      #               - '/invocations'
       #           httpMethod: GET
       #           type: aws_proxy
 
@@ -95,6 +99,8 @@ Resources:
 
   # API Deployment
   ApiGatewayDeployment:
+    DependsOn:
+      - HelloFunctionMethod
     Type: AWS::ApiGateway::Deployment
     Properties:
       RestApiId: !Ref ApiGatewayApi
@@ -108,7 +114,7 @@ Resources:
       RestApiId: !Ref ApiGatewayApi
       DeploymentId: !GetAtt ApiGatewayDeployment.DeploymentId
       Variables:
-        lambdaAlias: 1  # Define the Lambda version or alias for dev
+        lambdaAlias: live  # Define the Lambda version or alias for dev
       MethodSettings:
         - DataTraceEnabled: true
           HttpMethod: "*"
@@ -122,21 +128,35 @@ Resources:
   #     RestApiId: !Ref ApiGatewayApi
   #     ParentId: !GetAtt ApiGatewayApi.RootResourceId
   #     PathPart: test # "{proxy+}"
+  
 
-  # HelloFunctionMethod:
-  #   Type: AWS::ApiGateway::Method
-  #   Properties:
-  #     RestApiId: !Ref ApiGatewayApi
-  #     ResourceId: !GetAtt ApiGatewayApi.RootResourceId
-  #     HttpMethod: GET
-  #     AuthorizationType: NONE
-  #     Integration:
-  #       IntegrationHttpMethod: GET
-  #       Type: AWS_PROXY
-  #       Uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${HelloFunction.Arn}/invocations
+  # MUST SET LAMBDA TO POST, GET request DOESNT WORK!!!
+  # https://github.com/aws/serverless-application-model/issues/430
+  # https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-integrations.html
+  HelloFunctionMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayApi
+      ResourceId: !GetAtt ApiGatewayApi.RootResourceId
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Join
+          - ''
+          - - 'arn:aws:apigateway:'
+            - !Ref 'AWS::Region'
+            - ':lambda:path/2015-03-31/functions/'
+            - !GetAtt HelloFunction.Arn
+            - ':'
+            - '$'
+            - '{stageVariables.lambdaAlias}'
+            - '/invocations'
+  # !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${HelloFunction.Arn}/invocations
 
-          # How you can invoke a lambda function version by using a stageVariable
-          # arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${HelloFunction.Arn}:${stageVariables.lambdaAlias}/invocations
+  # How you can invoke a lambda function version by using a stageVariable
+  # arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${HelloFunction.Arn}:${stageVariables.lambdaAlias}/invocations
 
   HelloFunctionPermission:
     Type: AWS::Lambda::Permission
@@ -144,8 +164,55 @@ Resources:
       Action: lambda:InvokeFunction
       FunctionName: !GetAtt HelloFunction.Arn
       Principal: apigateway.amazonaws.com
-      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayApi}/*/GET/*
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayApi}/*/*/*
 
+
+  # Creates the initial Function version. A new version is not created unless you specify to publish a new version with the CLI.
+  # A new version WILL NOT be made when you run `sam deploy` again.
+  #
+  # CI/CD setup:
+  # LATEST_VERSION=$(aws lambda publish-version --function-name testingapi --query 'Version' --output text)
+  # aws lambda update-alias --function-name <function-name> --name staging --function-version $LATEST_VERSION
+  Version:
+    Type: AWS::Lambda::Version
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties: 
+      FunctionName: !Ref HelloFunction
+
+  StagingAlias:
+    Type: AWS::Lambda::Alias
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties: 
+      FunctionName: !Ref HelloFunction
+      FunctionVersion: !GetAtt Version.Version
+      Name: staging
+
+  StagingAliasPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref StagingAlias
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayApi}/*/*/*
+
+  DevAlias:
+    Type: AWS::Lambda::Alias
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties: 
+      FunctionName: !Ref HelloFunction
+      FunctionVersion: !GetAtt Version.Version
+      Name: dev
+
+  DevAliasPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref DevAlias
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayApi}/*/*/*
 
   HelloFunction:
     Type: AWS::Serverless::Function
@@ -158,15 +225,22 @@ Resources:
       CodeUri: function/
 
       # Without linking this "Servlerless::Function" to the api, you will get an "internal server error"
-      Events:
-        ProxyApiRoot:
-          Type: Api
-          Properties:
-            RestApiId: !Ref ApiGatewayApi
-            Path: /
-            Method: GET
-
+      # Events:
+      #   ProxyApiRoot:
+      #     Type: Api
+      #     Properties:
+      #       RestApiId: !Ref ApiGatewayApi
+      #       Path: /
+      #       Method: POST
       # AutoPublishAlias: live  # Automatically publishes a new version with alias 'live'
+
+  # LambdaAliasInvokePermission:
+  #   Type: AWS::Lambda::Permission
+  #   Properties: 
+  #     FunctionName: !Ref HelloFunction.Alias  # References the live alias created by AutoPublishAlias
+  #     Action: lambda:InvokeFunction
+  #     Principal: apigateway.amazonaws.com  # Allow API Gateway to invoke the Lambda function
+  #     SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayApi}/*/GET/
 
   LambdaRole:
     Type: AWS::IAM::Role
