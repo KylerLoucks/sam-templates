@@ -76,14 +76,51 @@ phases:
     commands:
       - echo Build started on `date`
 
-      # prepare ecs stack
-      - echo Building ECS Stack...
-      - sam build -t ephemeralenv/ecs/madisonreed-ServiceConnect-ALB.yml
+      # prepare coloradvisor api stack
+      - git clone https://github.com/MadisonReed/color-advisor-microservice.git
+      - cd color-advisor-microservice
+      - git checkout "c303-deploy"
+      - echo listing color advisor microservice files...
+      - ls -ltra
+      - mkdir -p ~/.ssh && echo "$SSH_KEY_FOR_SUBMODULE" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa
+      - npm run init-submodules
+      - npm run update-submodules
+      - npm i
+      - npm run build
+      - sam build
+
+      # Uses manually created ACM cert "*.coloradvisor.dev.mdsnrdfd.com"
+      - | 
+        sam deploy \
+          --resolve-s3
+          --capabilities CAPABILITY_NAMED_IAM \
+          --parameter-overrides \
+              "pACMCertificateArn=arn:aws:acm:us-east-1:174743933558:certificate/dc4a19ea-a563-43aa-a80e-0e0d1dade373" \
+              pR53HostedZoneName=dev.mdsnrdfd.com \
+              pDomainPrefix=${APP_NAME}.coloradvisor \
+              pR53HostedZoneId=Z0323068C9DQS081P13G \
+              RestAPIName=${APP_NAME}-coloradvisor \
+              NodeEnv=development \
+              MSSubnet=subnet-0598f465e77230bd5 \
+              EpsagonToken=- \
+              MSSecGroupA=sg-0a34349137fd5086d \
+              MSSecGroupB=sg-0a1053b02521d09b3" \
+          --stack-name ${APP_NAME}-coloradvisor \
+          --tags \
+              CleanupDate=$(date -u -d "+10 days" '+%Y-%m-%dT%H:%M:%SZ') \
+              ephemeral:app=${APP_NAME} \
+          --no-confirm-changeset \
+          --on-failure DELETE    
+
+      - cd ../
 
   post_build:
     commands:
       - echo Build completed on `date`
 
+
+      - echo Building ECS Stack...
+      - sam build -t ephemeralenv/ecs/madisonreed-ServiceConnect-ALB.yml
       # Deploy ECS stack
       - |
         sam deploy -t ephemeralenv/ecs/madisonreed-ServiceConnect-ALB.yml \

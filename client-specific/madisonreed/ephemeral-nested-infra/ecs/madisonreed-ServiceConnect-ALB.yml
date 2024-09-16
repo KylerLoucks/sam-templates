@@ -384,7 +384,7 @@ Resources:
             
             # Hardcoded for development
             - Name: COLOR_ADVISOR_API_URL
-              Value: !Sub coloradvisor.${pHostedZoneName}/coloradvisor/
+              Value: !Sub ${pAppName}.coloradvisor.${pHostedZoneName}/coloradvisor/
 
           # Secrets:
           #   - Name: MYSQL_PASSWORD
@@ -565,7 +565,7 @@ Resources:
 
             # Hardcoded for development
             - Name: COLOR_ADVISOR_API_URL
-              Value: !Sub coloradvisor.${pHostedZoneName}/coloradvisor/
+              Value: !Sub ${pAppName}.coloradvisor.${pHostedZoneName}/coloradvisor/
 
           LogConfiguration:
             LogDriver: awslogs
@@ -688,7 +688,7 @@ Resources:
 
             # Hardcoded for development
             - Name: COLOR_ADVISOR_API_URL
-              Value: !Sub coloradvisor.${pHostedZoneName}/coloradvisor/
+              Value: !Sub ${pAppName}.coloradvisor.${pHostedZoneName}/coloradvisor/
 
           LogConfiguration:
             LogDriver: awslogs

@@ -1,4 +1,3 @@
-
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: Color Advisor API
@@ -34,6 +33,10 @@ Parameters:
   pR53HostedZoneName:
     Type: String
     Description: Name of the Route53 hosted zone (e.g. dev.mdsnrdfd.com)
+
+  pDomainPrefix:
+    Type: String
+    Default: coloradvisor
   
   pR53HostedZoneId:
     Type: String
@@ -68,9 +71,9 @@ Resources:
       Name: !Ref RestAPIName
       AlwaysDeploy: true
       EndpointConfiguration:
-        Type: REGIONAL
+        Type: EDGE
       Domain: 
-        DomainName: !Sub coloradvisor.${pR53HostedZoneName}
+        DomainName: !Sub ${pDomainPrefix}.${pR53HostedZoneName}
         CertificateArn: !Ref pACMCertificateArn
         EndpointConfiguration: EDGE
         Route53:
@@ -278,7 +281,7 @@ Resources:
   MRModulesLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
-      LayerName: mr-modules
+      # LayerName: mr-modules
       Description: MR Modules
       ContentUri: layers/mr-modules-layer/
       CompatibleRuntimes:
@@ -291,7 +294,7 @@ Resources:
   ColorAdvisorLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
-      LayerName: color-advisor
+      # LayerName: color-advisor
       Description: Color Advisor
       ContentUri: layers/color-advisor-layer/
       CompatibleRuntimes:
@@ -304,4 +307,4 @@ Resources:
 Outputs:
   ColorAdvisorApiUrl:
     Description: DNS Endpoint for API GW
-    Value: !Sub coloradvisor.${pR53HostedZoneName}/coloradvisor/
+    Value: !Sub ${pDomainPrefix}.${pR53HostedZoneName}/coloradvisor/
