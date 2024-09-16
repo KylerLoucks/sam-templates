@@ -1,7 +1,7 @@
+
 AWSTemplateFormatVersion: "2010-09-09"
 Transform: AWS::Serverless-2016-10-31
 Description: Color Advisor API
-
 
 Globals:
   Function:
@@ -14,10 +14,9 @@ Globals:
         EPSAGON_TOKEN: !Ref EpsagonToken
     Layers:
       - !Ref AdvisorNodeModulesLayer
-      # - !Ref MRModulesLayer
-      - arn:aws:lambda:us-east-1:222286259312:layer:mr-modules:129
+      - !Ref MRModulesLayer
+      # - arn:aws:lambda:us-east-1:222286259312:layer:mr-modules:129
       - !Ref ColorAdvisorLayer
-      - arn:aws:lambda:us-east-1:066549572091:layer:epsagon-node-layer:315
     VpcConfig:
       SecurityGroupIds:
         - !Ref MSSecGroupA
@@ -26,20 +25,23 @@ Globals:
         - !Ref MSSubnet
     Handler: /opt/nodejs/node_modules/epsagon.wrapper
 
-
 Parameters:
 
-  pAppName:
-    Type: String
-    Default: pr1
-    Description: Application Name
   pACMCertificateArn:
     Type: String
     Description: ACM cert ARN for API Domain
+
+  pR53HostedZoneName:
+    Type: String
+    Description: Name of the Route53 hosted zone (e.g. dev.mdsnrdfd.com)
+  
   pR53HostedZoneId:
     Type: String
-    Description: Route 53 hosted zone
+    Description: Route 53 hosted zone ID
 
+  RestAPIName:
+    Type: String
+    Description: REST API Name
 
   NodeEnv:
     Description: "Required. Set Node Environment Variable"
@@ -57,36 +59,32 @@ Parameters:
     Description: "Required. Secondary Security Group"
     Type: "String"
 
-
-
 Resources:
+
   ColorAdvisorAPI:
     Type: AWS::Serverless::Api
     Properties:
       StageName: base
-      Name: !Sub ${pAppName}-coloradvisor
+      Name: !Ref RestAPIName
       AlwaysDeploy: true
       EndpointConfiguration:
-        Type: REGIONAL # Regional API. Max 600 per AWS account.
+        Type: REGIONAL
       Domain: 
-        DomainName: !Sub ${pAppName}-coloradvisor.dev.mdsnrdfd.com
+        DomainName: !Sub coloradvisor.${pR53HostedZoneName}
         CertificateArn: !Ref pACMCertificateArn
-        EndpointConfiguration: REGIONAL
+        EndpointConfiguration: EDGE
         Route53:
           HostedZoneId: !Ref pR53HostedZoneId
         BasePath:
           - coloradvisor
 
-
   # Swagger
   SwaggerFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Role: arn:aws:iam::174743933558:role/ConsumerLambdaRole
-      CodeUri: ../../color-advisor-microservice/.build/api/swagger/ # references cloned color-advisor-microservice repo up a few directories from this template.
-      Environment:
-        Variables:
-          EPSAGON_HANDLER: index.handler
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/ConsumerLambdaRole
+      CodeUri: .build/api/swagger/
+      Handler: index.handler
       Events:
         HttpEvent:
           Type: Api
@@ -103,11 +101,9 @@ Resources:
   OptionsFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Role: arn:aws:iam::174743933558:role/ConsumerLambdaRole
-      CodeUri: ../../color-advisor-microservice/.build/api
-      Environment:
-        Variables:
-          EPSAGON_HANDLER: options.handler
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/ConsumerLambdaRole
+      CodeUri: .build/api
+      Handler: options.handler
       Timeout: 90
       Events:
         ColorAdvisorAPI:
@@ -125,11 +121,9 @@ Resources:
   RuleSetFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Role: arn:aws:iam::174743933558:role/ConsumerLambdaRole
-      CodeUri: ../../color-advisor-microservice/.build/api/ruleSet/
-      Environment:
-        Variables:
-          EPSAGON_HANDLER: index.handler
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/ConsumerLambdaRole
+      CodeUri: .build/api/ruleSet/
+      Handler: index.handler
       Timeout: 90
       Events:
         RootPath:
@@ -153,11 +147,9 @@ Resources:
   RecommendationSetFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Role: arn:aws:iam::174743933558:role/ConsumerLambdaRole
-      CodeUri: ../../color-advisor-microservice/.build/api/recommendationSet/
-      Environment:
-        Variables:
-          EPSAGON_HANDLER: index.handler
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/ConsumerLambdaRole
+      CodeUri: .build/api/recommendationSet/
+      Handler: index.handler
       Timeout: 90
       Events:
         RootPath:
@@ -181,11 +173,9 @@ Resources:
   RecommendationFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Role: arn:aws:iam::174743933558:role/ConsumerLambdaRole
-      CodeUri: ../../color-advisor-microservice/.build/api/recommendation/
-      Environment:
-        Variables:
-          EPSAGON_HANDLER: index.handler
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/ConsumerLambdaRole
+      CodeUri: .build/api/recommendation/
+      Handler: index.handler
       Timeout: 90
       Events:
         RootPath:
@@ -209,11 +199,9 @@ Resources:
   ShadeFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Role: arn:aws:iam::174743933558:role/ConsumerLambdaRole
-      CodeUri: ../../color-advisor-microservice/.build/api/shade/
-      Environment:
-        Variables:
-          EPSAGON_HANDLER: index.handler
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/ConsumerLambdaRole
+      CodeUri: .build/api/shade/
+      Handler: index.handler
       Timeout: 90
       Events:
         RootPath:
@@ -237,11 +225,9 @@ Resources:
   EngineFunction:
     Type: AWS::Serverless::Function
     Properties:
-      Role: arn:aws:iam::174743933558:role/ConsumerLambdaRole
-      CodeUri: ../../color-advisor-microservice/.build/api/rulesEngine/
-      Environment:
-        Variables:
-          EPSAGON_HANDLER: index.handler
+      Role: !Sub arn:aws:iam::${AWS::AccountId}:role/ConsumerLambdaRole
+      CodeUri: .build/api/rulesEngine/
+      Handler: index.handler
       Timeout: 90
       Events:
         TargetLevel:
@@ -279,57 +265,43 @@ Resources:
   AdvisorNodeModulesLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
-      LayerName: !Sub ${pAppName}-advisor-node-modules
+      LayerName: advisor-node-modules
       Description: Node Modules for the Color Advisor
-      ContentUri: ../../color-advisor-microservice/lib/node_modules/
+      ContentUri: lib/node_modules/
       CompatibleRuntimes:
         - nodejs10.x
         - nodejs12.x
+        - nodejs16.x
       LicenseInfo: "MIT"
       RetentionPolicy: Retain
 
-  # MRModulesLayer:
-  #   Type: AWS::Serverless::LayerVersion
-  #   Properties:
-  #     LayerName: mr-modules
-  #     Description: MR Modules
-  #     ContentUri: ../../color-advisor-microservice/layers/mr-modules-layer/
-  #     CompatibleRuntimes:
-  #       - nodejs10.x
-  #       - nodejs12.x
-  #     LicenseInfo: "MIT"
-  #     RetentionPolicy: Retain
+  MRModulesLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      LayerName: mr-modules
+      Description: MR Modules
+      ContentUri: layers/mr-modules-layer/
+      CompatibleRuntimes:
+        - nodejs10.x
+        - nodejs12.x
+        - nodejs16.x
+      LicenseInfo: "MIT"
+      RetentionPolicy: Retain
 
   ColorAdvisorLayer:
     Type: AWS::Serverless::LayerVersion
     Properties:
-      LayerName: !Sub ${pAppName}-color-advisor
+      LayerName: color-advisor
       Description: Color Advisor
-      ContentUri: ../../color-advisor-microservice/layers/color-advisor-layer/
+      ContentUri: layers/color-advisor-layer/
       CompatibleRuntimes:
         - nodejs10.x
         - nodejs12.x
+        - nodejs16.x
       LicenseInfo: "MIT"
       RetentionPolicy: Retain
-
-  # ApiFunction:
-  #   Type: AWS::Serverless::Function
-  #   Properties:
-  #     Runtime: nodejs16.x
-  #     Handler: index.handler
-  #     CodeUri: function/
-  #     Environment:
-  #       Variables:
-  #         MY_ENV: Hello World
-  #     Events:
-  #       Test:
-  #         Type: Api
-  #         Properties:
-  #           Path: /test
-  #           Method: GET
-  #           RestApiId: !Ref ColorAdvisorAPI
 
 Outputs:
   ColorAdvisorApiUrl:
     Description: DNS Endpoint for API GW
-    Value: !Sub ${pAppName}-coloradvisor.dev.mdsnrdfd.com/coloradvisor/
+    Value: !Sub coloradvisor.${pR53HostedZoneName}/coloradvisor/
