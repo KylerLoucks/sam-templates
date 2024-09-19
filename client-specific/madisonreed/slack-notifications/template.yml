@@ -10,6 +10,11 @@ Parameters:
   pSlackChannel:
     Type: String
     Description: The slack channel to send notifications to
+  
+  pSlackDisplayName:
+    Type: String
+    Description: Name to give the slack webhook user
+    Default: Ephemeral CI/CD Pipeline Alerts
 
 Resources:
 
@@ -41,17 +46,18 @@ Resources:
     Type: AWS::Serverless::Function
     Properties:
       Handler: index.handler
-      Runtime: python3.11
+      Runtime: python3.12
       CodeUri: ./lambda_src/
       Timeout: 900
-      LogConfig:
+      LoggingConfig:
         ApplicationLogLevel: INFO
+        LogFormat: JSON
       Environment:
         Variables:
           ACCOUNT_ID: !Ref AWS::AccountId
           SLACK_WEBHOOK_URL: !Ref pSlackWebhookUrl
-          SLACK_CHANNEL: "test"
-          SLACK_DISPLAY_NAME: "Ephemeral CI/CD Pipeline Alerts"
+          SLACK_CHANNEL: !Ref pSlackChannel
+          SLACK_DISPLAY_NAME: !Ref pSlackDisplayName
           SLACK_DISPLAY_ICON: ":incoming_envelope:"
           SOURCE_ICON: ":pushpin:"
           APPROVAL_ICON: ":spiral_note_pad:"
