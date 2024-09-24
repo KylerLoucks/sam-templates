@@ -121,11 +121,11 @@ Resources:
   # ==============================
   #         Target Groups
   # ==============================
-  wordpressTg:
-    UpdateReplacePolicy: Delete
+  wordpressBlueTg:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    UpdateReplacePolicy: Delete
     Properties:
-      Name: wordpress-TG-HTTPS
+      Name: wordpress-blue-TG-HTTPS
       Port: !Ref pWordpressContainerPort
       TargetType: ip
       VpcId: !Ref pVpcId
@@ -152,15 +152,41 @@ Resources:
       #     Value: "180"
       Tags:
         - Key: Name
-          Value: wordpress-TG-HTTPS
+          Value: wordpress-blue-TG-HTTPS
         - Key: controlled-by
           Value: !Sub cloudformation-${AWS::StackName}
 
-  laravelTg:
+
+  wordpressGreenTg:
+    UpdateReplacePolicy: Delete
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: wordpress-green-TG-HTTPS
+      Port: !Ref pWordpressContainerPort
+      TargetType: ip
+      VpcId: !Ref pVpcId
+      Protocol: HTTP
+
+      HealthCheckPath: /
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: HTTP
+      HealthyThresholdCount: 4
+      UnhealthyThresholdCount: 4
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      Matcher:
+        HttpCode: 200-499
+      Tags:
+        - Key: Name
+          Value: wordpress-green-TG-HTTPS
+        - Key: controlled-by
+          Value: !Sub cloudformation-${AWS::StackName}
+
+  laravelBlueTG:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     UpdateReplacePolicy: Delete
     Properties:
-      Name: laravel-TG-HTTPS
+      Name: laravel-blue-TG-HTTPS
       Port: !Ref pLaravelContainerPort
       TargetType: ip
       VpcId: !Ref pVpcId
@@ -187,15 +213,75 @@ Resources:
       #     Value: "180"
       Tags:
         - Key: Name
-          Value: laravel-TG-HTTPS
+          Value: laravel-blue-TG-HTTPS
         - Key: controlled-by
           Value: !Sub cloudformation-${AWS::StackName}
 
-  orthancTg:
+  laravelGreenTG:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     UpdateReplacePolicy: Delete
     Properties:
-      Name: orthanc-TG-HTTPS
+      Name: laravel-green-TG-HTTPS
+      Port: !Ref pLaravelContainerPort
+      TargetType: ip
+      VpcId: !Ref pVpcId
+      Protocol: HTTP
+
+      HealthCheckPath: /
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: HTTP
+      HealthyThresholdCount: 4
+      UnhealthyThresholdCount: 4
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      Matcher:
+        HttpCode: 200-499
+
+      # TargetGroupAttributes:
+      #   - Key: stickiness.enabled
+      #     Value: !Ref pEnableTgStickySession
+      #   - Key: stickiness.lb_cookie.duration_seconds
+      #     Value: !Ref pTgStickyDuration
+      #   - Key: stickiness.type
+      #     Value: lb_cookie
+      #   - Key: deregistration_delay.timeout_seconds
+      #     Value: "180"
+      Tags:
+        - Key: Name
+          Value: laravel-green-TG-HTTPS
+        - Key: controlled-by
+          Value: !Sub cloudformation-${AWS::StackName}
+  
+  orthancGreenTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    UpdateReplacePolicy: Delete
+    Properties:
+      Name: orthanc-green-TG-HTTPS
+      Port: !Ref pOrthancContainerPort
+      TargetType: ip
+      VpcId: !Ref pVpcId
+      Protocol: HTTP
+
+      HealthCheckPath: /
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: HTTP
+      HealthyThresholdCount: 4
+      UnhealthyThresholdCount: 4
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      Matcher:
+        HttpCode: 200-499
+      Tags:
+        - Key: Name
+          Value: orthanc-green-TG-HTTPS
+        - Key: controlled-by
+          Value: !Sub cloudformation-${AWS::StackName}
+  
+  orthancBlueTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    UpdateReplacePolicy: Delete
+    Properties:
+      Name: orthanc-blue-TG-HTTPS
       Port: !Ref pOrthancContainerPort
       TargetType: ip
       VpcId: !Ref pVpcId
@@ -222,7 +308,7 @@ Resources:
       #     Value: "180"
       Tags:
         - Key: Name
-          Value: orthanc-TG-HTTPS
+          Value: laravel-blue-TG-HTTPS
         - Key: controlled-by
           Value: !Sub cloudformation-${AWS::StackName}
 
@@ -230,58 +316,66 @@ Resources:
   # ==============================
   #        Listener Rules
   # ==============================
-  laravelRule:
+  laravelBGRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref httpsListener
+      Priority: 2
+      Actions:
+        - Type: forward
+          ForwardConfig:
+            TargetGroups: 
+              - TargetGroupArn: !Ref laravelBlueTG
+                Weight: 100
+              - TargetGroupArn: !Ref laravelGreenTG
+                Weight: 0
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub ${pLaravelDnsPrefix}.${pDomainName}
+
+
+  orthancBGRule:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
     Properties:
       ListenerArn: !Ref httpsListener
       Priority: 3
       Actions:
         - Type: forward
-          TargetGroupArn: !Ref laravelTg
+          ForwardConfig:
+            TargetGroups: 
+              - TargetGroupArn: !Ref orthancBlueTg
+                Weight: 100
+              - TargetGroupArn: !Ref orthancGreenTg
+                Weight: 0
       Conditions:
-        # - Field: path-pattern
-        #   PathPatternConfig:
-        #     Values: [/laravel/*]
-        - Field: host-header
-          HostHeaderConfig:
-            Values: 
-              - !Sub ${pLaravelDnsPrefix}.${pDomainName}
-
-  orthancRule:
-    Type: AWS::ElasticLoadBalancingV2::ListenerRule
-    Properties:
-      ListenerArn: !Ref httpsListener
-      Priority: 4
-      Actions:
-        - Type: forward
-          TargetGroupArn: !Ref orthancTg
-      Conditions:
-        # - Field: path-pattern
-        #   PathPatternConfig:
-        #     Values: [/orthanc/*]
         - Field: host-header
           HostHeaderConfig:
             Values: 
               - !Sub ${pOrthancDnsPrefix}.${pDomainName}
 
-  wordpressRule:
+
+  wordpressBGRule:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
     Properties:
       ListenerArn: !Ref httpsListener
-      Priority: 5
+      Priority: 1
       Actions:
         - Type: forward
-          TargetGroupArn: !Ref wordpressTg
+          ForwardConfig:
+            TargetGroups: 
+              - TargetGroupArn: !Ref wordpressBlueTg
+                Weight: 100
+              - TargetGroupArn: !Ref wordpressGreenTg
+                Weight: 0
       Conditions:
-        # - Field: path-pattern
-        #   PathPatternConfig:
-        #     Values: [/orthanc/*]
         - Field: host-header
           HostHeaderConfig:
             Values: 
               - !Sub ${pWordpressDnsPrefix}.${pDomainName}
 
- # ==============================
+  # ==============================
   #        R53 Hosted Zone
   # ==============================
 
@@ -320,7 +414,24 @@ Resources:
           AliasTarget:
             DNSName: !GetAtt loadBalancer.DNSName
             HostedZoneId: !GetAtt loadBalancer.CanonicalHostedZoneID
-    
+
+
+  # wordpressRule:
+  #   Type: AWS::ElasticLoadBalancingV2::ListenerRule
+  #   Properties:
+  #     ListenerArn: !Ref httpsListener
+  #     Priority: 5
+  #     Actions:
+  #       - Type: forward
+  #         TargetGroupArn: !Ref wordpressTg
+  #     Conditions:
+  #       # - Field: path-pattern
+  #       #   PathPatternConfig:
+  #       #     Values: [/orthanc/*]
+  #       - Field: host-header
+  #         HostHeaderConfig:
+  #           Values: 
+  #             - !Sub ${pWordpressDnsPrefix}.${pDomainName}
 
 Outputs:
   albSecurityGroup:
@@ -328,21 +439,36 @@ Outputs:
     Value: !Ref albSecurityGroup
     Export:
       Name: !Sub alb-security-group-${AWS::StackName}
-  laravelTg:
+  laravelBlueTg:
+    Description: Blue Target Group for Laravel
+    Value: !Ref laravelBlueTG
+    Export:
+      Name: !Sub laravel-blue-tg-${AWS::StackName}
+  laravelGreenTg:
+    Description: Green Target Group for Laravel
+    Value: !Ref laravelGreenTG
+    Export:
+      Name: !Sub laravel-green-tg-${AWS::StackName}
+  orthancBlueTg:
     Description: Target Group for Laravel
-    Value: !Ref laravelTg
+    Value: !Ref orthancBlueTg
     Export:
-      Name: !Sub laravel-tg-${AWS::StackName}
-  orthancTg:
-    Description: Target Group for Orthanc
-    Value: !Ref orthancTg
+      Name: !Sub orthancBlueTg-${AWS::StackName}
+  orthancGreenTg:
+    Description: Target Group for Laravel
+    Value: !Ref orthancGreenTg
     Export:
-      Name: !Sub orthanc-tg-${AWS::StackName}
-  wordpressTg:
+      Name: !Sub orthancGreenTg-${AWS::StackName}
+  wordpressBlueTg:
     Description: Target Group for Wordpress
-    Value: !Ref wordpressTg
+    Value: !Ref wordpressBlueTg
     Export:
-      Name: !Sub wordpress-tg-${AWS::StackName}
+      Name: !Sub wordpressBlueTg-${AWS::StackName}
+  wordpressGreenTg:
+    Description: Target Group for Wordpress
+    Value: !Ref wordpressGreenTg
+    Export:
+      Name: !Sub wordpressGreenTg-${AWS::StackName}
   clusterALB:
     Description: Cluster ALB
     Value: !Ref loadBalancer
