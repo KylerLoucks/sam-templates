@@ -302,6 +302,7 @@ Resources:
                   - servicediscovery:*
                   - acm:*
                   - application-autoscaling:*
+                  - cloudfront:*
                 Resource: "*"
 
 
@@ -617,7 +618,7 @@ Resources:
             Value: !Sub ${pAppName}.${pHostedZoneName}
           
           - Name: COLOR_ADVISOR_API_URL
-            Value: !Sub coloradvisor.${pHostedZoneName}/coloradvisor/
+            Value: !Sub ${pAppName}.coloradvisor.${pHostedZoneName}/coloradvisor/
 
           # Gulp Lambda config
           - Name: GULP_LAMBDA_API_ID # Empty API GW (Should be removed at some point)
