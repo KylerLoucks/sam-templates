@@ -52,21 +52,6 @@ phases:
             echo "SnapshotId found. Continuing to use the previous snapshot used: $MONGO_SNAPSHOT_ID"
         fi
 
-      # Old mongo implementation
-      # # Grab the Mongo image tag that was used on the previous deploy
-      # - MONGO_FULL_IMAGE_URI=$(aws ecs describe-task-definition --task-definition ${APP_NAME}-mongo --query "taskDefinition.containerDefinitions[?name=='mongo'].image" --output text 2>/dev/null || echo "")
-      # # Extract the tag from the task definition if it exists. Otherwise, use the most recent tag from ECR
-      # - |
-      #   if [[ "$MONGO_FULL_IMAGE_URI" == *":"* ]]; then
-      #     MONGO_IMAGE_TAG=$(echo $MONGO_FULL_IMAGE_URI | sed 's/.*://')
-      #   else
-      #     # If the task definition does not exist or does not have a tag, get the latest image tag from ECR
-      #     echo "Task definition does not exist or no tag found. Fetching the latest Mongo image tag from ECR..."
-      #     MONGO_REPO_NAME=mongo-ephemeral
-      #     MONGO_IMAGE_TAG=$(aws ecr describe-images --repository-name ${MONGO_REPO_NAME} --query 'sort_by(imageDetails,&imagePushedAt)[-1].imageTags[1]' --output text)
-      #   fi
-      # - echo "Mongo Image Tag [ ${MONGO_IMAGE_TAG} ]"
-
       - echo Listing Source Files...
       # list all files by most recently modified in reverse order
       - ls -ltra
@@ -82,7 +67,9 @@ phases:
       - git checkout "c303-deploy"
       - echo listing color advisor microservice files...
       - ls -ltra
-      - mkdir -p ~/.ssh && echo "$SSH_KEY_FOR_SUBMODULE" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa
+      # - mkdir -p ~/.ssh && echo "$SSH_KEY_FOR_SUBMODULE" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa
+      # Use HTTPS connection instead of ssh for cloning sub-modules
+      - sed -i 's|git@github.com:MadisonReed/mr-modules.git|https://github.com/MadisonReed/mr-modules.git|' .gitmodules
       - npm run init-submodules
       - npm run update-submodules
       - npm i
@@ -92,10 +79,10 @@ phases:
       # Uses manually created ACM cert "*.coloradvisor.dev.mdsnrdfd.com"
       - | 
         sam deploy \
-          --resolve-s3
+          --resolve-s3 \
           --capabilities CAPABILITY_NAMED_IAM \
           --parameter-overrides \
-              "pACMCertificateArn=arn:aws:acm:us-east-1:174743933558:certificate/dc4a19ea-a563-43aa-a80e-0e0d1dade373" \
+              "pACMCertificateArn=arn:aws:acm:us-east-1:174743933558:certificate/dc4a19ea-a563-43aa-a80e-0e0d1dade373 \
               pR53HostedZoneName=dev.mdsnrdfd.com \
               pDomainPrefix=${APP_NAME}.coloradvisor \
               pR53HostedZoneId=Z0323068C9DQS081P13G \
