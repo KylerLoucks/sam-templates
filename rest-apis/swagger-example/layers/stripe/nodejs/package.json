@@ -1,0 +1,7 @@
+{
+  "name": "stripe",
+  "version": "1.0",
+  "dependencies": {
+    "stripe": "^16.5.0"
+  }
+}

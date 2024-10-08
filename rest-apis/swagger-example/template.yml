@@ -1,0 +1,524 @@
+Transform: AWS::Serverless-2016-10-31
+Resources:
+  ApiGatewayLogRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+
+  # Enable logs for the API:
+  ApiAccountLogRole:
+    Type: AWS::ApiGateway::Account
+    Properties:
+      CloudWatchRoleArn: !GetAtt ApiGatewayLogRole.Arn
+
+  restAPIGW:
+    Type: AWS::Serverless::Api
+    Properties:
+      StageName: dev
+      Variables:
+        lambdaAlias: dev
+      AlwaysDeploy: true
+      OpenApiVersion: "2.0" # prevent the creation of the 'Stage' stage.
+      AccessLogSetting:
+        DestinationArn: !GetAtt stageAccessLogGroup.Arn
+        Format: '{ "requestId": "$context.requestId", "ip": "$context.identity.sourceIp", "caller": "$context.identity.caller", "requestTime": "$context.requestTimeEpoch", "httpMethod": "$context.httpMethod", "resourcePath": "$context.resourcePath", "status": "$context.status", "protocol": "$context.protocol", "responseLength": "$context.responseLength" }'
+      DefinitionBody:
+        swagger: "2.0"
+        info:
+          title: "Swagger API"
+          description: "Swagger API"
+        paths:
+          /paymentIntent:
+            post:
+              x-amazon-apigateway-integration:
+                uri: !Join
+                  - ""
+                  - - "arn:aws:apigateway:"
+                    - !Ref "AWS::Region"
+                    - ":lambda:path/2015-03-31/functions/"
+                    - !GetAtt stripePaymentIntent.Arn
+                    - ":"
+                    - "$"
+                    - "{stageVariables.lambdaAlias}"
+                    - "/invocations"
+                httpMethod: POST
+                type: aws_proxy
+              parameters:
+                - name: Authorization
+                  in: header
+                  required: true
+                  type: string
+              security:
+                - LambdaAuthorizer: [] # Lambda Authorizer. Match the key specified under 'SecurityDefinitions'
+              # Doc response example
+              responses:
+                "200":
+                  description: "Successfully created a payment intent"
+                  content:
+                    application/json:
+                      schema:
+                        type: object
+                        properties:
+                          paymentIntent:
+                            type: string
+                            description: "The client secret of the created payment intent"
+                          ephemeralKey:
+                            type: string
+                            description: "The secret key for ephemeral access"
+                          customer:
+                            type: string
+                            description: "The customer ID"
+                          publishableKey:
+                            type: string
+                            description: "The publishable key for the Stripe account"
+                      example:
+                        paymentIntent: "pi_1234567890_secret_abcdef"
+                        ephemeralKey: "ek_test_1234567890abcdef"
+                        customer: "cus_1234567890"
+                        publishableKey: "pk_test_1234567890abcdef"
+
+            # OPTIONS method
+            options:
+              x-amazon-apigateway-integration:
+                type: mock
+                requestTemplates:
+                  application/json: '{ "statusCode": 200 }'
+                responses:
+                  default:
+                    statusCode: "200"
+                    responseParameters:
+                      method.response.header.Access-Control-Allow-Headers: "'Authorization'"
+                      method.response.header.Access-Control-Allow-Methods: "'POST,GET,OPTIONS'"
+                      method.response.header.Access-Control-Allow-Origin: "'*'"
+                      method.response.header.Access-Control-Max-Age: "'600'"
+                      method.response.header.Content-Type: "'application/json'"
+              responses:
+                "200":
+                  description: "Default CORS response"
+                  headers:
+                    Access-Control-Allow-Headers:
+                      type: string
+                    Access-Control-Allow-Methods:
+                      type: string
+                    Access-Control-Allow-Origin:
+                      type: string
+                    Access-Control-Max-Age:
+                      type: string
+                    Content-Type:
+                      type: string
+                  schema:
+                    type: object
+                  # content:
+                  #   application/json:
+                  #     schema:
+                  #       type: object
+          /paymentSuccess:
+            post:
+              x-amazon-apigateway-integration:
+                uri: !Join
+                  - ""
+                  - - "arn:aws:apigateway:"
+                    - !Ref "AWS::Region"
+                    - ":lambda:path/2015-03-31/functions/"
+                    - !GetAtt stripePaymentSuccess.Arn
+                    - ":"
+                    - "$"
+                    - "{stageVariables.lambdaAlias}"
+                    - "/invocations"
+                httpMethod: POST
+                type: aws_proxy
+              parameters:
+                - name: Authorization
+                  in: header
+                  required: true
+                  type: string
+              # security:
+              #   - LambdaAuthorizer: [] # Lambda Authorizer. Match the key specified under 'SecurityDefinitions'
+              # Doc response example
+              # responses:
+              #   "200":
+              #     description: "Successfully created a payment intent"
+              #     content:
+              #       application/json:
+              #         schema:
+              #           type: object
+              #           properties:
+              #             paymentIntent:
+              #               type: string
+              #               description: "The client secret of the created payment intent"
+              #             ephemeralKey:
+              #               type: string
+              #               description: "The secret key for ephemeral access"
+              #             customer:
+              #               type: string
+              #               description: "The customer ID"
+              #             publishableKey:
+              #               type: string
+              #               description: "The publishable key for the Stripe account"
+              #         example:
+              #           paymentIntent: "pi_1234567890_secret_abcdef"
+              #           ephemeralKey: "ek_test_1234567890abcdef"
+              #           customer: "cus_1234567890"
+              #           publishableKey: "pk_test_1234567890abcdef"
+
+        # Authorizer
+        securityDefinitions:
+          LambdaAuthorizer:
+            type: apiKey
+            name: Authorization
+            in: header
+            x-amazon-apigateway-authtype: custom
+            x-amazon-apigateway-authorizer:
+              type: REQUEST
+              authorizerUri: !Sub "arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${supaAuthorizer.Arn}/invocations"
+              identitySource: "method.request.header.Authorization"
+              authorizerResultTtlInSeconds: 300
+
+  # Log group for logging access to all API Gateway Stages.
+  stageAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub /apigateway/${AWS::StackName}-accesslogs
+      RetentionInDays: 30
+
+  # API Deployment
+  apiGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId: !Ref restAPIGW
+
+  # API Gateway Stage: prod
+  prodStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      StageName: prod
+      RestApiId: !Ref restAPIGW
+      DeploymentId: !GetAtt apiGatewayDeployment.DeploymentId
+      Variables:
+        lambdaAlias: prod # Define the Lambda version or alias for prod
+      MethodSettings:
+        - DataTraceEnabled: true
+          HttpMethod: "*"
+          LoggingLevel: INFO
+          ResourcePath: "/*"
+      AccessLogSetting:
+        DestinationArn: !GetAtt stageAccessLogGroup.Arn
+        Format: '{ "requestId": "$context.requestId", "ip": "$context.identity.sourceIp", "caller": "$context.identity.caller", "requestTime": "$context.requestTimeEpoch", "httpMethod": "$context.httpMethod", "resourcePath": "$context.resourcePath", "status": "$context.status", "protocol": "$context.protocol", "responseLength": "$context.responseLength" }'
+      # Optional, Enable Request Caching
+      CacheClusterEnabled: false
+      CacheClusterSize: "0.5" # size in GB
+
+  # API Gateway Stage: staging
+  stagingStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      StageName: staging
+      RestApiId: !Ref restAPIGW
+      DeploymentId: !GetAtt apiGatewayDeployment.DeploymentId
+      Variables:
+        lambdaAlias: staging # Define the Lambda version or alias for staging
+      MethodSettings:
+        - DataTraceEnabled: true
+          HttpMethod: "*"
+          LoggingLevel: INFO
+          ResourcePath: "/*"
+      AccessLogSetting:
+        DestinationArn: !GetAtt stageAccessLogGroup.Arn
+        Format: '{ "requestId": "$context.requestId", "ip": "$context.identity.sourceIp", "caller": "$context.identity.caller", "requestTime": "$context.requestTimeEpoch", "httpMethod": "$context.httpMethod", "resourcePath": "$context.resourcePath", "status": "$context.status", "protocol": "$context.protocol", "responseLength": "$context.responseLength" }'
+      # Optional, Enable Request Caching
+      CacheClusterEnabled: false
+      CacheClusterSize: "0.5" # size in GB
+
+  # ===============================================
+  # ============ STRIPE PAYMENT LAMBDA ============
+  # ===============================================
+  stripePaymentIntent:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambdas/paymentIntent
+      Description: "Stripe Payment Intent Handler"
+      MemorySize: 128
+      Timeout: 3
+      LoggingConfig:
+        ApplicationLogLevel: INFO
+        LogFormat: JSON
+      Handler: paymentIntent.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Layers:
+        - !Ref StripeLambdaLayer
+      EphemeralStorage:
+        Size: 512
+      EventInvokeConfig:
+        MaximumEventAgeInSeconds: 21600
+        MaximumRetryAttempts: 2
+      Policies:
+        - AWSLambdaVPCAccessExecutionRole
+        - Statement:
+            - Effect: Allow
+              Action:
+                - execute-api:Invoke
+                - execute-api:ManageConnections
+              Resource: arn:aws:execute-api:*:*:*
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/stripe-dev-secret
+
+  stripePaymentIntentLogGroup:
+    Type: AWS::Logs::LogGroup
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${stripePaymentIntent}
+      RetentionInDays: 7
+
+  stripePaymentIntentVersion:
+    Type: AWS::Lambda::Version
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      FunctionName: !Ref stripePaymentIntent
+
+  stripePaymentIntentProdAlias:
+    Type: AWS::Lambda::Alias
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      FunctionName: !Ref stripePaymentIntent
+      FunctionVersion: !GetAtt stripePaymentIntentVersion.Version
+      Name: prod
+
+  stripePaymentIntentProdAliasPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref stripePaymentIntentProdAlias
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${restAPIGW}/*/*/*
+
+  stripePaymentIntentStagingAlias:
+    Type: AWS::Lambda::Alias
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      FunctionName: !Ref stripePaymentIntent
+      FunctionVersion: !GetAtt stripePaymentIntentVersion.Version
+      Name: staging
+
+  stripePaymentIntentStagingAliasPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref stripePaymentIntentStagingAlias
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${restAPIGW}/*/*/*
+
+  stripePaymentIntentDevAlias:
+    Type: AWS::Lambda::Alias
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      FunctionName: !Ref stripePaymentIntent
+      FunctionVersion: !GetAtt stripePaymentIntentVersion.Version
+      Name: dev
+
+  stripePaymentIntentDevAliasPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref stripePaymentIntentDevAlias
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${restAPIGW}/*/*/*
+
+  # ==================================================
+  # ========= STRIPE PAYMENT SUCCESS WEBHOOK =========
+  # ==================================================
+  stripePaymentSuccess:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambdas/paymentSuccess
+      Description: "Stripe Payment Success Webhook"
+      MemorySize: 128
+      Timeout: 3
+      LoggingConfig:
+        ApplicationLogLevel: INFO
+        LogFormat: JSON
+      Handler: index.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Layers:
+        - !Ref StripeLambdaLayer
+      EphemeralStorage:
+        Size: 512
+      EventInvokeConfig:
+        MaximumEventAgeInSeconds: 21600
+        MaximumRetryAttempts: 2
+      Policies:
+        - AWSLambdaVPCAccessExecutionRole
+        - Statement:
+            - Effect: Allow
+              Action:
+                - execute-api:Invoke
+                - execute-api:ManageConnections
+              Resource: arn:aws:execute-api:*:*:*
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource:
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/dev/stripe-payment-success-params
+
+  stripePaymentSuccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${stripePaymentSuccess}
+      RetentionInDays: 7
+
+  stripePaymentSuccessVersion:
+    Type: AWS::Lambda::Version
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties:
+      FunctionName: !Ref stripePaymentSuccess
+
+  stripePaymentSuccessProdAlias:
+    Type: AWS::Lambda::Alias
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      FunctionName: !Ref stripePaymentSuccess
+      FunctionVersion: !GetAtt stripePaymentSuccessVersion.Version
+      Name: prod
+
+  stripePaymentSuccessProdAliasPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref stripePaymentSuccessProdAlias
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${restAPIGW}/*/*/*
+
+  stripePaymentSuccessStagingAlias:
+    Type: AWS::Lambda::Alias
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      FunctionName: !Ref stripePaymentSuccess
+      FunctionVersion: !GetAtt stripePaymentSuccessVersion.Version
+      Name: staging
+
+  stripePaymentSuccessStagingAliasPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref stripePaymentSuccessStagingAlias
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${restAPIGW}/*/*/*
+
+  stripePaymentSuccessDevAlias:
+    Type: AWS::Lambda::Alias
+    DeletionPolicy: Delete
+    UpdateReplacePolicy: Delete
+    Properties:
+      FunctionName: !Ref stripePaymentSuccess
+      FunctionVersion: !GetAtt stripePaymentSuccessVersion.Version
+      Name: dev
+
+  stripePaymentSuccessDevAliasPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref stripePaymentSuccessDevAlias
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${restAPIGW}/*/*/*
+
+  # =======================================
+  # ========== LAMBDA AUTHORIZER ==========
+  # =======================================
+  supaAuthorizer:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambdas/lambdaAuthorizer
+      Description: ""
+      MemorySize: 128
+      Timeout: 3
+      LoggingConfig:
+        ApplicationLogLevel: INFO
+        LogFormat: JSON
+      Handler: lambdaAuthorizer.handler
+      Runtime: nodejs18.x
+      Architectures:
+        - arm64
+      Layers:
+        - !Sub arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:layer:jwt:1
+      EphemeralStorage:
+        Size: 512
+      EventInvokeConfig:
+        MaximumEventAgeInSeconds: 21600
+        MaximumRetryAttempts: 2
+      FunctionUrlConfig:
+        AuthType: NONE
+        InvokeMode: BUFFERED
+      Policies:
+        - AWSLambdaVPCAccessExecutionRole
+        - AmazonAPIGatewayInvokeFullAccess
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource: !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/supabasejwt
+      SnapStart:
+        ApplyOn: None
+
+  supaAuthorizerInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt supaAuthorizer.Arn
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${restAPIGW}/authorizers/*
+
+  supaAuthorizerLogGroup:
+    Type: AWS::Logs::LogGroup
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${supaAuthorizer}
+      RetentionInDays: 7
+
+  # =======================================
+  # ============ LAMBDA LAYERS ============
+  # =======================================
+  StripeLambdaLayer:
+    Type: AWS::Serverless::LayerVersion
+    Properties:
+      Description: The stripe NPM package layer
+      ContentUri: layers/stripe/nodejs
+      CompatibleRuntimes:
+        - nodejs18.x
+      CompatibleArchitectures:
+        - arm64
+    Metadata:
+      BuildMethod: nodejs18.x
+      BuildArchitecture: arm64
+
+Outputs:
+  PaymentIntentFunctionArn:
+    Description: "ARN of the paymentIntent function"
+    Value: !GetAtt stripePaymentIntent.Arn
