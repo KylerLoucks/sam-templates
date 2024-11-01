@@ -1,0 +1,55 @@
+version = 0.1
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.local_start_api.parameters]
+force_image_build = true
+
+
+
+[development.deploy.parameters]
+stack_name = "dbmigrations-pipeline"
+resolve_s3 = true
+resolve_image_repos = true
+s3_prefix = "dbmigrations/"
+region = "us-east-1"
+capabilities = ["CAPABILITY_NAMED_IAM"]
+parameter_overrides = [
+    "pAppName=db-migrations",
+    "pRepoOwner=MadisonReed",
+    "pRepoName=mr",
+    "pCodestarConnectionArn=arn:aws:codestar-connections:us-east-1:174743933558:connection/d27c0b2b-88c2-45ac-b8f4-89b0e04af6fd",
+    "pTriggerBranch=c303/dbmigrationsv2",
+    "pCodeBuildComputeType=BUILD_GENERAL1_SMALL",
+    "pBuildSpecPath=buildspec-rundbmigrationsv2.yml"
+
+]
+confirm_changeset = true
+
+
+[staging.deploy.parameters]
+stack_name = "dbmigrations-pipeline"
+resolve_s3 = true
+resolve_image_repos = true
+s3_prefix = "dbmigrations/"
+region = "us-east-1"
+capabilities = ["CAPABILITY_NAMED_IAM"]
+parameter_overrides = [
+    "pAppName=db-migrations",
+    "pRepoOwner=MadisonReed",
+    "pRepoName=mr",
+    "pCodestarConnectionArn=arn:aws:codestar-connections:us-east-1:992382781399:connection/3cd65761-22f1-45a3-b59b-880078ea8e24",
+    "pTriggerBranch=c303/dbmigrationsv2",
+    "pCodeBuildComputeType=BUILD_GENERAL1_SMALL",
+    "pBuildSpecPath=buildspec-rundbmigrationsv2.yml",
+    "pMySQLSecretName=rds!db-bbfcc315-bd36-4f2e-a67c-34e236665b09",
+    "pMongoHost=mongo",
+    "pDefaultMigrationEnv=aws_new_staging",
+    "pVpcId=vpc-08a1c64440553954f",
+    "pPrivateSubnetId1=subnet-04203c77844a8ccbd",
+    "pPrivateSubnetId2=subnet-071b4f999c65a39f5"
+
+]
+confirm_changeset = true

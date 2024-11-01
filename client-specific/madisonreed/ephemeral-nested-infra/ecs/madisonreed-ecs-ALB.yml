@@ -1,0 +1,1298 @@
+
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  pAppName:
+    Type: String
+    Default: pr1
+    Description: Application Name
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the Virtual Private Network (VPC)
+  pPrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description:
+      List of Private SubnetIds in the Virtual Private Cloud (VPC).
+  pACMCertificateArn:
+    Type: String
+    Description: ACM cert ARN for ECS services ALB
+  pR53HostedZone:
+    Type: String
+    Description: Route 53 hosted zone
+  # Container Ports
+  pWebsitePort:
+    Type: Number
+    Default: 80
+  pApiServerPort:
+    Type: Number
+    Default: 80
+  pTopHatPort:
+    Type: Number
+    Default: 80
+  pSocketioPort:
+    Type: Number
+    Default: 80
+  pMongoPort:
+    Type: Number
+    Default: 27017
+  pRedisPort:
+    Type: Number
+    Default: 6379
+  pMySQLPort:
+    Type: Number
+    Default: 3306
+  pPostgresPort:
+    Type: Number
+    Default: 5432
+  # pPublicSubnetIds:
+  #   Type: List<AWS::EC2::Subnet::Id>
+  #   Description:
+  #     List of Public SubnetIds in the Virtual Private Cloud (VPC).
+
+
+Resources:
+
+
+
+  # ==============================================
+  # ================= LOG GROUPS =================
+  # ==============================================
+
+  redisLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/redis/${pAppName}
+      RetentionInDays: 7
+
+  websiteLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/website/${pAppName}
+      RetentionInDays: 7
+
+  apiServerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/apiserver/${pAppName}
+      RetentionInDays: 7
+
+  topHatLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/tophat/${pAppName}
+      RetentionInDays: 7
+
+  socketioLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/socketio/${pAppName}
+      RetentionInDays: 7
+
+  mongoLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/mongo/${pAppName}
+      RetentionInDays: 7
+
+  mysqlLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/mysql/${pAppName}
+      RetentionInDays: 7
+  
+  postgresLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/postgres/${pAppName}
+      RetentionInDays: 7
+
+
+  # ===================================================
+  # ================= SECURITY GROUPS =================
+  # ===================================================
+  
+  # BACKEND SERVICES
+  serviceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow all traffic from self and ALB Security Group
+      VpcId: !Ref pVpcId
+
+  # Allow everything that has this security group attached
+  serviceSelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt serviceSecurityGroup.GroupId
+      IpProtocol: -1
+      FromPort: -1
+      ToPort: -1
+      SourceSecurityGroupId: !GetAtt serviceSecurityGroup.GroupId
+
+  # ALLOW EVERYTHING FROM ALB SG
+  serviceFrontendIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt serviceSecurityGroup.GroupId
+      IpProtocol: -1
+      FromPort: -1
+      ToPort: -1
+      SourceSecurityGroupId: !Ref albSecurityGroup
+
+  # FRONTEND SG
+  albSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for ALB allowing HTTP
+      VpcId: !Ref pVpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+
+
+  # ECS task role
+  taskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CloudWatchLogs
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowCreateLogGroup
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Sid: AllowLogStreams
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/*:*"
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject*
+                  - s3:GetBucket*
+                  - s3:List*
+                  - s3:DeleteObject*
+                  - s3:PutObject
+                  - s3:PutObjectLegalHold
+                  - s3:PutObjectRetention
+                  - s3:PutObjectTagging
+                  - s3:PutObjectVersionTagging
+                  - s3:Abort*
+                Resource: "*"
+        
+  taskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      # Allows pulling ECR image and pushing logs to CW
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+
+  # ====================================================
+  # ================= TASK DEFINITIONS =================
+  # ====================================================
+
+  # WEBSITE
+  websiteTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
+      TaskRoleArn: !GetAtt taskRole.Arn
+      Cpu: 4096
+      Memory: 8192
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      # EphemeralStorage:
+      #   SizeInGiB: 20
+        
+      ContainerDefinitions:
+        - Name: website
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/website-${pAppName}:latest
+          PortMappings:
+              - ContainerPort: !Ref pWebsitePort
+          Environment:
+            - Name: REDIS_HOST
+              Value: !Sub redis-${pAppName}.dev.mdsnrdfd.com
+            - Name: MONGO_HOST
+              Value: !Sub mongo-${pAppName}.dev.mdsnrdfd.com
+            
+            # MYSQL
+            - Name: MYSQL_HOST
+              Value: !Sub mysql-${pAppName}.dev.mdsnrdfd.com
+            - Name: MYSQL_USER
+              Value: masteruser
+            - Name: MYSQL_PASSWORD
+              Value: root
+            
+            # POSTGRES
+            - Name: POSTGRES_HOST
+              Value: !Sub postgres-${pAppName}.dev.mdsnrdfd.com
+            - Name: POSTGRES_USER
+              Value: postgres
+            - Name: POSTGRES_PASSWORD
+              Value: postgres
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref websiteLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+
+  # API SERVER
+  apiServerTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
+      TaskRoleArn: !GetAtt taskRole.Arn
+      Cpu: 512
+      Memory: 1024
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      # EphemeralStorage:
+      #   SizeInGiB: 20
+        
+      ContainerDefinitions:
+        - Name: apiserver
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/apiserver-${pAppName}:latest
+          PortMappings:
+              - ContainerPort: !Ref pApiServerPort
+          Environment:
+            # TODO: Will change this to be e.g. redis-pullrequest12345.dev.private-mr.com
+            - Name: REDIS_HOST
+              Value: !Sub redis-${pAppName}.dev.mdsnrdfd.com 
+            - Name: NODE_ENV
+              Value: ecs
+            - Name: MONGO_HOST
+              Value: !Sub mongo-${pAppName}.dev.mdsnrdfd.com
+            # MYSQL
+            - Name: MYSQL_HOST
+              Value: !Sub mysql-${pAppName}.dev.mdsnrdfd.com
+            - Name: MYSQL_USER
+              Value: masteruser
+            - Name: MYSQL_PASSWORD
+              Value: root
+            
+            # POSTGRES
+            - Name: POSTGRES_HOST
+              Value: !Sub postgres-${pAppName}.dev.mdsnrdfd.com
+            - Name: POSTGRES_USER
+              Value: postgres
+            - Name: POSTGRES_PASSWORD
+              Value: postgres
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref apiServerLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+
+  # TOPHAT
+  topHatTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
+      TaskRoleArn: !GetAtt taskRole.Arn
+      Cpu: 512
+      Memory: 1024
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      # EphemeralStorage:
+      #   SizeInGiB: 20
+        
+      ContainerDefinitions:
+        - Name: tophat
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/tophat-${pAppName}:latest
+          PortMappings:
+              - ContainerPort: !Ref pTopHatPort
+          Environment:
+            - Name: REDIS_HOST
+              Value: !Sub redis-${pAppName}.dev.mdsnrdfd.com 
+            - Name: NODE_ENV
+              Value: ecs
+            - Name: MONGO_HOST
+              Value: !Sub mongo-${pAppName}.dev.mdsnrdfd.com
+            # MYSQL
+            - Name: MYSQL_HOST
+              Value: !Sub mysql-${pAppName}.dev.mdsnrdfd.com
+            - Name: MYSQL_USER
+              Value: masteruser
+            - Name: MYSQL_PASSWORD
+              Value: root
+            
+            # POSTGRES
+            - Name: POSTGRES_HOST
+              Value: !Sub postgres-${pAppName}.dev.mdsnrdfd.com
+            - Name: POSTGRES_USER
+              Value: postgres
+            - Name: POSTGRES_PASSWORD
+              Value: postgres
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref topHatLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+
+
+  socketioTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
+      TaskRoleArn: !GetAtt taskRole.Arn
+      Cpu: 512
+      Memory: 1024
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      # EphemeralStorage:
+      #   SizeInGiB: 20
+        
+      ContainerDefinitions:
+        - Name: socketio
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/socketio-${pAppName}:latest
+          PortMappings:
+              - ContainerPort: !Ref pSocketioPort
+          Environment:
+            - Name: REDIS_HOST
+              Value: !Sub redis-${pAppName}.dev.mdsnrdfd.com 
+            - Name: NODE_ENV
+              Value: ecs
+            - Name: MONGO_HOST
+              Value: !Sub mongo-${pAppName}.dev.mdsnrdfd.com
+            # MYSQL
+            - Name: MYSQL_HOST
+              Value: !Sub mysql-${pAppName}.dev.mdsnrdfd.com
+            - Name: MYSQL_USER
+              Value: masteruser
+            - Name: MYSQL_PASSWORD
+              Value: root
+            
+            # POSTGRES
+            - Name: POSTGRES_HOST
+              Value: !Sub postgres-${pAppName}.dev.mdsnrdfd.com
+            - Name: POSTGRES_USER
+              Value: postgres
+            - Name: POSTGRES_PASSWORD
+              Value: postgres
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref topHatLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+
+  mongoTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
+      TaskRoleArn: !GetAtt taskRole.Arn
+      Cpu: 512
+      Memory: 1024
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      # EphemeralStorage:
+      #   SizeInGiB: 20
+        
+      ContainerDefinitions:
+        - Name: mongo
+          Image: mongo:latest
+          PortMappings:
+              - ContainerPort: !Ref pMongoPort
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref mongoLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+
+  redisTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
+      TaskRoleArn: !GetAtt taskRole.Arn
+      Cpu: 512
+      Memory: 1024
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      # EphemeralStorage:
+      #   SizeInGiB: 20
+        
+      ContainerDefinitions:
+        - Name: redis
+          Image: redis:latest
+          PortMappings:
+              - ContainerPort: !Ref pRedisPort
+          Environment:
+            - Name: MONGO_HOST
+              Value: !Sub mongo-${pAppName}.dev.mdsnrdfd.com
+            # MYSQL
+            - Name: MYSQL_HOST
+              Value: !Sub mysql-${pAppName}.dev.mdsnrdfd.com
+            - Name: MYSQL_USER
+              Value: masteruser
+            - Name: MYSQL_PASSWORD
+              Value: root
+            
+            # POSTGRES
+            - Name: POSTGRES_HOST
+              Value: !Sub postgres-${pAppName}.dev.mdsnrdfd.com
+            - Name: POSTGRES_USER
+              Value: postgres
+            - Name: POSTGRES_PASSWORD
+              Value: postgres
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref redisLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+
+  mysqlTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
+      TaskRoleArn: !GetAtt taskRole.Arn
+      Cpu: 512
+      Memory: 1024
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      # EphemeralStorage:
+      #   SizeInGiB: 20
+        
+      ContainerDefinitions:
+        - Name: mysql
+          Image: mysql:latest
+          PortMappings:
+              - ContainerPort: !Ref pMySQLPort
+          Environment:
+            - Name: MYSQL_DATABASE
+              Value: mysql
+            - Name: MYSQL_ROOT_PASSWORD
+              Value: root
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref mysqlLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+
+  postgresTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
+      TaskRoleArn: !GetAtt taskRole.Arn
+      Cpu: 512
+      Memory: 1024
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      # EphemeralStorage:
+      #   SizeInGiB: 20
+        
+      ContainerDefinitions:
+        - Name: postgres
+          Image: postgres:latest
+          PortMappings:
+              - ContainerPort: !Ref pPostgresPort
+          Environment:
+            - Name: POSTGRES_USER
+              Value: postgres
+            - Name: POSTGRES_PASSWORD
+              Value: postgres
+            - Name: POSTGRES_DB
+              Value: postgres
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref postgresLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+
+
+
+
+
+  fargateCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${pAppName}-cluster
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+
+
+
+  # =================================================
+  # ================= TARGET GROUPS =================
+  # =================================================
+
+  # API SERVER
+  apiServerTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      Name: !Sub apiserver-${pAppName}
+
+      HealthCheckPath: /api/1.0/system/ping
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Port: !Ref pApiServerPort
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      Matcher:
+        HttpCode: 200-499
+      TargetType: ip
+      VpcId: !Ref pVpcId
+
+  # TOPHAT
+  topHatTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      Name: !Sub tophat-${pAppName}
+
+      HealthCheckPath: /awsHealthCheck.json
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Port: !Ref pTopHatPort
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      Matcher:
+        HttpCode: 200-499
+      TargetType: ip
+      VpcId: !Ref pVpcId
+
+  # WEBSITE
+  websiteTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      Name: !Sub website-${pAppName}
+
+      HealthCheckPath: /awsHealthCheck.json
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Port: !Ref pWebsitePort
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      Matcher:
+        HttpCode: 200-499
+      TargetType: ip
+      VpcId: !Ref pVpcId
+
+  # SOCKET IO
+  socketioTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      Name: !Sub socketio-${pAppName}
+
+      HealthCheckPath: /awsHealthCheck.json
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Port: !Ref pSocketioPort
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      Matcher:
+        HttpCode: 200-499
+      TargetType: ip
+      VpcId: !Ref pVpcId
+
+  # MONGO
+  mongoTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      Name: !Sub mongo-${pAppName}
+
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Port: !Ref pMongoPort
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      Matcher:
+        HttpCode: 200-499
+      TargetType: ip
+      VpcId: !Ref pVpcId
+
+  # REDIS
+  redisTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      Name: !Sub redis-${pAppName}
+
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Port: !Ref pRedisPort
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      Matcher:
+        HttpCode: 200-499
+      TargetType: ip
+      VpcId: !Ref pVpcId
+
+  # MYSQL
+  mysqlTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      Name: !Sub mysql-${pAppName}
+
+      HealthCheckPath: /api/1.0/system/ping
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Port: !Ref pMySQLPort
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      Matcher:
+        HttpCode: 200-499
+      TargetType: ip
+      VpcId: !Ref pVpcId
+
+  # POSTGRES
+  postgresTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      Name: !Sub postgres-${pAppName}
+
+      HealthCheckPath: /api/1.0/system/ping
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Port: !Ref pPostgresPort
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      Matcher:
+        HttpCode: 200-499
+      TargetType: ip
+      VpcId: !Ref pVpcId
+
+
+  # ===================================================
+  # ================= LISTENERS/RULES =================
+  # ===================================================
+  
+  # Listener to redirect HTTP traffic to HTTPS
+  redirectListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties: 
+      DefaultActions: 
+        - Type: "redirect"
+          RedirectConfig: 
+            Port: "443"
+            Protocol: "HTTPS"
+            StatusCode: "HTTP_301"
+      LoadBalancerArn: !Ref ecsLoadBalancer
+      Port: 80
+      Protocol: "HTTP"
+
+  httpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties: 
+      Certificates: 
+        - CertificateArn: !Ref pACMCertificateArn
+      DefaultActions: 
+        - Type: "fixed-response"
+          FixedResponseConfig:
+            StatusCode: "503"
+            ContentType: "text/plain"
+            MessageBody: "You have reached an invalid domain."
+      LoadBalancerArn: !Ref ecsLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: "ELBSecurityPolicy-2016-08"
+
+  # API SERVER
+  apiServerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref apiServerTg
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub api-${pAppName}.dev.mdsnrdfd.com
+      ListenerArn: !Ref httpsListener
+      Priority: 7
+
+  # SOCKET IO
+  socketIORule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref socketioTg
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub tophat-${pAppName}.dev.mdsnrdfd.com
+        - Field: path-pattern
+          PathPatternConfig:
+            Values: [/socket.io/*]
+      ListenerArn: !Ref httpsListener
+      Priority: 8
+
+  # TOP HAT
+  topHatRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref topHatTg
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub tophat-${pAppName}.dev.mdsnrdfd.com
+      ListenerArn: !Ref httpsListener
+      Priority: 12
+
+  # WEBSITE
+  websiteRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref websiteTg
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub ${pAppName}.dev.mdsnrdfd.com
+      ListenerArn: !Ref httpsListener
+      Priority: 18
+
+  # REDIS
+  redisRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref redisTg
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub redis-${pAppName}.dev.mdsnrdfd.com
+      ListenerArn: !Ref httpsListener
+      Priority: 20
+
+  # MONGO
+  mongoRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref mongoTg
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub mongo-${pAppName}.dev.mdsnrdfd.com
+      ListenerArn: !Ref httpsListener
+      Priority: 22
+
+
+  # MYSQL
+  mysqlRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref mysqlTg
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub mysql-${pAppName}.dev.mdsnrdfd.com
+      ListenerArn: !Ref httpsListener
+      Priority: 23
+
+  # POSTGRES
+  postgresRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref postgresTg
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub postgres-${pAppName}.dev.mdsnrdfd.com
+      ListenerArn: !Ref httpsListener
+      Priority: 24
+
+
+
+  
+  ecsLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      IpAddressType: ipv4
+      Scheme: internet-facing
+      SecurityGroups:
+        - !GetAtt albSecurityGroup.GroupId
+      Subnets: !Ref pPrivateSubnetIds
+      Type: application
+
+  ecsWebsiteService:
+    DependsOn:
+      - httpsListener
+      - redirectListener
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref fargateCluster
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      # Adjust if container takes a while to start up
+      HealthCheckGracePeriodSeconds: 30
+      LoadBalancers: 
+        - ContainerName: website
+          ContainerPort: !Ref pWebsitePort
+          TargetGroupArn: !Ref websiteTg
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: !Ref pPrivateSubnetIds
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # ServiceConnectConfiguration: # Allows using Cloud Map to connect services between clusters
+      #   ServiceConnectConfiguration
+      ServiceName: !Sub website-${pAppName}
+      # ServiceRegistries: 
+      #   - ServiceRegistry
+      TaskDefinition: !Ref websiteTaskDefinition
+      Tags: 
+        - Key: managed-by
+          Value: SAM
+
+
+
+  ecsApiServerService:
+    DependsOn:
+      - httpsListener
+      - redirectListener
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref fargateCluster
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      # Adjust if container takes a while to start up
+      HealthCheckGracePeriodSeconds: 30
+      LoadBalancers: 
+        - ContainerName: apiserver
+          ContainerPort: !Ref pApiServerPort
+          TargetGroupArn: !Ref apiServerTg
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: !Ref pPrivateSubnetIds
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # ServiceConnectConfiguration: # Allows using Cloud Map to connect services between clusters
+      #   ServiceConnectConfiguration
+      ServiceName: !Sub apiserver-${pAppName}
+      # ServiceRegistries: 
+      #   - ServiceRegistry
+      TaskDefinition: !Ref apiServerTaskDefinition
+      Tags: 
+        - Key: managed-by
+          Value: SAM
+  
+  ecsTopHatService:
+    DependsOn:
+      - httpsListener
+      - redirectListener
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref fargateCluster
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      # Adjust if container takes a while to start up
+      HealthCheckGracePeriodSeconds: 30
+      LoadBalancers: 
+        - ContainerName: tophat
+          ContainerPort: !Ref pTopHatPort
+          TargetGroupArn: !Ref topHatTg
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: !Ref pPrivateSubnetIds
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # ServiceConnectConfiguration: # Allows using Cloud Map to connect services between clusters
+      #   ServiceConnectConfiguration
+      ServiceName: !Sub tophat-${pAppName}
+      # ServiceRegistries: 
+      #   - ServiceRegistry
+      TaskDefinition: !Ref topHatTaskDefinition
+      Tags: 
+        - Key: managed-by
+          Value: SAM
+  
+  ecsSocketioService:
+    DependsOn:
+      - httpsListener
+      - redirectListener
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref fargateCluster
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      # Adjust if container takes a while to start up
+      HealthCheckGracePeriodSeconds: 30
+      LoadBalancers: 
+        - ContainerName: socketio
+          ContainerPort: !Ref pSocketioPort
+          TargetGroupArn: !Ref socketioTg
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: !Ref pPrivateSubnetIds
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # ServiceConnectConfiguration: # Allows using Cloud Map to connect services between clusters
+      #   ServiceConnectConfiguration
+      ServiceName: !Sub socketio-${pAppName}
+      # ServiceRegistries: 
+      #   - ServiceRegistry
+      TaskDefinition: !Ref socketioTaskDefinition
+      Tags: 
+        - Key: managed-by
+          Value: SAM
+
+
+
+  ecsMongoService:
+    DependsOn:
+      - httpsListener
+      - redirectListener
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref fargateCluster
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      # Adjust if container takes a while to start up
+      HealthCheckGracePeriodSeconds: 30
+      LoadBalancers: 
+        - ContainerName: mongo
+          ContainerPort: !Ref pMongoPort
+          TargetGroupArn: !Ref mongoTg
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: !Ref pPrivateSubnetIds
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # ServiceConnectConfiguration: # Allows using Cloud Map to connect services between clusters
+      #   ServiceConnectConfiguration
+      ServiceName: !Sub mongo-${pAppName}
+      # ServiceRegistries: 
+      #   - ServiceRegistry
+      TaskDefinition: !Ref mongoTaskDefinition
+      Tags: 
+        - Key: managed-by
+          Value: SAM
+
+
+  ecsRedisService:
+    DependsOn:
+      - httpsListener
+      - redirectListener
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref fargateCluster
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      # Adjust if container takes a while to start up
+      HealthCheckGracePeriodSeconds: 30
+      LoadBalancers: 
+        - ContainerName: redis
+          ContainerPort: !Ref pRedisPort
+          TargetGroupArn: !Ref redisTg
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: !Ref pPrivateSubnetIds
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # ServiceConnectConfiguration: # Allows using Cloud Map to connect services between clusters
+      #   ServiceConnectConfiguration
+      ServiceName: !Sub redis-${pAppName}
+      # ServiceRegistries: 
+      #   - ServiceRegistry
+      TaskDefinition: !Ref redisTaskDefinition
+      Tags: 
+        - Key: managed-by
+          Value: SAM
+
+  ecsMysqlService:
+    DependsOn:
+      - httpsListener
+      - redirectListener
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref fargateCluster
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      # Adjust if container takes a while to start up
+      HealthCheckGracePeriodSeconds: 30
+      LoadBalancers: 
+        - ContainerName: mysql
+          ContainerPort: !Ref pMySQLPort
+          TargetGroupArn: !Ref mysqlTg
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: !Ref pPrivateSubnetIds
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # ServiceConnectConfiguration: # Allows using Cloud Map to connect services between clusters
+      #   ServiceConnectConfiguration
+      ServiceName: !Sub mysql-${pAppName}
+      # ServiceRegistries: 
+      #   - ServiceRegistry
+      TaskDefinition: !Ref mysqlTaskDefinition
+      Tags: 
+        - Key: managed-by
+          Value: SAM
+
+  ecsPostgresService:
+    DependsOn:
+      - httpsListener
+      - redirectListener
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref fargateCluster
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      # Adjust if container takes a while to start up
+      HealthCheckGracePeriodSeconds: 30
+      LoadBalancers: 
+        - ContainerName: postgres
+          ContainerPort: !Ref pPostgresPort
+          TargetGroupArn: !Ref postgresTg
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: !Ref pPrivateSubnetIds
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # ServiceConnectConfiguration: # Allows using Cloud Map to connect services between clusters
+      #   ServiceConnectConfiguration
+      ServiceName: !Sub postgres-${pAppName}
+      # ServiceRegistries: 
+      #   - ServiceRegistry
+      TaskDefinition: !Ref postgresTaskDefinition
+      Tags: 
+        - Key: managed-by
+          Value: SAM
+  
+
+  # ROUTE53 Records
+  route53Records:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneId: !Ref pR53HostedZone # Id of the Hosted Zone created during domain registration
+      RecordSets:
+        # Website
+        - Name: !Sub ${pAppName}.dev.mdsnrdfd.com
+          Type: A
+          AliasTarget:
+            HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID # Loadbalancer Id
+            DNSName: !GetAtt ecsLoadBalancer.DNSName
+        
+        # Tophat
+        - Name: !Sub tophat-${pAppName}.dev.mdsnrdfd.com
+          Type: A
+          AliasTarget:
+            HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID
+            DNSName: !GetAtt ecsLoadBalancer.DNSName
+        
+        # Api Server
+        - Name: !Sub api-${pAppName}.dev.mdsnrdfd.com
+          Type: A
+          AliasTarget:
+            HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID
+            DNSName: !GetAtt ecsLoadBalancer.DNSName
+
+        # mongo
+        - Name: !Sub mongo-${pAppName}.dev.mdsnrdfd.com
+          Type: A
+          AliasTarget:
+            HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID
+            DNSName: !GetAtt ecsLoadBalancer.DNSName
+
+        # redis
+        - Name: !Sub redis-${pAppName}.dev.mdsnrdfd.com
+          Type: A
+          AliasTarget:
+            HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID
+            DNSName: !GetAtt ecsLoadBalancer.DNSName
+
+
+
+
+
+Outputs:
+  endpointUrl:
+    Description: DNS Endpoint for the ECS ALB
+    Value: !GetAtt ecsLoadBalancer.DNSName

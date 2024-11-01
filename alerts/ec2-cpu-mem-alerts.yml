@@ -1,0 +1,110 @@
+Description: >
+  Creates CloudWatch Alarms for CPU and Memory metrics for the specified instance.
+Parameters:
+  # pAutoScalingGroupName:
+  #   Type: String
+  #   Description: Name of the AutoScaling group that manages EC2 instances
+  pPrimaryEmailAddress:
+    Type: String
+    Description: Primary Email address to receive notifications (Required)
+  pSecondaryEmailAddress:
+    Type: String
+    Default: ''
+    Description: Secondary email address to receive notifications (Optional)
+
+  pInstanceId:
+    Type: AWS::EC2::Instance::Id
+    Description: The ID of the EC2 instance to monitor
+
+Conditions:
+  UseSecondaryEmail: !Not [ !Equals [ !Ref pSecondaryEmailAddress, '' ] ]
+
+Resources:
+  AlarmTopic:
+    Type: AWS::SNS::Topic
+    Properties:
+      Subscription:
+        - Protocol: email
+          Endpoint: !Ref pPrimaryEmailAddress
+        
+        - !If 
+          - UseSecondaryEmail
+          - 
+            Protocol: email
+            Endpoint: !Ref pSecondaryEmailAddress
+          - !Ref "AWS::NoValue"
+
+
+  CPUAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Alarm if CPU exceeds 90%
+      Namespace: AWS/EC2
+      MetricName: CPUUtilization
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref pInstanceId
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 90
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - Ref: AlarmTopic
+
+  MemoryAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmDescription: Alarm if Memory exceeds 90%
+      Namespace: CWAgent
+      MetricName: mem_used_percent
+      Dimensions:
+        - Name: InstanceId
+          Value: !Ref pInstanceId
+      Statistic: Average
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 90
+      ComparisonOperator: GreaterThanThreshold
+      AlarmActions:
+        - Ref: AlarmTopic
+
+
+
+
+# Autoscaling Setup (For future use)
+
+  # CPUAlarm:
+  #   Type: "AWS::CloudWatch::Alarm"
+  #   Properties:
+  #     AlarmDescription: "Alarm if CPU exceeds 80%"
+  #     Namespace: "AWS/EC2"
+  #     MetricName: "CPUUtilization"
+  #     Dimensions:
+  #       - Name: "AutoScalingGroupName"
+  #         Value: !Ref pAutoScalingGroupName
+  #     Statistic: "Average"
+  #     Period: 300
+  #     EvaluationPeriods: 1
+  #     Threshold: 30
+  #     ComparisonOperator: "GreaterThanThreshold"
+  #     AlarmActions:
+  #       - Ref: AlarmTopic
+
+  # MemoryAlarm:
+  #   Type: "AWS::CloudWatch::Alarm"
+  #   Properties:
+  #     AlarmDescription: "Alarm if Memory exceeds 80%"
+  #     Namespace: "CWAgent"
+  #     MetricName: "mem_used_percent"
+  #     Dimensions:
+  #       - Name: "AutoScalingGroupName"
+  #         Value: !Ref pAutoScalingGroupName
+  #     Statistic: "Average"
+  #     Period: 300
+  #     EvaluationPeriods: 1
+  #     Threshold: 80
+  #     ComparisonOperator: "GreaterThanThreshold"
+  #     AlarmActions:
+  #       - Ref: AlarmTopic
+

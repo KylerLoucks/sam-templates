@@ -1,0 +1,6 @@
+{
+    "name": "s3events",
+    "version": "1.0.0",
+    "description": "JavaScript implementation of a Lambda function that pushes video data to dynamodb. Triggers when a recording gets put in the mediaConcatBucket"
+  }
+  

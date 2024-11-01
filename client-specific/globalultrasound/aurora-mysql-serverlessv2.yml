@@ -1,0 +1,218 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Creates an Aurora Serverless V2 MySQL cluster. Password is manged by Secrets Manager
+
+Parameters:
+
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the Virtual Private Network (VPC)
+  
+  pPrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description:
+      List of Private SubnetIds in the Virtual Private Cloud (VPC) to use for the Database
+
+  pDBUsername:
+    Type: String
+    Default: master
+    Description: Database Admin Username
+  
+  pDBname:
+    Type: String
+    Default: wordpress
+    Description: Database name
+
+  pBackupRetentionPeriodDays:
+    Type: Number
+    Default: 7
+    Description: Number of days backups are retained. Valid value from 1 to 35
+
+  pAuroraMinACU:
+    Type: Number
+    Default: 0.5
+    Description: Minimum mumber of Aurora Capacity Units (ACUs)
+
+  pAuroraMaxACU:
+    Type: Number
+    Default: 16
+    Description: Maximum mumber of Aurora Capacity Units (ACUs)
+
+  pDeletionProtection:
+    Type: String
+    Description: Enable deletion protection for the aurora database
+    Default: true
+    AllowedValues:
+      - true
+      - false
+
+  pKmsKeyId:
+    Type: String
+    Default: ''
+    Description: (Optional) Customer Managed KMS Key ID
+
+Conditions:
+  CondUseKmsKey: !Not [ !Equals [ !Ref pKmsKeyId, '' ] ]
+
+Resources:
+
+
+  # Security group for Aurora
+  AuroraSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow MySQL/Aurora access
+      VpcId: !Ref pVpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: 0.0.0.0/0 # Replace with VPC Cidr
+      Tags:
+        - Key: Name
+          Value: AuroraMySQL
+
+  # RDS Cluster
+  AuroraCluster:
+    Type: AWS::RDS::DBCluster
+    Properties:
+      Engine: aurora-mysql
+      EngineVersion: 8.0.mysql_aurora.3.07.1
+      EngineMode: provisioned
+      DatabaseName: !Ref pDBname
+      MasterUsername: !Ref pDBUsername
+      ManageMasterUserPassword: true
+      KmsKeyId: !If 
+        - CondUseKmsKey
+        - !Ref pKmsKeyId
+        - !Ref AWS::NoValue
+      StorageEncrypted: !If
+        - CondUseKmsKey
+        - true
+        - false
+      BackupRetentionPeriod: !Ref pBackupRetentionPeriodDays
+      VpcSecurityGroupIds:
+        - !GetAtt AuroraSecurityGroup.GroupId
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      ServerlessV2ScalingConfiguration:
+        MinCapacity: !Ref pAuroraMinACU
+        MaxCapacity: !Ref pAuroraMaxACU
+      DeletionProtection: !Ref pDeletionProtection
+      Tags:
+        - Key: Name
+          Value: Aurora MySQL Serverless
+
+
+  DBProxyRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: rds.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DecryptSecrets
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Sid: DecryptSecrets
+                Effect: Allow
+                Action: kms:Decrypt
+                Resource: arn:aws:kms:*:*:key/*
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub secretsmanager.${AWS::Region}.amazonaws.com
+
+              - Sid: ListSecrets
+                Effect: Allow
+                Action:
+                  - secretsmanager:ListSecrets
+                  - secretsmanager:GetRandomPassword
+                Resource: "*"
+
+              - Sid: GetSecrets
+                Effect: Allow
+                Action:
+                  - secretsmanager:ListSecretVersionIds
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:GetResourcePolicy
+                  - secretsmanager:DescribeSecret
+                Resource: !GetAtt AuroraCluster.MasterUserSecret.SecretArn
+
+  # RDS Proxy
+  DBProxy:
+    Type: AWS::RDS::DBProxy
+    Properties:
+      DebugLogging: true
+      DBProxyName: mysql-proxy
+      EngineFamily: MYSQL
+      IdleClientTimeout: 120
+      RequireTLS: false
+      RoleArn:
+        !GetAtt DBProxyRole.Arn
+      Auth:
+        - AuthScheme: SECRETS
+          SecretArn: !GetAtt AuroraCluster.MasterUserSecret.SecretArn
+          IAMAuth: DISABLED
+      VpcSubnetIds: !Ref pPrivateSubnetIds
+      VpcSecurityGroupIds:
+        - !GetAtt AuroraSecurityGroup.GroupId
+
+  ProxyTargetGroup:
+    Type: AWS::RDS::DBProxyTargetGroup
+    Properties:
+      DBProxyName: !Ref DBProxy
+      DBClusterIdentifiers: [!Ref AuroraCluster]
+      TargetGroupName: default
+      ConnectionPoolConfigurationInfo:
+        MaxConnectionsPercent: 100
+        MaxIdleConnectionsPercent: 50
+        ConnectionBorrowTimeout: 120
+
+  # DB Subnet Group
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for RDS instance
+      SubnetIds: !Ref pPrivateSubnetIds
+
+  AuroraClusterWriterInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBClusterIdentifier: !Ref AuroraCluster
+      DBInstanceClass: db.serverless
+      Engine: aurora-mysql
+      EnablePerformanceInsights: true
+      PerformanceInsightsRetentionPeriod: 7 # Incurs cost if more than 7 days
+      PerformanceInsightsKMSKeyId: !If 
+        - CondUseKmsKey
+        - !Ref pKmsKeyId
+        - !Ref AWS::NoValue
+
+Outputs:
+
+  ClusterProxyEndpoint:
+    Description: The endpoint address of the Aurora Proxy
+    Value: !GetAtt DBProxy.Endpoint
+    Export:
+      Name: !Sub ${AWS::StackName}:RdsProxyEndpoint
+
+  ClusterWriterEndpoint:
+    Description: The endpoint address of the Aurora cluster
+    Value: !GetAtt AuroraCluster.Endpoint.Address
+    Export:
+      Name: !Sub ${AWS::StackName}:RdsWriterAddress
+
+  ClusterReaderEndpoint:
+    Description: The endpoint address of the Aurora cluster
+    Value: !GetAtt AuroraCluster.ReadEndpoint.Address
+    Export:
+      Name: !Sub ${AWS::StackName}:RdsReaderAddress
+  
+  ClusterMasterUserSecretArn:
+    Description: The ARN of the Aurora Clusters user and password secret
+    Value: !GetAtt AuroraCluster.MasterUserSecret.SecretArn
+    Export:
+      Name: !Sub ${AWS::StackName}:RdsSecretArn

@@ -1,0 +1,22 @@
+{
+    "Records": [
+        {
+            "EventSource": "aws:sns",
+            "EventVersion": "1.0",
+            "EventSubscriptionArn": "arn:aws:sns:us-east-1:174743933558:test-events-pipeline:f27a2598-f8a0-4b8c-ab9b-28743d8fc7fb",
+            "Sns": {
+                "Type": "Notification",
+                "MessageId": "bf539192-2070-5a5e-abe1-cec0efb86bf5",
+                "TopicArn": "arn:aws:sns:us-east-1:174743933558:test-events-pipeline",
+                "Subject": null,
+                "Message": "{\"account\":\"174743933558\",\"detailType\":\"CodePipeline Pipeline Execution State Change\",\"region\":\"us-east-1\",\"source\":\"aws.codepipeline\",\"time\":\"2024-09-04T21:13:32Z\",\"notificationRuleArn\":\"arn:aws:codestar-notifications:us-east-1:174743933558:notificationrule/2dc0ddc7e5d6c962af21ada123bc63e8c1fa230c\",\"detail\":{\"pipeline\":\"pr17387-pipeline\",\"execution-id\":\"8b4e6061-b2ad-41a1-94d6-dc6bd092caa3\",\"execution-trigger\":{\"trigger-type\":\"StartPipelineExecution\",\"trigger-detail\":\"arn:aws:sts::174743933558:assumed-role/cloud303-support/kloucks\"},\"start-time\":\"2024-09-04T21:13:32.225Z\",\"state\":\"STARTED\",\"version\":2.0,\"pipeline-execution-attempt\":1.0},\"resources\":[\"arn:aws:codepipeline:us-east-1:174743933558:pr17387-pipeline\"],\"additionalAttributes\":{}}",
+                "Timestamp": "2024-09-04T21:13:44.231Z",
+                "SignatureVersion": "1",
+                "Signature": "nkw+Ok0bByu5cobI/8BMmRRBUqOCM81pee4kj7WHrVYmckY3fifRArxg0d8Th7SisXW4DU3RokJ3sX1eX47wOT1YzzQ51BPNcGDL0rTIop35hz4/MfIe/M3S5boOOaT9WgZq9dJxcBNJ1m8Pxg8Tnsc7k8ekArvc7qqChUHuBuAlyvQC/LTcNrvzTDs6wdBBekrOHTw4+J0ZP6kR4l/ypJjn5xPDul4rxBjxwNlLVh/FBDbIRQ3lPjq9QefUqSfL1WUZgd3PZEc+ceNiHx23s4TniMRHzJhgr/P9bzTeVOVjuyaxNhphWI3Bzgprb7vvpA6YuheKnh6IaOyGbY9cKA==",
+                "SigningCertUrl": "https://sns.us-east-1.amazonaws.com/SimpleNotificationService-60eadc530605d63b8e62a523676ef735.pem",
+                "UnsubscribeUrl": "https://sns.us-east-1.amazonaws.com/?Action=Unsubscribe&SubscriptionArn=arn:aws:sns:us-east-1:174743933558:test-events-pipeline:f27a2598-f8a0-4b8c-ab9b-28743d8fc7fb",
+                "MessageAttributes": {}
+            }
+        }
+    ]
+}

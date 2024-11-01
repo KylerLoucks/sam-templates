@@ -1,0 +1,226 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >
+  Deploys Laravel on ECS Fargate using an existing ECS Cluster and Service Discovery Namespace
+
+Parameters:
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the Virtual Private Network (VPC)
+  pSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: List of Subnet IDs for the ECS tasks
+  pMySQLDBStackName:
+    Type: String
+    Description: Name of the stack exporting the required values
+  pClusterStackName:
+    Type: String
+    Description: Name of the cluster stack exporting the required values
+  pAlbStackName:
+    Type: String
+    Description: The name of the ALB stack.
+  DBUsername:
+    Type: String
+    Description: Username for the MySQL database
+  pCPU:
+    Type: Number
+    Description: The number of CPUs for the instance or service.
+    Default: 256
+  pMemory:
+    Type: Number
+    Description: The number of CPUs for the instance or service.
+    Default: 512
+  pDesiredCount:
+    Type: Number
+    Description: Desired amount of tasks to run on the ECS service.
+    Default: 0
+  pImageVersion:
+    Type: String
+    Description: The version tag of the container image.
+    Default: latest
+  pEcrRepo:
+    Type: String
+    Description: The ECR repository name.
+    Default: gusi-laravel
+
+Resources:
+
+  # Security Group
+  serviceSecurityGroup:
+      Type: AWS::EC2::SecurityGroup
+      Properties:
+        GroupDescription: Allow all traffic from self and ALB Security Group
+        VpcId: !Ref pVpcId
+
+  # Allow everything that has this security group attached
+  serviceSelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt serviceSecurityGroup.GroupId
+      IpProtocol: -1
+      FromPort: -1
+      ToPort: -1
+      SourceSecurityGroupId: !GetAtt serviceSecurityGroup.GroupId
+
+  serviceVpcIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt serviceSecurityGroup.GroupId
+      IpProtocol: -1  # Allows all protocols
+      FromPort: -1    # Allows all ports
+      ToPort: -1      # Allows all ports
+      CidrIp: 10.2.0.0/16
+
+  # IAM Role for ECS Task Execution
+  ecsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: LaravelECSExecutionRole
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/SecretsManagerReadWrite
+
+  taskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: EcsExec
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowEcsExec
+                Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: "*"
+        - PolicyName: CloudWatchLogs
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowCreateLogGroup
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Sid: AllowLogStreams
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/*:*"
+
+  # ECS Task Definition for Laravel
+  laravelTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: laravel-task
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform: 
+        CpuArchitecture: ARM64
+        OperatingSystemFamily: LINUX
+      Cpu: !Ref pCPU
+      Memory: !Ref pMemory
+      ExecutionRoleArn: !GetAtt ecsExecutionRole.Arn
+      TaskRoleArn: !GetAtt  taskRole.Arn
+      ContainerDefinitions:
+        - Name: laravel-container
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${pEcrRepo}:${pImageVersion}
+          Essential: true
+          PortMappings:
+            - ContainerPort: 80
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: laravel
+          Environment:
+            - Name: DB_CONNECTION
+              Value: mysql
+            - Name: DB_HOST
+              Value: !ImportValue 
+                Fn::Sub: ${pMySQLDBStackName}:RdsProxyEndpoint
+            - Name: DB_PORT
+              Value: 3306
+            - Name: DB_DATABASE
+              Value: wordpress
+            - Name: DB_USERNAME
+              Value: !Ref DBUsername
+          Secrets:
+            - Name: DB_PASSWORD
+              ValueFrom: !Join 
+                - ''
+                - - !ImportValue 
+                    Fn::Sub: ${pMySQLDBStackName}:RdsSecretArn
+                  - ':password::'
+
+  # CloudWatch Log Group for the container logs
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/laravel
+      RetentionInDays: 7
+
+  # ECS Service for Laravel
+  laravelService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !ImportValue 
+        Fn::Sub: ${pClusterStackName}:FargateClusterArn
+      ServiceName: laravel-service
+      TaskDefinition: !Ref laravelTaskDefinition
+      LoadBalancers:
+        - ContainerName: laravel-container
+          ContainerPort: 80
+          TargetGroupArn: !Join 
+            - ''
+            - - !ImportValue 
+                Fn::Sub: laravel-tg-${pAlbStackName}
+      DesiredCount: !Ref pDesiredCount
+      EnableExecuteCommand: true
+      EnableECSManagedTags: true
+      LaunchType: FARGATE
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Ref pSubnetIds
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          AssignPublicIp: DISABLED
+      ServiceRegistries:
+        - RegistryArn: !ImportValue 
+            Fn::Sub: ${pClusterStackName}:ServiceDiscoveryServiceArn
+
+Outputs:
+  EcsImageVersion:
+    Description: ECS Image Version
+    Value: !Ref pImageVersion
+    Export:
+      Name: !Sub ${AWS::StackName}:EcsImageVersion
+
+  ECSServiceName:
+    Description: Service Name
+    Value: !Ref laravelService

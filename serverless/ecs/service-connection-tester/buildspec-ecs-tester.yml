@@ -1,0 +1,65 @@
+version: 0.2
+env:
+  git-credential-helper: yes
+  exported-variables:
+    - IMAGE_TAG
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 16
+    commands:
+      - pip3 install --upgrade aws-sam-cli
+  pre_build:
+    commands:
+      - echo Logging into ECR...
+      - $(aws ecr get-login --no-include-email --region $AWS_DEFAULT_REGION)
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - IMAGE_TAG=${COMMIT_HASH:-latest}
+
+      - echo Listing Source Files...
+      # list all files by most recently modified in reverse order
+      - ls -ltra
+
+
+  build:
+    commands:
+      - echo Build started on `date`
+      - echo Building the Docker images...
+      - echo Building Website...
+
+      # ecs tester dockerfile
+      - docker build -f service-connection-tester/docker-flask-frontend/Dockerfile -t $WEBSITE_REPOSITORY_URI:latest service-connection-tester/docker-flask-frontend/
+      - docker tag $WEBSITE_REPOSITORY_URI:latest $REPOSITORY_URI:$IMAGE_TAG
+
+      # prepare nested stack
+      - echo Building ECS Stack...
+      - sam build -t service-connection-tester/ecs-tester-private-ServiceConnect.yml
+
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing Website Docker image...
+      - docker push $WEBSITE_REPOSITORY_URI:latest
+      - docker push $WEBSITE_REPOSITORY_URI:$IMAGE_TAG
+
+      # Deploy ECS
+      - |
+        sam deploy -t ephemeralenv/root.yml \
+          --config-env ephemeral \
+          --parameter-overrides \
+            "pAppName=${APP_NAME} \
+            pVpcId=vpc-09ef4a53e9290ca17 \
+            pPrivateSubnetId1=subnet-01086857935bfcf34 \ 
+            pPrivateSubnetId2=subnet-056e57e04fea05dd5 \
+            pPublicSubnetId1=subnet-0598f465e77230bd5 \
+            pPublicSubnetId2=subnet-0d650820a97fa5ba3 \
+            pR53HostedZoneId=Z0323068C9DQS081P13G \
+            pWebsiteEcrImageUri=${WEBSITE_REPOSITORY_URI}:${IMAGE_TAG} \
+            pACMCertificateArn=arn:aws:acm:us-east-1:174743933558:certificate/07f48ca4-3dcf-4ed7-b4df-147b3412be62" \
+          --stack-name ${APP_NAME}-ephemeral \
+          --tags CleanupDate=$(date -u -d "+10 days" '+%Y-%m-%dT%H:%M:%SZ') \
+          --no-confirm-changeset \
+          --on-failure DELETE
+
+ 

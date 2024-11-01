@@ -1,0 +1,986 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: > 
+  Creates a CodePipeline for Ephemeral Environments. Uses Github V2 Source action, Build ECR Images, and deploy with SAM CLI
+
+
+Parameters:
+
+  pAppName:
+    Type: String
+    Description: Used to name CI/CD resources.
+    Default: ephemeral
+
+  # GitHub Repo
+
+  pRepoOwner:
+    Type: String
+    Description: Owner not username. If the repo owner is an organization, enter organization name.
+    Default: MadisonReed
+
+  pRepoName:
+    Type: String 
+    Default: mr
+
+  pCodestarConnectionArn:
+    Type: String
+    Description: ARN of the CodeStar Connection.
+    Default: arn:aws:codestar-connections:us-east-1:313588322221:connection/e6cec00c-84fd-4370-b355-5291eaa602bc
+
+  pTriggerBranch:
+    Type: String
+    Description: Branch to trigger CodePipeline off of.
+    Default: master
+
+  # CodeBuild
+
+  pCodeBuildComputeType:
+    Type: String
+    Description: CodeBuild Compute Type
+    Default: BUILD_GENERAL1_SMALL
+    AllowedValues:
+      - BUILD_GENERAL1_SMALL
+      - BUILD_GENERAL1_MEDIUM
+      - BUILD_GENERAL1_LARGE
+
+  pCodeBuildImage:
+    Type: String
+    Description: Base image used by CodeBuild
+    Default: aws/codebuild/standard:7.0
+
+  # BUILDSPECPATHS
+  pLabelPRBuildSpecPath:
+    Type: String
+    Description: Path and name for the Buildspec in repo
+    Default: buildspec.yml
+
+  pPilkoBuildSpecPath:
+    Type: String
+    Description: Path and name for the Buildspec in repo
+    Default: buildspec.yml
+
+  pWebsiteBuildSpecPath:
+    Type: String
+    Description: Path and name for the Buildspec in repo
+    Default: buildspec.yml
+
+  pTophatBuildSpecPath:
+    Type: String
+    Description: Path and name for the Buildspec in repo
+    Default: buildspec.yml
+
+  pApiServerBuildSpecPath:
+    Type: String
+    Description: Path and name for the Buildspec in repo
+    Default: buildspec.yml
+
+  pDeployBuildSpecPath:
+    Type: String
+    Description: Path and name for the Buildspec in repo
+    Default: buildspec.yml
+
+  pDeployLambdasBuildSpecPath:
+    Type: String
+    Description: Path and name for the Buildspec in repo
+    Default: buildspec-buildlambdafunctionsv3.yml
+
+  pHostedZoneName:
+    Type: String
+    Description: Route53 Hosted Zone Name
+    Default: dev.mdsnrdfd.com
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterLabels:
+      pAppName:
+        default: Application Name
+      pRepoOwner:
+        default: GitHub Repository Owner
+      pRepoName:
+        default: GitHub Repository Name
+      pCodestarConnectionArn:
+        default: Codestar Connection Arn
+      pTriggerBranch:
+        default: GitHub Trigger Branch
+      pCodeBuildComputeType:
+        default: CodeBuild Compute Type
+      pCodeBuildImage:
+        default: CodeBuild Docker Image
+
+    ParameterGroups:
+      - Label:
+          default: CodePipeline Settings
+        Parameters:
+          - pAppName
+      - Label:
+          default: CodePipeline Source Settings
+        Parameters:
+          - pRepoOwner
+          - pRepoName
+          - pCodestarConnectionArn
+          - pTriggerBranch
+      - Label:
+          default: CodeBuild Settings
+        Parameters:
+          - pCodeBuildComputeType
+          - pCodeBuildImage
+
+Resources:
+
+
+  ecrWebsiteRepo:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub website-${pAppName}
+      EmptyOnDelete: true
+
+  ecrApiServerRepo:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub apiserver-${pAppName}
+      EmptyOnDelete: true
+
+  ecrTophatRepo:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub tophat-${pAppName}
+      EmptyOnDelete: true
+
+  # IAM Role - CodeBuild
+
+  codeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${pAppName}-build-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/*
+        - PolicyName: GitCloneConnection # Required for CODEBUILD_CLONE_REF
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codestar-connections:UseConnection
+                Resource: 
+                  - !Ref pCodestarConnectionArn
+        - PolicyName: S3ArtifactBucket
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                Resource:
+                  - !Sub "arn:aws:s3:::${artifactBucket}"
+                  - !Sub "arn:aws:s3:::${artifactBucket}/*"
+        - PolicyName: s3ReadWrite
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:*
+                Resource:
+                  - "*"
+        - PolicyName: ECR
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:PutLifecyclePolicy
+                  - ecr:PutImageTagMutability
+                  - ecr:PutImageScanningConfiguration
+                  - ecr:BatchGetImage
+                  - ecr:CompleteLayerUpload
+                  - ecr:DescribeImages
+                  - ecr:TagResource
+                  - ecr:ListTagsForResource
+                  - ecr:UploadLayerPart
+                  - ecr:InitiateLayerUpload
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:PutImage
+                  - ecr:GetDownloadUrlForLayer
+                Resource:
+                  - !GetAtt ecrWebsiteRepo.Arn
+                  - !GetAtt ecrApiServerRepo.Arn
+                  - !GetAtt ecrTophatRepo.Arn
+                  - !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/mysql-ephemeral
+                  - !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/mongo-ephemeral
+        - PolicyName: BASE-ECR
+          PolicyDocument: 
+            Version: 2012-10-17 
+            Statement:  
+              - Effect: Allow 
+                Action: 
+                  - ecr:BatchGetImage 
+                  - ecr:DescribeImages  
+                  - ecr:ListTagsForResource 
+                  - ecr:GetDownloadUrlForLayer
+                Resource: 
+                  - !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/base-image
+        - PolicyName: ECR-Token
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+        - PolicyName: ParamStore
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameters
+                Resource: 
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/GITHUB/SSH_KEY"
+                  - !Sub "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/GITHUB/ACCESS_TOKEN"
+              - Effect: Allow # Used for generateSecureConfig script
+                Action:
+                  - ssm:GetParameters*
+                Resource: 
+                  - "*"
+        - PolicyName: SAMDeploy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - 
+                Sid: AllowSAMBucketAccess
+                Effect: Allow
+                Action:
+                  - s3:*
+                Resource: 
+                  - "arn:aws:s3:::aws-sam-cli-managed-default-*/*"
+              - 
+                Sid: IAMRoles
+                Effect: Allow
+                Action:
+                  - iam:*
+                Resource: arn:aws:iam::*:role/*
+              - 
+                Sid: Cloudformation
+                Effect: Allow
+                Action:
+                  - cloudformation:*
+                Resource: "*"
+              -
+                Sid: AllowResourceCreation
+                Effect: Allow
+                Action:
+                  - route53:*
+                  - ecs:*
+                  - ec2:*
+                  - elasticloadbalancing:*
+                  - apigateway:*
+                  - logs:*
+                  - cloudwatch:*
+                  - lambda:*
+                  - events:*
+                  - servicediscovery:*
+                  - acm:*
+                  - application-autoscaling:*
+                  - cloudfront:*
+                Resource: "*"
+
+
+  codeBuildLabelPR:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${pAppName}-label-pr
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: Add Labels to PRs via Github API
+      Environment:
+        ComputeType: !Ref pCodeBuildComputeType
+        Image: !Ref pCodeBuildImage
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: ACCOUNT_ID  
+            Value: !Ref AWS::AccountId
+            Type: PLAINTEXT
+
+          - Name: APP_NAME 
+            Value: !Ref pAppName 
+            Type: PLAINTEXT
+
+          - Name: GITHUB_TOKEN
+            Value: /GITHUB/ACCESS_TOKEN
+            Type: PARAMETER_STORE
+
+
+      ServiceRole: !GetAtt codeBuildServiceRole.Arn
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Ref pLabelPRBuildSpecPath
+      TimeoutInMinutes: 60
+      Cache:
+        Type: LOCAL
+        Modes:
+          - LOCAL_SOURCE_CACHE # Caches .git metadata so subsequent runs only pull change in commits
+
+  codeBuildLabelPRLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/codebuild/${codeBuildLabelPR}"
+      RetentionInDays: 7
+
+
+  codeBuildPilko:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${pAppName}-pilko
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: Lint and approve PR with mr-github-bot
+      Environment:
+        ComputeType: !Ref pCodeBuildComputeType
+        Image: !Ref pCodeBuildImage
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: ACCOUNT_ID  
+            Value: !Ref AWS::AccountId
+            Type: PLAINTEXT
+
+          - Name: APP_NAME 
+            Value: !Ref pAppName 
+            Type: PLAINTEXT
+
+
+      ServiceRole: !GetAtt codeBuildServiceRole.Arn
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Ref pPilkoBuildSpecPath
+      TimeoutInMinutes: 60
+      Cache:
+        Type: LOCAL
+        Modes:
+          - LOCAL_SOURCE_CACHE # Caches .git metadata so subsequent runs only pull change in commits
+
+  codeBuildPilkoLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/codebuild/${codeBuildPilko}"
+      RetentionInDays: 7
+
+  codeBuildDeploy:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${pAppName}-deploy
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: Deploy/Update Ephemeral environment
+      Environment:
+        ComputeType: !Ref pCodeBuildComputeType
+        Image: !Ref pCodeBuildImage
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: ACCOUNT_ID  
+            Value: !Ref AWS::AccountId
+            Type: PLAINTEXT
+
+          - Name: APP_NAME 
+            Value: !Ref pAppName 
+            Type: PLAINTEXT
+
+          - Name: SSH_KEY_FOR_SUBMODULE
+            Value: /GITHUB/SSH_KEY
+            Type: PARAMETER_STORE
+
+          - Name: WEBSITE_REPOSITORY_URI
+            Value: !GetAtt ecrWebsiteRepo.RepositoryUri
+          - Name: TOPHAT_REPOSITORY_URI
+            Value: !GetAtt ecrTophatRepo.RepositoryUri
+          - Name: APISERVER_REPOSITORY_URI
+            Value: !GetAtt ecrApiServerRepo.RepositoryUri
+
+      ServiceRole: !GetAtt codeBuildServiceRole.Arn
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Ref pDeployBuildSpecPath
+      TimeoutInMinutes: 180
+      Cache:
+        Type: LOCAL
+        Modes:
+          - LOCAL_SOURCE_CACHE # Caches .git metadata so subsequent runs only pull change in commits
+
+  codeBuildDeployLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/codebuild/${codeBuildDeploy}"
+      RetentionInDays: 7
+
+  codeBuildTophat:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${pAppName}-tophat
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: Build ECR image for Tophat ECS service
+      Environment:
+        ComputeType: !Ref pCodeBuildComputeType
+        Image: !Ref pCodeBuildImage
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: ACCOUNT_ID  
+            Value: !Ref AWS::AccountId
+            Type: PLAINTEXT
+
+          - Name: BASE_IMAGE_REPO_NAME  
+            Value: base-image
+            Type: PLAINTEXT
+
+          - Name: BASE_IMAGE_TAG
+            Value: latest
+            Type: PLAINTEXT
+
+          - Name: APP_NAME 
+            Value: !Ref pAppName 
+            Type: PLAINTEXT
+
+          - Name: REPOSITORY_URI
+            Value: !GetAtt ecrTophatRepo.RepositoryUri
+
+      ServiceRole: !GetAtt codeBuildServiceRole.Arn
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Ref pTophatBuildSpecPath
+      TimeoutInMinutes: 60
+      Cache:
+        Type: LOCAL
+        Modes:
+          - LOCAL_CUSTOM_CACHE
+          - LOCAL_SOURCE_CACHE # Caches .git metadata so subsequent runs only pull change in commits
+          - LOCAL_DOCKER_LAYER_CACHE
+
+  codeBuildTophatLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/codebuild/${codeBuildTophat}"
+      RetentionInDays: 7
+
+  codeBuildWebsite:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${pAppName}-website
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: Build ECR image for Website ECS service
+      Environment:
+        ComputeType: !Ref pCodeBuildComputeType
+        Image: !Ref pCodeBuildImage
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: ACCOUNT_ID  
+            Value: !Ref AWS::AccountId
+            Type: PLAINTEXT
+
+          - Name: BASE_IMAGE_REPO_NAME  
+            Value: base-image
+            Type: PLAINTEXT
+
+          - Name: BASE_IMAGE_TAG
+            Value: latest
+            Type: PLAINTEXT 
+
+          - Name: APP_NAME 
+            Value: !Ref pAppName 
+            Type: PLAINTEXT
+
+          - Name: REPOSITORY_URI
+            Value: !GetAtt ecrWebsiteRepo.RepositoryUri
+
+      ServiceRole: !GetAtt codeBuildServiceRole.Arn
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Ref pWebsiteBuildSpecPath
+      TimeoutInMinutes: 60
+      Cache:
+        Type: LOCAL
+        Modes:
+          - LOCAL_CUSTOM_CACHE
+          - LOCAL_SOURCE_CACHE # Caches .git metadata so subsequent runs only pull change in commits
+          - LOCAL_DOCKER_LAYER_CACHE
+
+  codeBuildWebsiteLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/codebuild/${codeBuildWebsite}"
+      RetentionInDays: 7
+
+  codeBuildApiServer:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${pAppName}-apiserver
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: Build ECR image for API Server ECS service
+      Environment:
+        ComputeType: !Ref pCodeBuildComputeType
+        Image: !Ref pCodeBuildImage
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: ACCOUNT_ID  
+            Value: !Ref AWS::AccountId
+            Type: PLAINTEXT
+
+          - Name: BASE_IMAGE_REPO_NAME  
+            Value: base-image
+            Type: PLAINTEXT
+
+          - Name: BASE_IMAGE_TAG
+            Value: latest
+            Type: PLAINTEXT 
+
+          - Name: APP_NAME 
+            Value: !Ref pAppName 
+            Type: PLAINTEXT
+
+          - Name: REPOSITORY_URI
+            Value: !GetAtt ecrApiServerRepo.RepositoryUri
+
+      ServiceRole: !GetAtt codeBuildServiceRole.Arn
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Ref pApiServerBuildSpecPath
+      TimeoutInMinutes: 60
+      Cache:
+        Type: LOCAL
+        Modes:
+          - LOCAL_CUSTOM_CACHE
+          - LOCAL_SOURCE_CACHE # Caches .git metadata so subsequent runs only pull change in commits
+          - LOCAL_DOCKER_LAYER_CACHE
+
+  codeBuildApiServerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/codebuild/${codeBuildApiServer}"
+      RetentionInDays: 7
+
+  codeBuildLambdas:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${pAppName}-deploy-lambdas
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: Deploy/Update Lambdas
+      Environment:
+        ComputeType: !Ref pCodeBuildComputeType
+        Image: !Ref pCodeBuildImage
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: ACCOUNT_ID  
+            Value: !Ref AWS::AccountId
+            Type: PLAINTEXT
+
+          # All these envs are required to allow connectivity from Lambdas
+          - Name: REDIS_HOST
+            Value: !Sub redis-ecs.${pAppName}.cloudmap.internal
+          - Name: MONGO_HOST
+            Value: !Sub mongo-ecs.${pAppName}.cloudmap.internal
+          - Name: MYSQL_HOST
+            Value: !Sub mysql-ecs.${pAppName}.cloudmap.internal
+          - Name: MYSQL_PASSWORD
+            Value: root
+          - Name: MYSQL_USER
+            Value: root
+
+          - Name: DOMAIN_NAME
+            Value: !Sub ${pAppName}.${pHostedZoneName}
+          
+          - Name: COLOR_ADVISOR_API_URL
+            Value: !Sub ${pAppName}.coloradvisor.${pHostedZoneName}/coloradvisor/
+
+          # Gulp Lambda config
+          - Name: GULP_LAMBDA_API_ID # Empty API GW (Should be removed at some point)
+            Value: asct374564
+          - Name: GULP_LAMBDA_IAM_ROLE_ARN # Lambda Execution Role ARN
+            Value: !Sub arn:aws:iam::${AWS::AccountId}:role/ConsumerLambdaRole
+          - Name: GULP_LAMBDA_SECURITY_GROUP_ID # SG for Lambdas to be in VPC
+            Value: sg-08d325adcfc900ceb 
+          - Name: GULP_LAMBDA_SUBNET_ID # Private1a Subnet
+            Value: subnet-01086857935bfcf34
+
+      ServiceRole: !GetAtt codeBuildServiceRole.Arn
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Ref pDeployLambdasBuildSpecPath
+      TimeoutInMinutes: 180
+
+  codeBuildDeployLambdasLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/codebuild/${codeBuildLambdas}"
+      RetentionInDays: 7
+      
+      
+  # IAM Role - CodePipeline    
+
+  codePipelineServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${pAppName}-pipeline-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codepipeline.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: s3Artifacts
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                Resource: 
+                  - !Sub "arn:aws:s3:::${artifactBucket}"
+                  - !Sub "arn:aws:s3:::${artifactBucket}/*"
+        - PolicyName: codeBuildTrigger
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codebuild:BatchGetBuilds
+                  - codebuild:StartBuild
+                  - codebuild:BatchGetBuildBatches
+                  - codebuild:StartBuildBatch
+                Resource: 
+                  - !GetAtt codeBuildLabelPR.Arn
+                  - !GetAtt codeBuildPilko.Arn
+                  - !GetAtt codeBuildWebsite.Arn
+                  - !GetAtt codeBuildTophat.Arn
+                  - !GetAtt codeBuildApiServer.Arn
+                  - !GetAtt codeBuildDeploy.Arn
+                  - !GetAtt codeBuildLambdas.Arn
+              - Effect: Allow
+                Action:
+                  - codestar-connections:UseConnection
+                Resource: 
+                  - !Ref pCodestarConnectionArn
+        - PolicyName: ecsUpdate
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:*
+                  - ecr:*
+                Resource:
+                  - "*"
+        - PolicyName: iamPassRole
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: 
+                  - "*"
+          
+
+      
+ # CodePipeline
+
+  artifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${pAppName}-pipeline-artifacts-${AWS::AccountId}-${AWS::Region}
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # Artifact bucket cleanup
+  DeleteObjectStorage:
+    Type: Custom::S3DeleteObjectsLambda
+    Properties:
+      ServiceToken: !GetAtt DeleteS3ObjectsFunction.Arn
+      Bucket: !Ref artifactBucket
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        -
+          PolicyName: S3Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Sid: AllowLogging
+                Effect: Allow
+                Action:
+                  - "logs:CreateLogGroup"
+                  - "logs:CreateLogStream"
+                  - "logs:PutLogEvents"
+                Resource: "*"
+              -
+                Sid: DeleteBucketObjects
+                Effect: Allow
+                Action:
+                  - "s3:ListBucket"
+                  - "s3:ListBucketVersions"
+                  - "s3:GetObject"
+                  - "s3:DeleteObject"
+                  - "s3:DeleteObjectVersion"
+                Resource:
+                  - !Sub "arn:aws:s3:::${artifactBucket}"
+                  - !Sub "arn:aws:s3:::${artifactBucket}/*"
+
+  DeleteS3ObjectsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Deletes objects from buckets provisioned by CloudFormation
+      Handler: index.handler
+      Runtime: python3.9
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: 120
+      Code:
+        ZipFile: |
+          import os 
+          import json
+          import cfnresponse
+          import boto3
+          import logging
+
+          from botocore.exceptions import ClientError
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          s3 = boto3.resource('s3')
+
+          def handler(event, context):
+            logger.info("Received event: %s" % json.dumps(event))
+            bucket = s3.Bucket(event['ResourceProperties']['Bucket'])
+
+            result = cfnresponse.SUCCESS
+
+            try:
+              if event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
+                result = cfnresponse.SUCCESS
+              elif event['RequestType'] == 'Delete':
+                result = delete_objects(bucket)
+            except ClientError as e:
+              logger.error('Error: %s', e)
+              result = cfnresponse.FAILED
+
+            cfnresponse.send(event, context, result, {})
+
+          def delete_objects(bucket):        
+            bucket.object_versions.delete()
+            bucket.objects.all().delete()
+            return cfnresponse.SUCCESS
+            
+  cleanupLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${DeleteS3ObjectsFunction}
+      RetentionInDays: 7
+
+  codePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      ArtifactStore:
+        Location: !Ref artifactBucket
+        Type: S3
+      Name: !Sub ${pAppName}-pipeline
+      RoleArn: !GetAtt codePipelineServiceRole.Arn
+      PipelineType: V2
+      RestartExecutionOnUpdate: false
+      Variables:
+        - Name: PR_ID
+          Description: Pull Request ID (e.g. 123456)
+        - Name: PR_EVENT
+          Description: 'Type of PR event. Valid values: [opened, synchronize, reopened, closed]'
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              Namespace: SourceVariables
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: 1
+              Configuration:
+                FullRepositoryId: !Sub ${pRepoOwner}/${pRepoName}
+                ConnectionArn: !Ref pCodestarConnectionArn
+                BranchName: !Ref pTriggerBranch
+                DetectChanges: false
+                OutputArtifactFormat: CODEBUILD_CLONE_REF # Code Build Git Full Clone
+              OutputArtifacts:
+                - Name: SourceArtifact
+        - Name: Lint
+          Actions:
+            # - Name: PilkoLint
+            #   ActionTypeId:
+            #     Category: Build
+            #     Owner: AWS
+            #     Provider: CodeBuild
+            #     Version: 1
+            #   Configuration:
+            #     ProjectName: !Ref codeBuildPilko
+            #     # Override existing or add additional env vars to the buildproject
+            #     EnvironmentVariables: '[{"name": "PULL_REQUEST_ID", "value": "#{variables.PR_ID}"}, {"name": "PR_EVENT", "value": "#{variables.PR_EVENT}"}]'
+            #   InputArtifacts:
+            #     - Name: SourceArtifact
+            #   OutputArtifacts:
+            #     - Name: BuildArtifactPilko
+            #   RunOrder: 1
+            - Name: MergeConflicts
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              Configuration:
+                ProjectName: !Ref codeBuildLabelPR
+                # Override existing or add additional env vars to the buildproject
+                EnvironmentVariables: '[{"name": "PULL_REQUEST_ID", "value": "#{variables.PR_ID}"}, {"name": "PR_EVENT", "value": "#{variables.PR_EVENT}"}]'
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildArtifactLabelPR
+              RunOrder: 1
+        - Name: Build
+          Actions:
+            - Name: ManualApproval
+              ActionTypeId:
+                Category: Approval
+                Owner: AWS
+                Provider: Manual
+                Version: 1
+              Configuration:
+                CustomData: "Approve ephemeral deployment. Pull Request#: #{variables.PR_ID}"
+                ExternalEntityLink: !Sub "https://github.com/${pRepoOwner}/${pRepoName}/commit/#{SourceVariables.CommitId}"
+              RunOrder: 1
+
+            - Name: BuildTophat
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              Configuration:
+                ProjectName: !Ref codeBuildTophat
+                EnvironmentVariables: '[{"name": "PULL_REQUEST_ID", "value": "#{variables.PR_ID}"}, {"name": "PR_EVENT", "value": "#{variables.PR_EVENT}"}]'
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildArtifactTophat
+              RunOrder: 2
+
+            - Name: BuildApiServer
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              Configuration:
+                ProjectName: !Ref codeBuildApiServer
+                EnvironmentVariables: '[{"name": "PULL_REQUEST_ID", "value": "#{variables.PR_ID}"}, {"name": "PR_EVENT", "value": "#{variables.PR_EVENT}"}]'
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildArtifactApiServer
+              RunOrder: 2
+
+            - Name: BuildWebsite
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              Configuration:
+                ProjectName: !Ref codeBuildWebsite
+                EnvironmentVariables: '[{"name": "PULL_REQUEST_ID", "value": "#{variables.PR_ID}"}, {"name": "PR_EVENT", "value": "#{variables.PR_EVENT}"}]'
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildArtifactWebsite
+              RunOrder: 2
+
+            - Name: DeployECS
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              Configuration:
+                ProjectName: !Ref codeBuildDeploy
+                EnvironmentVariables: '[{"name": "PULL_REQUEST_ID", "value": "#{variables.PR_ID}"}, {"name": "PR_EVENT", "value": "#{variables.PR_EVENT}"}]'
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildArtifact
+              RunOrder: 3
+        - Name: DeployLambdas
+          Actions:
+            - Name: DeployLambdas
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              RunOrder: 1
+              Configuration:
+                ProjectName: !Ref codeBuildLambdas
+                EnvironmentVariables: '[{"name": "PULL_REQUEST_ID", "value": "#{variables.PR_ID}"}, {"name": "PR_EVENT", "value": "#{variables.PR_EVENT}"}]'
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildArtifactLambdas
+
+Outputs:
+
+  Version:
+    Description: Template Version
+    Value: ephemeral-pipeline-1.0

@@ -1,0 +1,195 @@
+
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+
+Parameters:
+  pAlertsEmail:
+    Type: String
+    Default: kloucks@cloud303.io
+    Description: Email to send error alerts to
+
+Resources:
+
+  lambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+
+  lambdaRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      PolicyName: StateMachinePolicy
+      Roles:
+        - !Ref lambdaRole
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Sid: AllowCWLogs
+            Effect: Allow
+            Action:
+              - logs:CreateLogGroup
+              - logs:CreateLogStream
+              - logs:PutLogEvents
+            Resource: "*"
+          - Sid: AllowS3
+            Effect: Allow
+            Action:
+              - s3:*
+            Resource: "*"
+          - Sid: DescribeStateMachines
+            Effect: Allow
+            Action:
+              - states:DescribeStateMachine
+            Resource: 
+              - !GetAtt stateMachine.Arn
+          - Sid: SnsPublish
+            Effect: Allow
+            Action:
+              - sns:Publish
+            Resource: 
+              - !Ref alertSns
+
+
+                
+
+  startLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt lambdaRole.Arn
+      Timeout: 120
+      Environment:
+        Variables:
+          ALERTS_TOPIC_ARN: !GetAtt alertSns.TopicArn
+      Runtime: python3.9
+      Architectures:
+        - x86_64
+      Handler: app.lambda_handler
+      CodeUri: startlambda/
+
+  startLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${startLambda}
+      RetentionInDays: 90
+
+
+  # Error Notifications for when the state machine fails
+  eventLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt lambdaRole.Arn
+      Timeout: 120
+      Environment:
+        Variables:
+          ALERTS_TOPIC_ARN: !GetAtt alertSns.TopicArn
+          AWS_ACCOUNT_ID: !Ref AWS::AccountId
+      Runtime: python3.9
+      Architectures:
+        - x86_64
+      Handler: app.lambda_handler
+      CodeUri: eventlambda/
+      Events:
+        Trigger:
+            Type: CloudWatchEvent
+            Properties:
+              Pattern:
+                source:
+                  - "aws.states"
+                detail-type:
+                  - "Step Functions Execution Status Change"
+                detail:
+                  status:
+                    - "FAILED"
+                  stateMachineArn:
+                    - !GetAtt stateMachine.Arn
+
+
+  eventLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${eventLambda}
+      RetentionInDays: 90
+
+  stateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Definition:
+        StartAt: RunLambdaFunction
+        States:
+          RunLambdaFunction:
+            Type: Task
+            Resource: !GetAtt startLambda.Arn
+            End: true
+      Role: !GetAtt stateMachineExecutionRole.Arn
+      Events:
+        CronSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 8 ? * SAT *)  # Every Saturday @ 8 AM UTC.
+            Enabled: False
+
+  stateMachineExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StateMachineExecutionPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: "*"
+
+
+
+
+  alertSns:
+    Type: AWS::SNS::Topic
+    Properties: 
+      Subscription:
+        - Endpoint: !Ref pAlertsEmail
+          Protocol: email
+
+  alertSnsPolicy:
+    Type: AWS::SNS::TopicPolicy
+    Properties:
+      PolicyDocument:
+        Statement:
+          - Sid: TrustAccountToPublishToTopic
+            Effect: Allow
+            Principal:
+              AWS: "*"
+            Action:
+              - SNS:GetTopicAttributes
+              - SNS:SetTopicAttributes
+              - SNS:AddPermission
+              - SNS:RemovePermission
+              - SNS:DeleteTopic
+              - SNS:Subscribe
+              - SNS:ListSubscriptionsByTopic
+              - SNS:Publish
+              - SNS:Receive
+            Resource: "*"
+            Condition:
+              StringEquals:
+                AWS:SourceOwner: !Ref AWS::AccountId
+      Topics:
+        - Ref: alertSns

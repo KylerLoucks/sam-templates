@@ -1,0 +1,324 @@
+
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  pAppName:
+    Type: String
+    Default: pr1
+    Description: Application Name
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the Virtual Private Network (VPC)
+  pPrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description:
+      List of Private SubnetIds in the Virtual Private Cloud (VPC).
+  # pPublicSubnetIds:
+  #   Type: List<AWS::EC2::Subnet::Id>
+  #   Description:
+  #     List of Public SubnetIds in the Virtual Private Cloud (VPC).
+
+
+Resources:
+
+
+
+  ecsBackendLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/${pAppName}-backend
+      RetentionInDays: 90
+
+  ecsFrontendLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/${pAppName}-frontend
+      RetentionInDays: 90
+
+
+  # SECURITY GROUPS
+  backendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow all traffic from self and ALB Security Group
+      VpcId: !Ref pVpcId
+
+  backendSelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt backendSecurityGroup.GroupId
+      IpProtocol: -1
+      FromPort: -1
+      ToPort: -1
+      SourceSecurityGroupId: !GetAtt backendSecurityGroup.GroupId
+
+  backendFrontendIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt backendSecurityGroup.GroupId
+      IpProtocol: -1
+      FromPort: -1
+      ToPort: -1
+      SourceSecurityGroupId: !Ref frontendSecurityGroup
+
+  frontendSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for ALB allowing HTTP
+      VpcId: !Ref pVpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+
+
+  # ECS task role
+  taskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CloudWatchLogs
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowCreateLogGroup
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Sid: AllowLogStreams
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/*:*"
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject*
+                  - s3:GetBucket*
+                  - s3:List*
+                  - s3:DeleteObject*
+                  - s3:PutObject
+                  - s3:PutObjectLegalHold
+                  - s3:PutObjectRetention
+                  - s3:PutObjectTagging
+                  - s3:PutObjectVersionTagging
+                  - s3:Abort*
+                Resource: "*"
+        
+  taskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      # Allows pulling ECR image and pushing logs to CW
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  frontendTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
+      TaskRoleArn: !GetAtt taskRole.Arn
+      Cpu: 256
+      Memory: 512
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      # EphemeralStorage:
+      #   SizeInGiB: 20
+        
+      ContainerDefinitions:
+        - Name: frontend
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${pAppName}-frontend:latest
+          PortMappings:
+              - ContainerPort: 80
+          Environment:
+            - Name: AWS_ACCOUNT_ID
+              Value: !Ref AWS::AccountId
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ecsFrontendLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+
+  # backendTaskDefinition:
+  #   Type: AWS::ECS::TaskDefinition
+  #   Properties:
+  #     ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
+  #     TaskRoleArn: !GetAtt taskRole.Arn
+  #     Cpu: 256
+  #     Memory: 512
+  #     RequiresCompatibilities:
+  #       - FARGATE
+  #     NetworkMode: awsvpc
+  #     RuntimePlatform:
+  #       CpuArchitecture: X86_64
+  #       OperatingSystemFamily: LINUX
+  #     # EphemeralStorage:
+  #     #   SizeInGiB: 50
+        
+  #     ContainerDefinitions:
+  #       - Name: backend
+  #         Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${pAppName}-backend:latest
+  #         Environment:
+  #           - Name: AWS_ACCOUNT_ID
+  #             Value: !Ref AWS::AccountId
+  #         LogConfiguration:
+  #           LogDriver: awslogs
+  #           Options:
+  #             awslogs-group: !Ref ecsBackendLogGroup
+  #             awslogs-region: !Sub ${AWS::Region}
+  #             awslogs-stream-prefix: ecs
+
+
+  fargateCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${pAppName}-cluster
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+
+
+  ecsTargetGroup:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      HealthCheckIntervalSeconds: 10
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 5
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Name: !Sub ${pAppName}-http
+      Port: 80
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      TargetType: ip
+      VpcId: !Ref pVpcId
+
+ 
+  # Listener to redirect HTTP traffic to HTTPS
+  ecsLoadBalancerHTTPListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties: 
+      DefaultActions: 
+        - TargetGroupArn: !Ref ecsTargetGroup
+          Type: forward
+      LoadBalancerArn: !Ref ecsLoadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  ecsLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      IpAddressType: ipv4
+      Scheme: internet-facing
+      SecurityGroups:
+        - !GetAtt frontendSecurityGroup.GroupId
+      Subnets: !Ref pPrivateSubnetIds
+      Type: application
+
+  ecsFrontendFargateService:
+    DependsOn:
+      - ecsLoadBalancerHTTPListener
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref fargateCluster
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      # Adjust if container takes a while to start up
+      HealthCheckGracePeriodSeconds: 30
+      LoadBalancers: 
+        - ContainerName: frontend
+          ContainerPort: 80
+          TargetGroupArn: !Ref ecsTargetGroup
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+               - !GetAtt backendSecurityGroup.GroupId
+          Subnets: !Ref pPrivateSubnetIds
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # ServiceConnectConfiguration: # Allows using Cloud Map to connect services between clusters
+      #   ServiceConnectConfiguration
+      ServiceName: !Sub ${pAppName}-frontend
+      # ServiceRegistries: 
+      #   - ServiceRegistry
+      TaskDefinition: !Ref frontendTaskDefinition
+      Tags: 
+        - Key: managed-by
+          Value: SAM
+  
+
+
+  # ecsBackendFargateService:
+  #   Type: AWS::ECS::Service
+  #   Properties:
+  #     Cluster: !Ref fargateCluster
+  #     DeploymentController: 
+  #       Type: ECS
+  #     DesiredCount: 1
+  #     EnableECSManagedTags: true
+  #     EnableExecuteCommand: true
+  #     LaunchType: FARGATE
+  #     # LoadBalancers: 
+  #     #   - LoadBalancer
+  #     NetworkConfiguration: 
+  #       AwsvpcConfiguration:
+  #         AssignPublicIp: DISABLED
+  #         SecurityGroups:
+  #              - !Ref backendSecurityGroup
+  #         Subnets: !Ref pPrivateSubnetIds
+  #     PlatformVersion: LATEST
+  #     PropagateTags: SERVICE
+  #     # ServiceConnectConfiguration: # Allows using Cloud Map to connect services between clusters
+  #     #   ServiceConnectConfiguration
+  #     ServiceName: !Sub ${pAppName}-backend
+  #     # ServiceRegistries: 
+  #     #   - ServiceRegistry
+  #     TaskDefinition: !Ref backendTaskDefinition
+  #     Tags: 
+  #       - Key: managed-by
+  #         Value: SAM
+  
+
+Outputs:
+  endpointUrl:
+    Description: DNS Endpoint for the ECS ALB
+    Value: !GetAtt ecsLoadBalancer.DNSName

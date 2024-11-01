@@ -1,0 +1,102 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  pSlackWebhookUrl:
+    Type: String
+    Description: URL For slack Webhook
+    NoEcho: true
+
+  pSlackChannel:
+    Type: String
+    Description: The slack channel to send notifications to
+  
+  pSlackDisplayName:
+    Type: String
+    Description: Name to give the slack webhook user
+    Default: Ephemeral CI/CD Pipeline Alerts
+
+Resources:
+
+  lambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: GetPipelineExecution
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codepipeline:GetPipelineExecution
+                Resource: "*"
+
+  PipelineEventFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Runtime: python3.12
+      CodeUri: ./lambda_src/
+      Timeout: 900
+      LoggingConfig:
+        ApplicationLogLevel: INFO
+        LogFormat: JSON
+      Environment:
+        Variables:
+          ACCOUNT_ID: !Ref AWS::AccountId
+          SLACK_WEBHOOK_URL: !Ref pSlackWebhookUrl
+          SLACK_CHANNEL: !Ref pSlackChannel
+          SLACK_DISPLAY_NAME: !Ref pSlackDisplayName
+          SLACK_DISPLAY_ICON: ":incoming_envelope:"
+          SOURCE_ICON: ":pushpin:"
+          APPROVAL_ICON: ":spiral_note_pad:"
+          BUILD_ICON: ":hammer_and_wrench:"
+          DEPLOY_ICON: ":rocket:"
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - codepipeline:GetPipelineExecution
+              Resource: '*'
+      Events:
+        # The commit_sha doesn't exist until source succeeded event.
+        PipelineEvents:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source:
+                - aws.codepipeline
+              detail-type:
+                - CodePipeline Action Execution State Change
+              detail:
+                pipeline:
+                  - prefix: pr
+                  - suffix: -pipeline
+                state:
+                  - SUCCEEDED
+                  - STARTED
+                  - FAILED
+                  - CANCELED
+                type:
+                  category:
+                    - Source
+                    - Approval
+                    - Build
+                    - Deploy
+
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${PipelineEventFunction}
+      RetentionInDays: 7

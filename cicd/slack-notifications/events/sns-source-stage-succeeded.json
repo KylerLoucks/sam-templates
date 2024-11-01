@@ -1,0 +1,22 @@
+{
+    "Records": [
+        {
+            "EventSource": "aws:sns",
+            "EventVersion": "1.0",
+            "EventSubscriptionArn": "arn:aws:sns:us-east-1:174743933558:test-events-pipeline:f27a2598-f8a0-4b8c-ab9b-28743d8fc7fb",
+            "Sns": {
+                "Type": "Notification",
+                "MessageId": "c7c840be-7441-5415-9138-1fecbb849ada",
+                "TopicArn": "arn:aws:sns:us-east-1:174743933558:test-events-pipeline",
+                "Subject": null,
+                "Message": "{\"account\":\"174743933558\",\"detailType\":\"CodePipeline Stage Execution State Change\",\"region\":\"us-east-1\",\"source\":\"aws.codepipeline\",\"time\":\"2024-09-04T21:13:38Z\",\"notificationRuleArn\":\"arn:aws:codestar-notifications:us-east-1:174743933558:notificationrule/2dc0ddc7e5d6c962af21ada123bc63e8c1fa230c\",\"detail\":{\"pipeline\":\"pr17387-pipeline\",\"execution-id\":\"8b4e6061-b2ad-41a1-94d6-dc6bd092caa3\",\"start-time\":\"2024-09-04T21:13:32.359Z\",\"stage\":\"Source\",\"state\":\"SUCCEEDED\",\"version\":2.0,\"pipeline-execution-attempt\":0.0},\"resources\":[\"arn:aws:codepipeline:us-east-1:174743933558:pr17387-pipeline\"],\"additionalAttributes\":{\"sourceActions\":[]}}",
+                "Timestamp": "2024-09-04T21:13:41.952Z",
+                "SignatureVersion": "1",
+                "Signature": "ojw3dsY3FTjjNofoepk+jxMQvTTxiDZGU27GiHqba6JdqbvMhSd3sUB8vjSGL5sDw4+mm9yDd0tUWfbcyMRpUcxpduIOz05k/YUV1BYMQlmoJ32g2vwhyItlsfFdv0IyChc757GmddZci50euoLlM+h7x7i3F9b4YrSXIHn1Q4mGrDIm2RSC/xx6PI2jG+kPKT92J9zHAcviSvsV8k1MCOnNghWfe9ihTwZcIBTfMLF6/7+arLJtl0VH4Ev+wFXkldTJIYhzLiVhTbhpr4fUgRywADK+0dAUwuiLqOK86YAXEf1CNv6O8IHtBHR5KhRs8Fl4Ye04105Ir9v4iPtOAw==",
+                "SigningCertUrl": "https://sns.us-east-1.amazonaws.com/SimpleNotificationService-60eadc530605d63b8e62a523676ef735.pem",
+                "UnsubscribeUrl": "https://sns.us-east-1.amazonaws.com/?Action=Unsubscribe&SubscriptionArn=arn:aws:sns:us-east-1:174743933558:test-events-pipeline:f27a2598-f8a0-4b8c-ab9b-28743d8fc7fb",
+                "MessageAttributes": {}
+            }
+        }
+    ]
+}

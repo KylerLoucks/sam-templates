@@ -1,0 +1,109 @@
+{
+  "Comment": "A description of my state machine",
+  "StartAt": "CreateDBCluster",
+  "States": {
+    "CreateDBCluster": {
+      "Type": "Task",
+      "Parameters": {
+        "DbClusterIdentifier": "aurora-serverless-ephemeral-import",
+        "Engine": "aurora-mysql",
+        "EngineVersion": "8.0.mysql_aurora.3.04.1",
+        "EngineMode": "provisioned",
+        "ServerlessV2ScalingConfiguration": {
+          "MinCapacity": 0.5,
+          "MaxCapacity": 16
+        },
+        "MasterUsername": "masteruser",
+        "MasterUserPassword": "ephemeralroot",
+        "DbSubnetGroupName": "madisonreed-development-rds-mysql",
+        "VpcSecurityGroupIds": [
+          "sg-0e3b6e63ea5ef0eba"
+        ]
+      },
+      "Resource": "arn:aws:states:::aws-sdk:rds:createDBCluster",
+      "Next": "CreateDBInstance",
+      "ResultPath": "$.response.create_db"
+    },
+    "CreateDBInstance": {
+      "Type": "Task",
+      "Parameters": {
+        "DbInstanceClass": "db.serverless",
+        "DbInstanceIdentifier": "ephemeral-import-writer-instance",
+        "DbClusterIdentifier": "aurora-serverless-ephemeral-import",
+        "Engine": "aurora-mysql"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:rds:createDBInstance",
+      "Next": "DescribeDBClusterEndpoints",
+      "ResultPath": "$.response.create_db_writer"
+    },
+    "DescribeDBClusterEndpoints": {
+      "Type": "Task",
+      "Parameters": {
+        "DbClusterIdentifier": "aurora-serverless-ephemeral-import"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:rds:describeDBClusterEndpoints",
+      "Next": "IsEndpointAvailable?",
+      "ResultPath": "$.response.describe_endpoints"
+    },
+    "IsEndpointAvailable?": {
+      "Type": "Choice",
+      "Choices": [
+        {
+          "Variable": "$.response.describe_endpoints.DbClusterEndpoints[0].Status",
+          "StringMatches": "available",
+          "Next": "GetSnapshotDatePattern"
+        }
+      ],
+      "Default": "WaitForDbEndpointCreation"
+    },
+    "WaitForDbEndpointCreation": {
+      "Type": "Wait",
+      "Seconds": 20,
+      "Next": "DescribeDBClusterEndpoints",
+      "Comment": "Wait until db cluster endpoints are available"
+    },
+    "GetSnapshotDatePattern": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::lambda:invoke",
+      "Parameters": {
+        "Payload.$": "$",
+        "FunctionName": "arn:aws:lambda:us-east-1:174743933558:function:ecs-preOrderFinalizeProducer:$LATEST"
+      },
+      "Retry": [
+        {
+          "ErrorEquals": [
+            "Lambda.ServiceException",
+            "Lambda.AWSLambdaException",
+            "Lambda.SdkClientException",
+            "Lambda.TooManyRequestsException"
+          ],
+          "IntervalSeconds": 1,
+          "MaxAttempts": 3,
+          "BackoffRate": 2
+        }
+      ],
+      "Next": "DeleteWriterInstance",
+      "ResultPath": "$.lambda_date_result"
+    },
+    "DeleteWriterInstance": {
+      "Type": "Task",
+      "Parameters": {
+        "DbInstanceIdentifier": "ephemeral-import-writer-instance"
+      },
+      "Resource": "arn:aws:states:::aws-sdk:rds:deleteDBInstance",
+      "Next": "DeleteDBCluster"
+    },
+    "DeleteDBCluster": {
+      "Type": "Task",
+      "Resource": "arn:aws:states:::aws-sdk:rds:deleteDBCluster",
+      "Parameters": {
+        "DbClusterIdentifier": "aurora-serverless-ephemeral-import",
+        "FinalDbSnapshotIdentifier.$": "States.Format('ephemeral-{}', $.lambda_date_result.datePattern)"
+      },
+      "Next": "EndSuccess"
+    },
+    "EndSuccess": {
+      "Type": "Succeed"
+    }
+  }
+}

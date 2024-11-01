@@ -1,0 +1,209 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: AWS CloudFormation stack deminstrating DRY code standards with AWS Lambda
+
+
+Globals:
+  Function:
+    Timeout: 900
+    MemorySize: 128
+    Tracing: Active
+
+# Parameters:
+#   pVpcId:
+#     Type: AWS::EC2::VPC::Id
+#     Description: ID of the Virtual Private Network (VPC)
+#   pPrivateSubnetId1:
+#     Type: String
+#   pPrivateSubnetId2:
+#     Type: String
+#   pVpcCidr:
+#     Type: String
+#     Default: 10.0.0.0/16
+
+Resources:
+
+
+  # Lambda Security Group
+  # Used to be able to connect to private subnet resources (e.g. RDS, OpenSearch)
+  # LambdaVpcSecurityGroup:
+  #   Type: AWS::EC2::SecurityGroup
+  #   Properties:
+  #     GroupDescription: Security group allowing Lambda connectivity to private VPC resources
+  #     VpcId: !Ref pVpcId
+  #     SecurityGroupIngress:
+  #       - IpProtocol: '-1' # '-1' all protocols
+  #         FromPort: -1
+  #         ToPort: -1
+  #         CidrIp: !Ref pVpcCidr
+  #     SecurityGroupEgress:
+  #       - IpProtocol: '-1' # '-1' all protocols
+  #         FromPort: -1
+  #         ToPort: -1
+  #         CidrIp: 0.0.0.0/0
+  #     Tags: 
+  #       - Key: controlled-by
+  #         Value: !Sub SAM-${AWS::StackName}
+  #       - Key: Name
+  #         Value: Lambda VPC SG
+
+  PythonLayer:
+    Type: AWS::Serverless::LayerVersion
+    Description: Layer that can be used with all Python based Lambda functions
+    Metadata:
+      BuildMethod: python3.10
+      BuildArchitecture: arm64 # arm64 | x86_64
+    Properties:
+      LayerName: common-code-layer
+      Description: DRY code Layer used across Lambda functions
+      ContentUri: layers/awspyutils
+      CompatibleArchitectures:
+        - arm64 # arm64 | x86_64
+      CompatibleRuntimes:
+        - python3.10
+        - python3.9
+
+  LambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: lambda-code/
+      Handler: app.lambda_handler
+      Runtime: python3.10
+      Role: !GetAtt LambdaRole.Arn
+      Architectures: 
+        - arm64 # arm64 | x86_64
+      Layers:
+        - !Ref PythonLayer
+      Environment: 
+        Variables:
+          MY_ENV: Hello World
+      # VpcConfig:
+      #   SubnetIds:
+      #     - !Ref pPrivateSubnetId1
+      #     - !Ref pPrivateSubnetId2
+      #   SecurityGroupIds:
+      #     - !Ref LambdaVpcSecurityGroup
+      Events:
+        SQSEvent:
+          Type: SQS
+          Properties:
+            Enabled: true # set to true when ready to trigger from events
+            Queue: !GetAtt SQSQueue.Arn
+            BatchSize: 1
+
+
+
+
+  LambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${LambdaFunction}
+      RetentionInDays: 90
+
+
+  SQSQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${AWS::StackName}-queue
+      VisibilityTimeout: 900
+      RedrivePolicy:
+        deadLetterTargetArn: !GetAtt DLQueue.Arn
+        maxReceiveCount: 2
+      Tags:
+        - Key: controlled-by
+          Value: !Sub SAM-${AWS::StackName}
+
+  DLQueue:
+    Type: AWS::SQS::Queue
+    Properties:
+      QueueName: !Sub ${AWS::StackName}-dlq
+      VisibilityTimeout: 900
+      Tags:
+        - Key: controlled-by
+          Value: !Sub SAM-${AWS::StackName}
+
+
+
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: XRAYAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                Resource: '*'
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/*}
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject*
+                  - s3:GetBucket*
+                  - s3:List*
+                  - s3:DeleteObject*
+                  - s3:PutObject
+                  - s3:PutObjectLegalHold
+                  - s3:PutObjectRetention
+                  - s3:PutObjectTagging
+                  - s3:PutObjectVersionTagging
+                  - s3:Abort*
+                Resource:
+                  - !Sub arn:aws:s3:::my-bucket
+                  - !Sub arn:aws:s3:::my-bucket/*
+        - PolicyName: SnsPublish
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sns:Publish
+                Resource: '*'
+        - PolicyName: SQS
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - sqs:*
+                Resource: '*'
+        - PolicyName: SSMAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameter
+                Resource:
+                  - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/fwa/FTP_PASSWORD

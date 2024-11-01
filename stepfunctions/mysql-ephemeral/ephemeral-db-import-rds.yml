@@ -1,0 +1,881 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  pUbuntuImageId:
+    Description: "The Amazon Machine Image ID used for the EC2 instance"
+    Type: "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>"
+    Default: /aws/service/canonical/ubuntu/server/20.04/stable/current/amd64/hvm/ebs-gp2/ami-id
+
+  pPrivateSubnet1a:
+    Type: String
+    Default: subnet-01086857935bfcf34
+  
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the Virtual Private Network (VPC)
+    Default: vpc-09ef4a53e9290ca17
+
+  pVpcCidr:
+    Type: String
+    Description: CIDR range of the VPC (e.g. 10.20.0.0/16)
+    Default: 10.20.0.0/16
+
+Resources:
+
+
+  # Run shell or Powershell scripts on multiple EC2 instances
+  SfnRunCommandByTargets:
+      Type: "AWS::SSM::Document"
+      Properties:
+        Content:
+          description: |
+            *This automation document implements an AWS-RunShellScript execution for a step functions waitForCallBack integration pattern. This allows step functions to synchronously call an AWS-RunShellScript.
+            ---
+            # Details
+            This AWS-RunShellScript document wrapper for will execute the necessary step function api calls send_task_success upon successful execution and send_task_failure when errors occur.
+            
+            This document is used to target an array of search criteria. To use InstanceIds filtering please check SfnRunCommandByInstanceIds.
+            
+            The automation consists of three steps to achieve a synchronous call when using (.waitForCallBack) option in step functions.
+            
+            1. **Branch** - checks the Shell parameter value to decide whether to trigger AWS-RunShellScript for Linux or AWS-RunPowerShellScript for Windows
+            2. **RunCommand_Shell**  or **RunCommand_PowerShell** - takes several inputs and executes a RunShellScript or RunPowerShellScript command. Check details tab for more information.
+            3. **SendTaskSuccess** - executed when step 2 is successful and consists of an AWS step function api call (send_task_success) having as input the token passed by the step function
+            4. **SendTaskFailure** - executed when step 2 is aborted or cancelled and consists of an AWS step function api call (send_task_failure) having as input the token passed by the step function and the execution failure error and cause
+            
+            ## Sample step function StartAutomationExecution Task parameters 
+            ```
+            "Parameters": {
+                  "DocumentName": "SfnRunCommandByTargets",
+                  "Parameters": {
+                    "Targets":[{"Key":"InstanceIds","Values":["i-02573cafcfEXAMPLE","i-0471e04240EXAMPLE"]}]
+                    ,
+                    "taskToken.$": "States.Array($$.Task.Token)",
+                    "workingDirectory": [
+                      "/home/ssm-user/"
+                    ],
+                    "Commands": [
+                      "echo \"This is a test running automation waitForTaskToken\" >> automation.log",
+                      "sleep 10"
+                    ],
+              "executionTimeout": [
+                  "10800"
+                ],
+                "deliveryTimeout": [
+                  "30"
+                ],
+                "Shell": [
+                  "Linux"
+                ]
+                  }
+                }
+            ```
+            ## References
+            - Step function service integration patterns [wait for CallBack](https://docs.aws.amazon.com/step-functions/latest/dg/connect-to-resource.html#connect-wait-token)
+            - Step function boto3 api call send_task_success and send_task_failure [reference](https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/stepfunctions.html)
+          schemaVersion: "0.3"
+          assumeRole:
+            Fn::GetAtt:
+              - SSMSyncRole
+              - Arn
+          parameters:
+            Targets:
+              type: "MapList"
+              description: "(Required) An array of search criteria that targets instances using Key-Value pairs that you specify. Example: [{\"Key\":\"InstanceIds\",\"Values\":[\"i-02573cafcfEXAMPLE\",\"i-0471e04240EXAMPLE\"]}]"
+            taskToken:
+              type: "String"
+              description: "(Required) Step Function task token for callback response"
+            Commands:
+              type: "StringList"
+              description: "(Required) Specify a shell script or a command to run."
+            workingDirectory:
+              type: "String"
+              default: ""
+              description: "(Optional) The path to the working directory on your instance."
+            executionTimeout:
+              type: "String"
+              description: "(Optional) The time in seconds for a command to complete before it is considered to have failed. Default is 3600 (1 hour). Maximum is 172800 (48 hours)."
+              default: "3600"
+            deliveryTimeout:
+              type: "Integer"
+              default: 3600
+              description: "(Optional) If this time is reached and the command hasn't already started running, it won't run. Minimum value of 30. Maximum value of 2592000."
+            shell:
+              type: "String"
+              allowedValues:
+                - "Shell"
+                - "PowerShell"
+              description: "The shell script type to decide whether to run AWS-RunShellScript for Linux or AWS-RunPowerShellScript for Windows"
+          mainSteps:
+            - name: "Branch"
+              action: "aws:branch"
+              inputs:
+                Choices:
+                  - NextStep: "RunCommand_Powershell"
+                    Variable: "{{ shell }}"
+                    StringEquals: "PowerShell"
+                Default: "RunCommand_Shell"
+            - name: "RunCommand_Shell"
+              action: "aws:runCommand"
+              inputs:
+                DocumentName: "AWS-RunShellScript"
+                TimeoutSeconds: "{{deliveryTimeout}}"
+                Parameters:
+                  commands: "{{Commands}}"
+                  workingDirectory: "{{workingDirectory}}"
+                  executionTimeout: "{{executionTimeout}}"
+                Targets: "{{ Targets }}"
+              nextStep: "SendTaskSuccess"
+              onFailure: "step:SendTaskFailure"
+              onCancel: "step:SendTaskFailure"
+            - name: "RunCommand_Powershell"
+              action: "aws:runCommand"
+              inputs:
+                DocumentName: "AWS-RunPowerShellScript"
+                TimeoutSeconds: "{{deliveryTimeout}}"
+                Parameters:
+                  commands: "{{Commands}}"
+                  workingDirectory: "{{workingDirectory}}"
+                  executionTimeout: "{{executionTimeout}}"
+                Targets: "{{ Targets }}"
+              nextStep: "SendTaskSuccess"
+              onFailure: "step:SendTaskFailure_PowerShell"
+              onCancel: "step:SendTaskFailure_PowerShell"
+            - name: "SendTaskSuccess"
+              action: "aws:executeAwsApi"
+              inputs:
+                Service: "stepfunctions"
+                Api: "send_task_success"
+                taskToken: "{{ taskToken }}"
+                output: "{}"
+              isEnd: true
+              timeoutSeconds: 50
+            - name: "SendTaskFailure_PowerShell"
+              action: "aws:executeAwsApi"
+              timeoutSeconds: 50
+              isEnd: true
+              inputs:
+                Service: "stepfunctions"
+                cause: "{{ RunCommand_Powershell.OutputPayload }}"
+                Api: "SendTaskFailure"
+                error: "{{ RunCommand_Powershell.Output }}"
+                taskToken: "{{ taskToken }}"
+            - name: "SendTaskFailure"
+              action: "aws:executeAwsApi"
+              inputs:
+                Service: "stepfunctions"
+                Api: "send_task_failure"
+                taskToken: "{{ taskToken }}"
+                error: "Automation document failure"
+                cause: "RunCommand failed, check command execution id {{RunCommand.CommandId}} for more details"
+              timeoutSeconds: 50
+        Name: "SfnRunCommandByTargets"
+        DocumentType: "Automation"
+        TargetType: "/AWS::EC2::Host"
+
+
+
+  # Run Against a single Instance ID
+  SfnRunCommandByInstanceIds:
+    Type: "AWS::SSM::Document"
+    Properties:
+      Content:
+        description: |
+          *This automation document implements an AWS-RunShellScript execution for a step functions waitForCallBack integration pattern. This allows step functions to synchronously call an AWS-RunShellScript.*
+          
+          ---
+          # Details
+          This AWS-RunShellScript document wrapper for will execute the necessary step function api calls send_task_success upon successful execution and send_task_failure when errors occur.
+          
+          This document is used to target a list of InstanceIds. To use target filtering please check SfnRunCommandByTargets.
+          
+          The automation consists of four steps to achieve a synchronous call when using (.waitForCallBack) option in step functions.
+          
+          1. **Branch** - checks the Shell parameter value to decide whether to trigger AWS-RunShellScript for Linux or AWS-RunPowerShellScript for Windows
+          2. **RunCommand_Shell**  or **RunCommand_PowerShell** - takes several inputs and executes a RunShellScript or RunPowerShellScript command. Check details tab for more information.
+          3. **SendTaskSuccess** - executed when step 2 is successful and consists of an AWS step function api call (send_task_success) having as input the token passed by the step function
+          4. **SendTaskFailure** - executed when step 2 is aborted or cancelled and consists of an AWS step function api call (send_task_failure) having as input the token passed by the step function and the execution failure error and cause
+          
+          ## Sample step function StartAutomationExecution Task parameters 
+          ```
+          "Parameters": {
+             "DocumentName": "SfnRunCommandByInstanceIds",
+             "Parameters": {
+                 "InstanceIds.$": "States.Array($.runInstances.Instances[0].InstanceId)",
+                 "taskToken.$": "States.Array($$.Task.Token)",
+                 "workingDirectory": [
+                     "/home/ssm-user/"
+                 ],
+                 "Commands": [
+                    "echo \"This is a test running automation waitForTaskToken\" >> automation.log",
+                     "sleep 10"
+                 ],
+                "executionTimeout": [
+                    "10800"
+                  ],
+                  "deliveryTimeout": [
+                    "30"
+                  ],
+                  "Shell": [
+                    "Linux"
+                  ]
+             }
+          }
+          ```
+          ## References
+          - Step function service integration patterns [wait for CallBack](https://docs.aws.amazon.com/step-functions/latest/dg/connect-to-resource.html#connect-wait-token)
+          - Step function boto3 api call send_task_success and send_task_failure [reference](https://boto3.amazonaws.com/v1/documentation/api/latest/reference/services/stepfunctions.html)
+        schemaVersion: "0.3"
+        assumeRole:
+          Fn::GetAtt:
+            - SSMSyncRole
+            - Arn
+        parameters:
+          InstanceIds:
+            type: "StringList"
+            description: "(Required) The IDs of the instances where you want to run the command."
+          taskToken:
+            type: "String"
+            description: "(Required) Step Function task token for callback response."
+          Commands:
+            type: "StringList"
+            description: "(Required) Specify a shell script or a command to run."
+          workingDirectory:
+            type: "String"
+            default: ""
+            description: "(Optional) The path to the working directory on your instance."
+          executionTimeout:
+            type: "String"
+            description: "(Optional) The time in seconds for a command to complete before it is considered to have failed. Default is 3600 (1 hour). Maximum is 172800 (48 hours)."
+            default: "3600"
+          deliveryTimeout:
+            type: "Integer"
+            default: 3600
+            description: "(Optional) If this time is reached and the command hasn't already started running, it won't run. Minimum value of 30. Maximum value of 2592000."
+          shell:
+            type: "String"
+            allowedValues:
+              - "Shell"
+              - "PowerShell"
+            default: "Linux"
+            description: "(Required) The instances Shell to decide whether to run AWS-RunShellScript for Linux or AWS-RunPowerShellScript for Windows"
+        mainSteps:
+          - name: "Branch"
+            action: "aws:branch"
+            inputs:
+              Choices:
+                - NextStep: "RunCommand_Powershell"
+                  Variable: "{{ shell }}"
+                  StringEquals: "PowerShell"
+              Default: "RunCommand_Shell"
+          - name: "RunCommand_Shell"
+            action: "aws:runCommand"
+            nextStep: "SendTaskSuccess"
+            isEnd: false
+            onCancel: "step:SendTaskFailure"
+            onFailure: "step:SendTaskFailure"
+            inputs:
+              Parameters:
+                workingDirectory: "{{workingDirectory}}"
+                commands: "{{Commands}}"
+                executionTimeout: "{{executionTimeout}}"
+              InstanceIds: "{{InstanceIds}}"
+              DocumentName: "AWS-RunShellScript"
+              TimeoutSeconds: "{{deliveryTimeout}}"
+          - name: "RunCommand_Powershell"
+            action: "aws:runCommand"
+            nextStep: "SendTaskSuccess"
+            isEnd: false
+            onCancel: "step:SendTaskFailure_PowerShell"
+            onFailure: "step:SendTaskFailure_PowerShell"
+            inputs:
+              TimeoutSeconds: "{{deliveryTimeout}}"
+              InstanceIds: "{{InstanceIds}}"
+              DocumentName: "AWS-RunPowerShellScript"
+              Parameters:
+                workingDirectory: "{{workingDirectory}}"
+                commands:
+                  - "{{ Commands }}"
+                executionTimeout: "{{executionTimeout}}"
+          - name: "SendTaskSuccess"
+            action: "aws:executeAwsApi"
+            timeoutSeconds: 50
+            isEnd: true
+            inputs:
+              output: "{}"
+              Service: "stepfunctions"
+              Api: "SendTaskSuccess"
+              taskToken: "{{ taskToken }}"
+          - name: "SendTaskFailure"
+            action: "aws:executeAwsApi"
+            timeoutSeconds: 50
+            isEnd: true
+            inputs:
+              Service: "stepfunctions"
+              cause: "{{RunCommand_Shell.OutputPayload}}"
+              Api: "SendTaskFailure"
+              error: "Automation document failure"
+              taskToken: "{{ taskToken }}"
+          - name: "SendTaskFailure_PowerShell"
+            action: "aws:executeAwsApi"
+            timeoutSeconds: 50
+            isEnd: true
+            inputs:
+              Service: "stepfunctions"
+              cause: "{{ RunCommand_Powershell.OutputPayload }}"
+              Api: "SendTaskFailure"
+              error: "{{ RunCommand_Powershell.Output }}"
+              taskToken: "{{ taskToken }}"
+      Name: "SfnRunCommandByInstanceIds"
+      DocumentType: "Automation"
+      TargetType: "/AWS::EC2::Host"
+
+  # Role used for the RunCommand to assume. The Run command will handle the states:SendTaskSuccess API call
+  SSMSyncRole:
+    Type: "AWS::IAM::Role"
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Effect: "Allow"
+            Principal:
+              Service: "ssm.amazonaws.com"
+            Action: "sts:AssumeRole"
+        Version: "2012-10-17"
+      RoleName: "sync-run-shell-script-role"
+      Policies:
+        - PolicyName: "sync-run-shell-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: "Allow"
+                Action: "ssm:DescribeInstanceInformation"
+                Resource: "*"
+              - Effect: "Allow"
+                Action: "ssm:SendCommand"
+                Resource:
+                  - Fn::Sub: "arn:aws:ec2:${AWS::Region}:${AWS::AccountId}:instance/*"
+                  - Fn::Sub: "arn:aws:ssm:${AWS::Region}::document/AWS-RunShellScript"
+                  - Fn::Sub: "arn:aws:ssm:${AWS::Region}::document/AWS-RunPowerShellScript"
+              - Effect: "Allow"
+                Action:
+                  - "ssm:ListCommands"
+                  - "ssm:ListCommandInvocations"
+                Resource:
+                  - Fn::Sub: "arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:*"
+              - Effect: "Allow"
+                Action:
+                  - "states:SendTaskFailure"
+                  - "states:SendTaskSuccess"
+                Resource:
+                  Fn::Sub: "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:*"
+
+
+
+  lambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+      Policies:
+        - PolicyName: XRAYAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xxray:PutTelemetryRecords
+                Resource: "*"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+
+
+  getDatePatternLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt lambdaRole.Arn
+      Timeout: 120
+      MemorySize: 128
+      Runtime: python3.10
+      Architectures:
+        - x86_64
+      Handler: app.lambda_handler
+      CodeUri: lambdas/getDatePattern/
+
+  datePatternLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${getDatePatternLambda}
+      RetentionInDays: 30
+
+
+  runInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InstancePolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:*
+                  - logs:*
+                  - s3:*
+                Resource: "*"
+              - Sid: GetSecrets
+                Action: secretsmanager:GetSecretValue
+                Effect: Allow
+                Resource: arn:aws:secretsmanager:*:*:secret:*
+      ManagedPolicyArns:
+        # This managed policy allows us to connect to the instance using SSM and use SSM Run commands
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2RoleforSSM
+
+  runInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref runInstanceRole
+
+  # RDS Aurora SG. Use this for both EC2 and Serverless Cluster
+  auroraSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for MYSQL/Aurora
+      VpcId: !Ref pVpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: !Ref pVpcCidr
+      Tags:
+        - Key: Name
+          Value: EphemeralAuroraMySQLImport
+
+  auroraMysqlServerlessImportStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Definition:
+        StartAt: CreateDBCluster
+        States:
+          # Create Aurora Serverless V2 MySQL Cluster
+          CreateDBCluster:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:rds:createDBCluster
+            Parameters:
+              DbClusterIdentifier: aurora-serverless-ephemeral-import
+              Engine: aurora-mysql
+              EngineVersion: 8.0.mysql_aurora.3.04.1
+              EngineMode: provisioned
+              StorageEncrypted: true
+              ServerlessV2ScalingConfiguration:
+                MinCapacity: 0.5
+                MaxCapacity: 16
+              MasterUsername: masteruser
+              ManageMasterUserPassword: true
+              # MasterUserPassword: ephemeralroot # Can we specify the password securely?
+              DbSubnetGroupName: madisonreed-development-rds-mysql # Change this to a subnet group created by this IaC
+              VpcSecurityGroupIds:
+                - !GetAtt auroraSecurityGroup.GroupId
+            
+            # Create the Writer Instance next so we can have the DB URL endpoints active.
+            Next: CreateDBInstance
+            ResultPath: $.response.create_db
+
+          CreateDBInstance:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:rds:createDBInstance
+            Parameters:
+              DbInstanceClass: db.serverless
+              DbInstanceIdentifier: ephemeral-import-writer-instance
+              DbClusterIdentifier: aurora-serverless-ephemeral-import
+              Engine: aurora-mysql
+            
+            # Move to Choice loop to check if the Endpoint is available before doing anything else
+            Next: DescribeDBClusterWriterInstance
+            ResultPath: $.response.create_db_writer
+          
+          # Check if Writer instance is available
+          DescribeDBClusterWriterInstance:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:rds:describeDBInstances
+            Parameters:
+              DbInstanceIdentifier: ephemeral-import-writer-instance
+            Next: IsEndpointAvailable?
+            ResultPath: $.response.describe_writer_instance
+          
+          IsEndpointAvailable?:
+            Type: Choice
+            Choices:
+              - Variable: $.response.describe_writer_instance.DbInstances[0].DbInstanceStatus
+                StringMatches: available
+                Next: RunInstances
+            Default: WaitForDbEndpointCreation
+          WaitForDbEndpointCreation:
+            Type: Wait
+            Seconds: 30
+            Next: DescribeDBClusterWriterInstance
+            Comment: Wait until db cluster endpoints are available
+
+          # Run Import DB EC2 Instance
+          RunInstances:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:ec2:runInstances
+            Parameters:
+              ImageId: !Ref pUbuntuImageId
+              InstanceType: r5.xlarge
+              IamInstanceProfile: 
+                Arn: !GetAtt runInstanceProfile.Arn
+              SecurityGroupIds:
+                - !GetAtt auroraSecurityGroup.GroupId
+              SubnetId: !Ref pPrivateSubnet1a
+              MaxCount: 1
+              MinCount: 1
+              BlockDeviceMappings:
+                - DeviceName: /dev/sda1
+                  Ebs:
+                    VolumeSize: 120
+                    DeleteOnTermination: true
+                    VolumeType: gp3
+                    Iops: 3000
+              InstanceInitiatedShutdownBehavior: terminate # Set this so we can terminate the instance using shutdown shell cmd
+            Next: WaitForInstanceInitialization
+            ResultPath: $.runInstances
+
+          WaitForInstanceInitialization:
+            Type: Wait
+            Seconds: 60  # Adjust the wait time as needed
+            Next: CheckInstanceStatus
+
+          # Make sure the instance is fully initialized before running scripts on it.
+          CheckInstanceStatus:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:ec2:describeInstanceStatus
+            Parameters:
+              InstanceIds.$: States.Array($.runInstances.Instances[0].InstanceId)
+              IncludeAllInstances: true
+            Next: IsSystemStatusOk
+            ResultPath: $.instanceStatus
+
+          IsSystemStatusOk:
+            Type: Choice
+            Choices:
+              - Variable: $.instanceStatus.InstanceStatuses[0].SystemStatus.Status
+                StringEquals: ok
+                Next: RunImportInstanceScript
+            Default: WaitForInstanceInitialization  # If not ok, wait again
+
+          # Run Script on EC2 instance(s)
+          RunImportInstanceScript:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:ssm:startAutomationExecution.waitForTaskToken
+            Parameters:
+              DocumentName: SfnRunCommandByInstanceIds
+              Parameters:
+                InstanceIds.$: States.Array($.runInstances.Instances[0].InstanceId)
+                taskToken.$: States.Array($$.Task.Token)
+                workingDirectory:
+                  - /home/ubuntu/ # Use directory that is created at instance launch, otherwise you'll get a `no such file or directory` error
+
+                # Need to use States.Array so we can pass state input with Commands.$
+                Commands.$: |
+                  States.Array(
+                    'LOG_FILE=/home/ubuntu/automation.log', 
+                    States.Format('DB_USER={}', $.response.create_db.DbCluster.MasterUsername),
+                    States.Format('DB_SECRET_ARN={}', $.response.create_db.DbCluster.MasterUserSecret.SecretArn),
+                    States.Format('DB_ENDPOINT={}', $.response.create_db.DbCluster.Endpoint),
+                    'apt install -y mysql-client-core-8.0 >> $LOG_FILE 2>&1',
+                    'apt install -y unzip >> $LOG_FILE 2>&1',
+                    'apt install -y jq >> $LOG_FILE 2>&1',
+                    'curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"',
+                    'unzip awscliv2.zip',
+                    './aws/install',
+                    'DB_PASSWORD=$(aws secretsmanager get-secret-value --secret-id $DB_SECRET_ARN --query SecretString --output text | jq -r .password)',
+                    'DATABASES="inventory magento tophat"',
+                    'for DB_NAME in $DATABASES; do',
+                    '  echo "Creating database $DB_NAME" >> $LOG_FILE',
+                    '  if mysql -h $DB_ENDPOINT -u $DB_USER -p$DB_PASSWORD -e "CREATE DATABASE IF NOT EXISTS $DB_NAME;"; then',
+                    '    echo "Database $DB_NAME created successfully." >> $LOG_FILE',
+                    '  else',
+                    '  echo "Error creating database $DB_NAME Exiting..." >> $LOG_FILE',
+                    '  exit 1',
+                    '  fi',
+                    'done',
+                    'echo "All Databases created successfully, proceeding with import" >> $LOG_FILE',
+                    'S3_FILE=$(aws s3api list-objects-v2 --bucket db-prod-sanitized-backup --query "reverse(sort_by(Contents, &LastModified))[0].Key" --output text)',
+                    'echo "Copying $S3_FILE from dump bucket..." >> $LOG_FILE',
+                    'aws s3 cp s3://db-prod-sanitized-backup/$S3_FILE dbs_mysql.tar',
+                    'tar -xf dbs_mysql.tar',
+                    'mv *.dmp dump.sql',
+                    'if mysql -h $DB_ENDPOINT -u $DB_USER -p$DB_PASSWORD < dump.sql; then',
+                    '  echo "Database import completed successfully." >> $LOG_FILE',
+                    'else',
+                    '  echo "Error during database import. Exiting..." >> $LOG_FILE',
+                    '  exit 1',
+                    'fi',
+                    'echo "Script completed." >> $LOG_FILE'
+                  )
+                executionTimeout:
+                  - "36000"
+                deliveryTimeout:
+                  - "30"
+                shell:
+                  - Shell  # Execute Linux Shell commands
+            Next: TerminateInstance
+            ResultPath: $.runImportInstanceScript
+
+          TerminateInstance:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:ec2:terminateInstances
+            Parameters:
+              InstanceIds.$: States.Array($.runInstances.Instances[0].InstanceId)
+            Next: GetSnapshotDatePattern
+            ResultPath: null
+
+          # Call lambda function to get snapshot name date pattern suffix
+          GetSnapshotDatePattern:
+            Type: Task
+            Resource: arn:aws:states:::lambda:invoke
+            Parameters:
+              Payload.$: $
+              FunctionName: !Ref getDatePatternLambda
+            Retry:
+              - ErrorEquals:
+                  - Lambda.ServiceException
+                  - Lambda.AWSLambdaException
+                  - Lambda.SdkClientException
+                  - Lambda.TooManyRequestsException
+                IntervalSeconds: 1
+                MaxAttempts: 3
+                BackoffRate: 2
+            Next: CreateDBClusterSnapshot
+            ResultPath: $.lambda_date_result
+
+          CreateDBClusterSnapshot:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:rds:createDBClusterSnapshot
+            Parameters:
+              DbClusterSnapshotIdentifier.$: States.Format('ephemeral-{}', $.lambda_date_result.Payload.datePattern)
+              DbClusterIdentifier: aurora-serverless-ephemeral-import
+            Next: WaitForSnapshotCreation
+            ResultPath: $.snapshotResult
+
+          WaitForSnapshotCreation:
+            Type: Wait
+            Seconds: 30
+            Next: CheckClusterSnapshotStatus
+
+          # Describe the cluster snapshot to see if its in the available state
+          CheckClusterSnapshotStatus:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:rds:describeDBClusterSnapshots
+            Parameters:
+              DbClusterSnapshotIdentifier.$: States.Format('ephemeral-{}', $.lambda_date_result.Payload.datePattern)
+              DbClusterIdentifier: aurora-serverless-ephemeral-import
+            Next: IsSnapshotAvailable
+            ResultPath: $.snapshotStatusResult
+
+          # If snapshot is available, move to delete the cluster
+          IsSnapshotAvailable:
+            Type: Choice
+            Choices:
+              - Variable: $.snapshotStatusResult.DbClusterSnapshots[0].Status
+                StringEquals: available
+                Next: DeleteWriterInstance
+            Default: WaitForSnapshotCreation
+          
+          # Delete the writer instance so we can delete the cluster
+          DeleteWriterInstance:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:rds:deleteDBInstance
+            Parameters:
+              DbInstanceIdentifier: ephemeral-import-writer-instance
+            Next: DeleteDBCluster
+            ResultPath: null # Discard the results from this step
+          
+          # Delete the Aurora Cluster and take a final snapshot beforehand
+          DeleteDBCluster:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:rds:deleteDBCluster
+            Parameters:
+              DbClusterIdentifier: aurora-serverless-ephemeral-import
+              SkipFinalSnapshot: true
+
+              # Can't have the cluster auto delete. This param value is not supported by Step Functions.
+              # Using this gives the error: [The field "FinalDbSnapshotIdentifier" is not supported by Step Functions]
+              # FinalDbSnapshotIdentifier.$: States.Format('ephemeral-{}', $.lambda_date_result.Payload.datePattern)
+            Next: EndSuccess
+          
+          EndSuccess:
+            Type: Succeed
+
+      Role: !GetAtt stateMachineExecutionRole.Arn
+      Events:
+        CronSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 8 1 1 ? *)
+            Enabled: False
+
+
+  stateMachineExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StateMachineExecutionPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                Resource: "*"
+              - Sid: RDSApiCalls
+                Effect: Allow
+                Action:
+                  - rds:DescribeDBClusters
+                  - rds:DescribeDBInstances
+                  - rds:CreateDBCluster
+                  - rds:CreateDBInstance
+                  - rds:CreateDBClusterSnapshot
+                  - rds:DescribeDBClusterSnapshots
+                  - secretsmanager:Create*
+                Resource: "*"
+              - Sid: DeleteRDSCluster
+                Effect: Allow
+                Action:
+                  - rds:DeleteDBCluster
+                  - rds:DeleteDBInstance
+                Resource: "*" # Make this more fine grained
+              - Sid: KMS
+                Effect: Allow
+                Action:
+                  - kms:Encrypt*
+                  - kms:Decrypt*
+                  - kms:DescribeKey
+                Resource: "*"
+              - Sid: RunInstance
+                Effect: Allow
+                Action:
+                  - ec2:RunInstances
+                  - ec2:TerminateInstances
+                  - ec2:DescribeInstance*
+                Resource: "*"
+              # Permissions to allow running an SSM automation document on EC2 instance
+              - Sid: StartAutomation
+                Effect: Allow
+                Action:
+                  - ssm:StartAutomationExecution
+                Resource: "*"
+              # Allows Step functions to pass the IAM role to EC2 instances
+              - Sid: PassInstanceRole 
+                Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: !GetAtt runInstanceRole.Arn
+
+
+              # - Effect: Allow
+              #   Action:
+              #     - ecs:RunTask
+              #     - ecs:DescribeTasks
+              #     - ecs:DescribeTaskDefinition
+              #   Resource: "*"
+              #     - !GetAtt fargateCluster.Arn
+              #     - !Ref taskDefinition
+              # - Sid: PassEcsExecutionRole
+              #   Effect: Allow
+              #   Action:
+              #     - iam:PassRole
+              #   Resource: !GetAtt taskExecutionRole.Arn
+
+
+
+# Use Step Functions to RunInstances
+# use the instance ID from the output as input into the next step (ssm:startAutomationExecution.waitForTaskToken)
+# https://github.com/aws-samples/amazon-stepfunctions-ssm-waitfortasktoken/tree/main <- Use this cloudformation to make the SSM document
+
+# CreateDBCluster output:
+# DbCluster.Endpoint   | "aurora-serverless-ephemeral-import.cluster-cizses2inrh6.us-east-1.rds.amazonaws.com"
+# "create_db": {
+#   "DbCluster": {
+#     "AllocatedStorage": 1,
+#     "AssociatedRoles": [],
+#     "AutoMinorVersionUpgrade": true,
+#     "AvailabilityZones": [
+#       "us-east-1c",
+#       "us-east-1a",
+#       "us-east-1b"
+#     ],
+#     "BackupRetentionPeriod": 1,
+#     "ClusterCreateTime": "2024-06-02T18:36:26.974Z",
+#     "CopyTagsToSnapshot": false,
+#     "CrossAccountClone": false,
+#     "DbClusterArn": "arn:aws:rds:us-east-1:174743933558:cluster:aurora-serverless-ephemeral-import",
+#     "DbClusterIdentifier": "aurora-serverless-ephemeral-import",
+#     "DbClusterMembers": [],
+#     "DbClusterParameterGroup": "default.aurora-mysql8.0",
+#     "DbClusterResourceId": "cluster-6HB2ANPSUV7IIKJA42F5FH7O7E",
+#     "DbSubnetGroup": "madisonreed-development-rds-mysql",
+#     "DeletionProtection": false,
+#     "DomainMemberships": [],
+#     "Endpoint": "aurora-serverless-ephemeral-import.cluster-cizses2inrh6.us-east-1.rds.amazonaws.com",
+#     "Engine": "aurora-mysql",
+#     "EngineMode": "provisioned",
+#     "EngineVersion": "8.0.mysql_aurora.3.04.1",
+#     "HostedZoneId": "Z2R2ITUGPM61AM",
+#     "HttpEndpointEnabled": false,
+#     "IamDatabaseAuthenticationEnabled": false,
+#     "KmsKeyId": "arn:aws:kms:us-east-1:174743933558:key/89578399-7b83-405f-ad1b-9a744d3e2507",
+#     "LocalWriteForwardingStatus": "disabled",
+#     "MasterUserSecret": {
+#       "KmsKeyId": "arn:aws:kms:us-east-1:174743933558:key/ebf1291e-248e-4e38-b2e7-420b691183d5",
+#       "SecretArn": "arn:aws:secretsmanager:us-east-1:174743933558:secret:rds!cluster-6797630e-21fe-423d-8101-0ae8ac1c9040-4ihPo7",
+#       "SecretStatus": "creating"
+#     },
+#     "MasterUsername": "masteruser",
+#     "MultiAZ": false,
+#     "NetworkType": "IPV4",
+#     "Port": 3306,
+#     "PreferredBackupWindow": "07:26-07:56",
+#     "PreferredMaintenanceWindow": "tue:08:49-tue:09:19",
+#     "ReadReplicaIdentifiers": [],
+#     "ReaderEndpoint": "aurora-serverless-ephemeral-import.cluster-ro-cizses2inrh6.us-east-1.rds.amazonaws.com",
+#     "ServerlessV2ScalingConfiguration": {
+#       "MaxCapacity": 16,
+#       "MinCapacity": 0.5
+#     },
+#     "Status": "creating",
+#     "StorageEncrypted": true,
+#     "TagList": [],
+#     "VpcSecurityGroups": [
+#       {
+#         "Status": "active",
+#         "VpcSecurityGroupId": "sg-0e3b6e63ea5ef0eba"
+#       }
+#     ]
+#   }
+# }

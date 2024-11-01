@@ -1,0 +1,87 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Creates an Aurora Serverless V2 MySQL cluster from Snapshots. Password is manged by Secrets Manager
+
+Parameters:
+  pAppName:
+    Type: String
+    Default: pr1
+    Description: Name to give the application
+
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the Virtual Private Network (VPC)
+    Default: vpc-09ef4a53e9290ca17
+
+  pVpcCidr:
+    Type: String
+    Default: 10.20.0.0/16
+    Description: CIDR of the VPC
+
+  pSnapshotIdentifier:
+    Type: String
+    Description: Name of Aurora Serverless MySQL Manual Snapshot to use during deployment
+    Default: ephemeral-20240605
+
+Resources:
+
+
+  # RDS Aurora SG
+  AuroraSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for MYSQL/Aurora
+      VpcId: !Ref pVpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 3306
+          ToPort: 3306
+          CidrIp: !Ref pVpcCidr
+      Tags:
+        - Key: Name
+          Value: !Sub ${pAppName}EphemeralAuroraMySQL
+
+  # Reference: https://github.com/widdix/aws-cf-templates/blob/master/state/rds-aurora-serverless.yaml
+  AuroraCluster:
+    Type: AWS::RDS::DBCluster
+    UpdateReplacePolicy: Delete
+    Properties:
+      Engine: aurora-mysql
+      EngineVersion: 8.0.mysql_aurora.3.05.2
+      EngineMode: provisioned
+      SnapshotIdentifier: !Ref pSnapshotIdentifier # Can't use with masteruser and password specified...
+
+      # Specify this when using SnapshotIdentifier so the password is no longer managed at the snapshot level
+      ManageMasterUserPassword: true
+
+      #MasterUsername: !Sub '{{resolve:secretsmanager:arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:rds!db-9a890b61-a8d0-4dd2-be50-2821f8752698-rb2djF:SecretString:username}}'
+      #MasterUserPassword: !Sub '{{resolve:secretsmanager:arn:${AWS::Partition}:secretsmanager:${AWS::Region}:${AWS::AccountId}:secret:rds!db-9a890b61-a8d0-4dd2-be50-2821f8752698-rb2djF:SecretString:password}}'
+      DBSubnetGroupName: madisonreed-development-rds-mysql
+      VpcSecurityGroupIds:
+        - !GetAtt AuroraSecurityGroup.GroupId
+      Tags:
+        - Key: Name
+          Value: Ephemeral Aurora MySQL Serverless
+      ServerlessV2ScalingConfiguration:
+        MinCapacity: 0.5
+        MaxCapacity: 16
+
+  AuroraClusterWriterInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      DBClusterIdentifier: !Ref AuroraCluster
+      DBInstanceClass: db.serverless
+      Engine: aurora-mysql
+
+
+Outputs:
+  ClusterWriterEndpoint:
+    Description: The endpoint address of the Aurora cluster
+    Value: !GetAtt AuroraCluster.Endpoint.Address
+
+  ClusterReaderEndpoint:
+    Description: The endpoint address of the Aurora cluster
+    Value: !GetAtt AuroraCluster.ReadEndpoint.Address
+  
+  ClusterMasterUserSecretArn:
+    Description: The ARN of the Aurora Clusters user and password secret
+    Value: !GetAtt AuroraCluster.MasterUserSecret.SecretArn

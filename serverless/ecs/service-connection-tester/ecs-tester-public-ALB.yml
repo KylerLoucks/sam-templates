@@ -1,0 +1,434 @@
+
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+
+Parameters:
+  pAppName:
+    Type: String
+    Default: pr1
+    Description: Application Name
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the Virtual Private Network (VPC)
+  pPrivateSubnetId1:
+    Type: String
+  pPrivateSubnetId2:
+    Type: String
+  pPublicSubnetId1:
+    Type: String
+  pPublicSubnetId2:
+    Type: String
+  pACMCertificateArn:
+    Type: String
+    Description: ACM cert ARN for ECS services ALB
+  pR53HostedZoneId:
+    Type: String
+    Description: Route 53 hosted zone
+  # Container Ports
+  pWebsitePort:
+    Type: Number
+    Default: 80
+  pMongoPort:
+    Type: Number
+    Default: 27017
+  pRedisPort:
+    Type: Number
+    Default: 6379
+  pMySQLPort:
+    Type: Number
+    Default: 3306
+  pPostgresPort:
+    Type: Number
+    Default: 5432
+
+  # ECR repos
+  pWebsiteEcrImageUri:
+    Type: String
+    Description: > 
+      URI of the ECR image used for Website Task Definition. 
+      e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
+
+
+Resources:
+
+
+
+  # ==============================================
+  # ================= LOG GROUPS =================
+  # ==============================================
+
+  websiteLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/website/${pAppName}
+      RetentionInDays: 7
+
+  # ===================================================
+  # ================= SECURITY GROUPS =================
+  # ===================================================
+  
+  # BACKEND SERVICES
+  serviceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow all traffic from self and ALB Security Group
+      VpcId: !Ref pVpcId
+
+  # Allow everything that has this security group attached
+  serviceSelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt serviceSecurityGroup.GroupId
+      IpProtocol: -1
+      FromPort: -1
+      ToPort: -1
+      SourceSecurityGroupId: !GetAtt serviceSecurityGroup.GroupId
+
+  # Allow everything from ALB SG
+  serviceFrontendIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt serviceSecurityGroup.GroupId
+      IpProtocol: -1
+      FromPort: -1
+      ToPort: -1
+      SourceSecurityGroupId: !Ref albSecurityGroup
+
+  # FRONTEND ALB SG
+  albSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for ALB allowing HTTP
+      VpcId: !Ref pVpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+
+
+  # ECS task role
+  taskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CloudWatchLogs
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowCreateLogGroup
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Sid: AllowLogStreams
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/*:*"
+        
+  taskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      # Allows pulling ECR images and pushing logs to CW
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+
+  # ====================================================
+  # ================= TASK DEFINITIONS =================
+  # ====================================================
+
+  # WEBSITE
+  websiteTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
+      TaskRoleArn: !GetAtt taskRole.Arn
+      Cpu: 4096
+      Memory: 8192
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      # EphemeralStorage:
+      #   SizeInGiB: 20
+        
+      ContainerDefinitions:
+        - Name: website
+          # changes to the Image will cause a new deployment to the ECS service, replacing the old deployment.
+          Image: !Ref pWebsiteEcrImageUri
+          PortMappings:
+              - ContainerPort: !Ref pWebsitePort
+          Environment:
+            - Name: REDIS_HOST
+              Value: localhost #!Sub redis-${pAppName}.dev.mdsnrdfd.com
+            - Name: REDIS_PORT
+              Value: !Ref pRedisPort
+
+            # MYSQL
+            - Name: MYSQL_HOST
+              Value: localhost
+            - Name: MYSQL_USER
+              Value: root
+            - Name: MYSQL_PASSWORD
+              Value: root
+            - Name: MYSQL_DB
+              Value: mysql
+            - Name: MYSQL_PORT
+              Value: !Ref pMySQLPort
+
+            # POSTGRES
+            - Name: POSTGRES_HOST
+              Value: localhost
+            - Name: POSTGRES_USER
+              Value: postgres
+            - Name: POSTGRES_PASSWORD
+              Value: postgres
+            - Name: POSTGRES_DB
+              Value: postgres
+            - Name: POSTGRES_PORT
+              Value: !Ref pPostgresPort
+
+            # MONGO
+            - Name: MONGO_HOST
+              Value: localhost
+            - Name: MONGO_PORT
+              Value: !Ref pMongoPort
+        - Name: redis
+          Image: redis:latest
+          PortMappings:
+            - ContainerPort: !Ref pRedisPort
+        - Name: mysql
+          Image: mysql:latest
+          PortMappings:
+            - ContainerPort: !Ref pMySQLPort
+          Environment:
+            - Name: MYSQL_DATABASE
+              Value: mysql
+            - Name: MYSQL_ROOT_PASSWORD
+              Value: root
+        - Name: postgres
+          Image: postgres:latest
+          PortMappings:
+            - ContainerPort: !Ref pPostgresPort
+          Environment:
+            - Name: POSTGRES_USER
+              Value: postgres
+            - Name: POSTGRES_PASSWORD
+              Value: postgres
+            - Name: POSTGRES_DB
+              Value: postgres
+        - Name: mongo
+          Image: mongo:latest
+          PortMappings:
+            - ContainerPort: !Ref pMongoPort
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref websiteLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+
+  fargateCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${pAppName}-cluster
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE_SPOT
+          Base: 0 # how many tasks (minimum) can be ran on this strategy
+          Weight: 50
+        - CapacityProvider: FARGATE
+          Base: 20
+          Weight: 50
+
+
+
+  # =================================================
+  # ================= TARGET GROUPS =================
+  # =================================================
+
+
+  # WEBSITE
+  websiteTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      Name: !Sub website-${pAppName}
+
+      HealthCheckPath: /
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Port: !Ref pWebsitePort
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      Matcher:
+        HttpCode: 200-499
+      TargetType: ip
+      VpcId: !Ref pVpcId
+
+  # ===================================================
+  # ================= LISTENERS/RULES =================
+  # ===================================================
+  
+  # Listener to redirect HTTP traffic to HTTPS
+  redirectListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties: 
+      DefaultActions: 
+        - Type: "redirect"
+          RedirectConfig: 
+            Port: 443
+            Protocol: "HTTPS"
+            StatusCode: "HTTP_301"
+      LoadBalancerArn: !Ref ecsLoadBalancer
+      Port: 80
+      Protocol: "HTTP"
+
+  httpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties: 
+      Certificates: 
+        - CertificateArn: !Ref pACMCertificateArn
+      DefaultActions: 
+        - Type: "fixed-response"
+          FixedResponseConfig:
+            StatusCode: "503"
+            ContentType: "text/plain"
+            MessageBody: "You have reached an invalid domain."
+      LoadBalancerArn: !Ref ecsLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: "ELBSecurityPolicy-2016-08"
+
+  # WEBSITE
+  websiteRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref websiteTg
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub ${pAppName}.dev.mdsnrdfd.com
+      ListenerArn: !Ref httpsListener
+      Priority: 1
+  
+  ecsLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      IpAddressType: ipv4
+      Scheme: internet-facing
+      SecurityGroups:
+        - !GetAtt albSecurityGroup.GroupId
+      Subnets:
+        - !Ref pPublicSubnetId1
+        - !Ref pPublicSubnetId2
+      Type: application
+
+  ecsWebsiteService:
+    DependsOn:
+      - websiteRule
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref fargateCluster
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      # Allows the ability for updates to create a new task before draining the old task.
+      # https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_DeploymentConfiguration.html
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+      # Adjust if container takes a while to start up
+      HealthCheckGracePeriodSeconds: 30
+      LoadBalancers: 
+        - ContainerName: website
+          ContainerPort: !Ref pWebsitePort
+          TargetGroupArn: !Ref websiteTg
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: 
+            - !Ref pPrivateSubnetId1
+            - !Ref pPrivateSubnetId2
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # ServiceConnectConfiguration: # Allows using Cloud Map to connect services between clusters
+      #   ServiceConnectConfiguration
+      ServiceName: !Sub website-${pAppName}
+      # ServiceRegistries: 
+      #   - ServiceRegistry
+      TaskDefinition: !Ref websiteTaskDefinition
+      Tags: 
+        - Key: managed-by
+          Value: SAM
+  
+
+  # ROUTE53 Records
+  route53Records:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneId: !Ref pR53HostedZoneId # Id of the Hosted Zone created during domain registration
+      RecordSets:
+        # Website
+        - Name: !Sub ${pAppName}.dev.mdsnrdfd.com
+          Type: A
+          AliasTarget:
+            HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID # Loadbalancer Id
+            DNSName: !GetAtt ecsLoadBalancer.DNSName
+
+
+
+
+
+Outputs:
+  albEndpointUrl:
+    Description: DNS Endpoint for the ECS ALB
+    Value: !GetAtt ecsLoadBalancer.DNSName
+
+  websiteUrl:
+    Description: Application URL endpoint
+    Value: !Sub https://${pAppName}.dev.mdsnrdfd.com
+  

@@ -1,0 +1,207 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: SAM Template for Lambda function with Function URL
+
+Parameters:
+  pGithubAppId:
+    Type: Number
+    Description: The ID of the GitHub App.
+    Default: 981792
+  pGithubClientId:
+    Type: String
+    Description: The client ID of the GitHub App.
+    Default: Iv23li8Ri5BviWszCSen
+  pGithubOwner:
+    Type: String
+    Description: The owner of the GitHub repository.
+    Default: MadisonReed
+  pGithubRepo:
+    Type: String
+    Description: The name of the GitHub repository.
+    Default: mr
+
+
+Resources:
+
+  # Handles receiving webhooks from the github app
+  WebhookFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Runtime: nodejs20.x
+      CodeUri: ./webhook-lambda/
+      FunctionUrlConfig:
+        AuthType: NONE
+        Cors:
+          AllowOrigins:
+            - '*'
+          AllowMethods:
+            - GET
+            - POST
+          AllowHeaders:
+            - '*'
+      Environment:
+        Variables:
+          GITHUB_APP_ID: !Ref pGithubAppId
+          GITHUB_OWNER: !Ref pGithubOwner
+          GITHUB_REPO: !Ref pGithubRepo
+          GITHUB_CLIENT_ID: !Ref pGithubClientId
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource: 
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/development/GithubAppPrivateKey
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/development/GithubAppSecret
+            - Effect: Allow
+              Action:
+                - ecs:ListServices
+                - ecs:UpdateService
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - codepipeline:GetPipelineState
+                - codepipeline:PutApprovalResult
+              Resource: '*'
+            - Effect: Allow
+              Action:
+                - codepipeline:GetPipelineExecution
+              Resource: '*'
+
+
+  PipelineEventFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Runtime: nodejs20.x
+      CodeUri: ./pipeline-event-lambda/
+      Timeout: 30
+      Environment:
+        Variables:
+          GITHUB_APP_ID: !Ref 'pGithubAppId'
+          GITHUB_OWNER: !Ref 'pGithubOwner'
+          GITHUB_REPO: !Ref 'pGithubRepo'
+          GITHUB_CLIENT_ID: !Ref 'pGithubClientId'
+      Policies:
+        - Statement:
+            - Effect: Allow
+              Action:
+                - ssm:GetParameter
+              Resource: 
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/development/GithubAppPrivateKey
+                - !Sub arn:aws:ssm:${AWS::Region}:${AWS::AccountId}:parameter/development/GithubAppSecret
+            - Effect: Allow
+              Action:
+                - codepipeline:GetPipelineExecution
+              Resource: '*'
+      Events:
+
+        # Used for when the pipeline starts.
+        # The commit_sha doesn't exist until source succeeded event.
+        SourceSucceededEvent:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source:
+                - aws.codepipeline
+              detail-type:
+                - CodePipeline Action Execution State Change
+              detail:
+                pipeline:
+                  - prefix: pr
+                  - suffix: -pipeline
+                state:
+                  - SUCCEEDED
+                type:
+                  category:
+                    - Source
+
+        # Filter specifically for manual approval start and failures
+        BuildEvent:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source:
+                - aws.codepipeline
+              detail-type:
+                - CodePipeline Action Execution State Change
+              detail:
+                pipeline:
+                  - prefix: pr
+                  - suffix: -pipeline
+                state:
+                  - STARTED
+                  # - SUCCEEDED
+                  # - FAILED
+                  # - CANCELED
+                type:
+                  category:
+                    - Build
+
+        # Filter specifically for manual approval start and failures
+        ManualApprovalEvent:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source:
+                - aws.codepipeline
+              detail-type:
+                - CodePipeline Action Execution State Change
+              detail:
+                pipeline:
+                  - prefix: pr
+                  - suffix: -pipeline
+                state:
+                  - STARTED
+                  - SUCCEEDED
+                  - FAILED
+                  # - CANCELED
+                type:
+                  category:
+                    - Approval
+
+        # Filter specifically for manual approval start and failures
+        DeployEvent:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source:
+                - aws.codepipeline
+              detail-type:
+                - CodePipeline Action Execution State Change
+              detail:
+                pipeline:
+                  - prefix: pr
+                  - suffix: -pipeline
+                state:
+                  - STARTED
+                  # - SUCCEEDED
+                  # - FAILED
+                  # - CANCELED
+                type:
+                  category:
+                    - Deploy
+    
+        # Filter by Pipeline Execution Failed events
+        PipelineExecutionEvent:
+          Type: EventBridgeRule
+          Properties:
+            Pattern:
+              source:
+                - aws.codepipeline
+              detail-type:
+                - CodePipeline Pipeline Execution State Change
+              detail:
+                state:
+                  - FAILED
+                  - SUCCEEDED
+                  - CANCELED
+                pipeline:
+                  - prefix: pr
+                  - suffix: -pipeline
+  
+Outputs:
+  FunctionUrl:
+    Description: "Lambda Function URL"
+    Value: !GetAtt WebhookFunction.FunctionUrl

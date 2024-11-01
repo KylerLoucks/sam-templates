@@ -1,0 +1,89 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Deploys NLB for Orthanc
+
+Parameters:
+
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the Virtual Private Network (VPC)
+
+  pSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: List of Public Subnet IDs for the Internet Facing Load Balancer
+
+
+Resources:
+
+  # Security Group for the NLB
+  NLBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow traffic to NLB
+      VpcId: !Ref pVpcId  # Replace with your VPC ID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 104
+          ToPort: 104
+          CidrIp: 0.0.0.0/0  # Allows traffic from anywhere; adjust as necessary
+
+  # Network Load Balancer
+  DicomNlb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: ECS-DicomNlb
+      Type: network
+      Scheme: internet-facing
+      Subnets:  !Ref pSubnetIds
+      SecurityGroups:
+        - !Ref NLBSecurityGroup
+
+  # Listener to redirect HTTP traffic to HTTPS
+  nlbListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties: 
+      DefaultActions: 
+        - Type: forward
+          TargetGroupArn: !Ref orthancTg
+      LoadBalancerArn: !Ref DicomNlb
+      Port: 104
+      Protocol: TCP
+
+
+  orthancTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: ECS-TargetGroup
+      Port: 4242
+      Protocol: TCP
+      TargetType: ip
+      VpcId: !Ref pVpcId
+      HealthCheckProtocol: TCP
+      HealthCheckPort: traffic-port
+      Tags:
+        - Key: Name
+          Value: orthanc-TG-HTTPS
+        - Key: controlled-by
+          Value: !Sub cloudformation-${AWS::StackName}
+
+Outputs:
+  nlbSecurityGroup:
+    Description: Security Group for ALB
+    Value: !Ref NLBSecurityGroup
+    Export:
+      Name: !Sub nlb-security-group-${AWS::StackName}
+  orthancTg:
+    Description: Target Group for Orthanc
+    Value: !Ref orthancTg
+    Export:
+      Name: !Sub orthanc-tg-${AWS::StackName}
+  clusterDicomNlb:
+    Description: Cluster DicomNlb
+    Value: !Ref DicomNlb
+    Export:
+      Name: !Sub cluster-nlb-${AWS::StackName}
+  NlbTargetGroupArn:
+    Description: ARN of the Target Group for the NLB
+    Value: !Ref orthancTg
+    Export:
+      Name: !Sub nlb-target-group-arn-${AWS::StackName} 

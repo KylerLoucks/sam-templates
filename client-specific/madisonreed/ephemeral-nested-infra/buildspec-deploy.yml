@@ -1,0 +1,155 @@
+version: 0.2
+env:
+  git-credential-helper: yes
+  exported-variables:
+    - IMAGE_TAG
+    - MONGO_IMAGE_TAG
+    - SNAPSHOT_ID
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 16
+    commands:
+      - pip3 install --upgrade aws-sam-cli
+  pre_build:
+    commands:
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - IMAGE_TAG=${COMMIT_HASH:-latest}
+
+      - MONGO_REPOSITORY_URI=${ACCOUNT_ID}.dkr.ecr.${AWS_REGION}.amazonaws.com/mongo-ephemeral
+
+      # Define the name to give the ECS ephemeral environment stack
+      - STACK_NAME="${APP_NAME}-ephemeral"
+
+      # Grab the MySQL Snapshot Id that was used on the last deploy by checking the stack outputs
+      - MYSQL_OUTPUT_KEY="mysqlEbsSnapshotId"
+      - echo "Attempting to fetch stack details for ${STACK_NAME} with output key ${MYSQL_OUTPUT_KEY}"
+      - MYSQL_SNAPSHOT_ID=$(aws cloudformation describe-stacks --stack-name "${STACK_NAME}" --query "Stacks[0].Outputs[?OutputKey=='${MYSQL_OUTPUT_KEY}'].OutputValue" --output text 2>/dev/null || echo "")
+      - |
+        # Check if the SnapshotId was found
+        if [ -z "$MYSQL_SNAPSHOT_ID" ]; then
+            echo "No output with key $MYSQL_OUTPUT_KEY found in stack $STACK_NAME."
+            # Grab the latest snapshot
+            MYSQL_SNAPSHOT_ID=$(aws ec2 describe-snapshots --filters Name=tag-key,Values=ephemeral-mysql --query "Snapshots[].[SnapshotId,StartTime]" --output json | jq -r 'sort_by(.[1]) | last | .[0]')
+            echo "Using Latest MySQL EBS SnapshotId: $MYSQL_SNAPSHOT_ID"
+        else
+            echo "SnapshotId found. Continuing to use the previous snapshot used: $SNAPSHOT_ID"
+        fi
+
+      # Grab the MongoDB Snapshot Id that was used on the last deploy by checking the stack outputs
+      - MONGO_OUTPUT_KEY="mongoEbsSnapshotId"
+      - echo "Attempting to fetch stack details for ${STACK_NAME} with output key ${MONGO_OUTPUT_KEY}"
+      - MONGO_SNAPSHOT_ID=$(aws cloudformation describe-stacks --stack-name "${STACK_NAME}" --query "Stacks[0].Outputs[?OutputKey=='${MONGO_OUTPUT_KEY}'].OutputValue" --output text 2>/dev/null || echo "")
+      - |
+        # Check if the SnapshotId was found
+        if [ -z "$MONGO_SNAPSHOT_ID" ]; then
+            echo "No output with key $MONGO_OUTPUT_KEY found in stack $STACK_NAME."
+            # Grab the latest snapshot
+            MONGO_SNAPSHOT_ID=$(aws ec2 describe-snapshots --filters Name=tag-key,Values=ephemeral-mongo --query "Snapshots[].[SnapshotId,StartTime]" --output json | jq -r 'sort_by(.[1]) | last | .[0]')
+            echo "Using Latest Mongo EBS SnapshotId: $MONGO_SNAPSHOT_ID"
+        else
+            echo "SnapshotId found. Continuing to use the previous snapshot used: $MONGO_SNAPSHOT_ID"
+        fi
+
+      # Old mongo implementation
+      # # Grab the Mongo image tag that was used on the previous deploy
+      # - MONGO_FULL_IMAGE_URI=$(aws ecs describe-task-definition --task-definition ${APP_NAME}-mongo --query "taskDefinition.containerDefinitions[?name=='mongo'].image" --output text 2>/dev/null || echo "")
+      # # Extract the tag from the task definition if it exists. Otherwise, use the most recent tag from ECR
+      # - |
+      #   if [[ "$MONGO_FULL_IMAGE_URI" == *":"* ]]; then
+      #     MONGO_IMAGE_TAG=$(echo $MONGO_FULL_IMAGE_URI | sed 's/.*://')
+      #   else
+      #     # If the task definition does not exist or does not have a tag, get the latest image tag from ECR
+      #     echo "Task definition does not exist or no tag found. Fetching the latest Mongo image tag from ECR..."
+      #     MONGO_REPO_NAME=mongo-ephemeral
+      #     MONGO_IMAGE_TAG=$(aws ecr describe-images --repository-name ${MONGO_REPO_NAME} --query 'sort_by(imageDetails,&imagePushedAt)[-1].imageTags[1]' --output text)
+      #   fi
+      # - echo "Mongo Image Tag [ ${MONGO_IMAGE_TAG} ]"
+
+      - echo Listing Source Files...
+      # list all files by most recently modified in reverse order
+      - ls -ltra
+
+
+  build:
+    commands:
+      - echo Build started on `date`
+
+      # prepare coloradvisor api stack
+      - git clone https://github.com/MadisonReed/color-advisor-microservice.git
+      - cd color-advisor-microservice
+      - git checkout "c303-deploy"
+      - echo listing color advisor microservice files...
+      - ls -ltra
+      # - mkdir -p ~/.ssh && echo "$SSH_KEY_FOR_SUBMODULE" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa
+      # Use HTTPS connection instead of ssh for cloning sub-modules
+      - sed -i 's|git@github.com:MadisonReed/mr-modules.git|https://github.com/MadisonReed/mr-modules.git|' .gitmodules
+      - npm run init-submodules
+      - npm run update-submodules
+      - npm i
+      - npm run build
+      - sam build
+
+      # Uses manually created ACM cert "*.coloradvisor.dev.mdsnrdfd.com"
+      - | 
+        sam deploy \
+          --resolve-s3 \
+          --capabilities CAPABILITY_NAMED_IAM \
+          --parameter-overrides \
+              "pACMCertificateArn=arn:aws:acm:us-east-1:174743933558:certificate/dc4a19ea-a563-43aa-a80e-0e0d1dade373 \
+              pR53HostedZoneName=dev.mdsnrdfd.com \
+              pDomainPrefix=${APP_NAME}.coloradvisor \
+              pR53HostedZoneId=Z0323068C9DQS081P13G \
+              RestAPIName=${APP_NAME}-coloradvisor \
+              NodeEnv=development \
+              MSSubnet=subnet-0598f465e77230bd5 \
+              EpsagonToken=- \
+              MSSecGroupA=sg-0a34349137fd5086d \
+              MSSecGroupB=sg-0a1053b02521d09b3" \
+          --stack-name ${APP_NAME}-coloradvisor \
+          --tags \
+              CleanupDate=$(date -u -d "+10 days" '+%Y-%m-%dT%H:%M:%SZ') \
+              ephemeral:app=${APP_NAME} \
+          --no-confirm-changeset \
+          --on-failure DELETE    
+
+      - cd ../
+
+  post_build:
+    commands:
+      - echo Build completed on `date`
+
+
+      - echo Building ECS Stack...
+      - sam build -t ephemeralenv/ecs/madisonreed-ServiceConnect-ALB.yml
+      # Deploy ECS stack
+      - |
+        sam deploy -t ephemeralenv/ecs/madisonreed-ServiceConnect-ALB.yml \
+          --resolve-s3 \
+          --capabilities CAPABILITY_NAMED_IAM \
+          --parameter-overrides \
+              "pAppName=${APP_NAME} \
+              pVpcId=vpc-09ef4a53e9290ca17 \
+              pPrivateSubnetId1=subnet-01086857935bfcf34 \ 
+              pPrivateSubnetId2=subnet-056e57e04fea05dd5 \
+              pWebsiteEcrImageUri=${WEBSITE_REPOSITORY_URI}:${IMAGE_TAG} \
+              pTopHatEcrImageUri=${TOPHAT_REPOSITORY_URI}:${IMAGE_TAG} \
+              pSocketioEcrImageUri=${TOPHAT_REPOSITORY_URI}:${IMAGE_TAG} \
+              pApiServerEcrImageUri=${APISERVER_REPOSITORY_URI}:${IMAGE_TAG} \
+              pMongoEcrImageUri=public.ecr.aws/docker/library/mongo:7.0 \
+              pMysqlEcrImageUri=mysql:8.0 \
+              pMysqlEbsSnapshotId=${MYSQL_SNAPSHOT_ID} \
+              pMongoEbsSnapshotId=${MONGO_SNAPSHOT_ID} \
+              pPublicSubnetId1=subnet-0598f465e77230bd5 \
+              pPublicSubnetId2=subnet-0d650820a97fa5ba3 \
+              pR53HostedZoneId=Z0323068C9DQS081P13G \
+              pR53HostedZoneName=dev.mdsnrdfd.com" \
+          --stack-name $STACK_NAME \
+          --tags \
+              CleanupDate=$(date -u -d "+10 days" '+%Y-%m-%dT%H:%M:%SZ') \
+              ephemeral:app=${APP_NAME} \
+          --no-confirm-changeset \
+          --on-failure DELETE
+
+ 

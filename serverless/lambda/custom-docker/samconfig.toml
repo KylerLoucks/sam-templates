@@ -1,0 +1,21 @@
+version = 0.1
+[default]
+[default.deploy]
+[default.deploy.parameters]
+stack_name = "benchmark-lambda-processors-dev"
+s3_bucket = "aws-sam-cli-managed-default-samclisourcebucket-e9l8p858cgu"
+s3_prefix = "benchmark-lambda-processors-dev"
+region = "us-east-2"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+
+
+
+[prod.deploy.parameters]
+stack_name = "custom-image"
+resolve_s3 = true
+s3_prefix = "custom-image/"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+image_repositories = ["caliMedicalBoardLambda=396253486745.dkr.ecr.us-east-1.amazonaws.com/benchmark-generator-production"]

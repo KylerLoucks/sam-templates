@@ -1,0 +1,254 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+
+
+Resources:
+
+  lambdaLayer:
+    Type: AWS::Serverless::LayerVersion
+    Description: The AWS SDK with support for Deepgram.
+    Metadata:
+      BuildMethod: nodejs16.x
+    Properties:
+      LayerName: aws-lambda-auth-layer
+      Description: Custom Authorizer Layer
+      ContentUri: deepgrampackages/
+      CompatibleRuntimes:
+        - nodejs16.x
+
+  webSocketApiGatewayApi:
+    Type: AWS::ApiGatewayV2::Api
+    Properties:
+      Name: !Sub ${AWS::StackName}
+      ProtocolType: WEBSOCKET
+      RouteSelectionExpression: "$request.body.action"
+
+  # WebSocket API Stage deployment
+  webSocketApiProdDeployment:
+    Type: AWS::ApiGatewayV2::Deployment
+    DependsOn:
+      - webSocketOnConnectRoute
+      - webSocketStreamRoute
+      - wsDefaultRoute
+    Properties:
+      ApiId: !Ref webSocketApiGatewayApi
+
+  webSocketApiProdStage:
+    Type: AWS::ApiGatewayV2::Stage
+    Properties:
+      StageName: prod
+      DeploymentId: !Ref webSocketApiProdDeployment
+      ApiId: !Ref webSocketApiGatewayApi
+
+
+  wsAuthorizer:
+    Type: AWS::ApiGatewayV2::Authorizer
+    Properties:
+      Name: LambdaAuthorizer
+      ApiId: !Ref webSocketApiGatewayApi
+      AuthorizerType: REQUEST
+      IdentitySource: 
+        - route.request.querystring.Auth # Query String param to use to validate connection
+      AuthorizerUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${wsAuthorizerFunction.Arn}/invocations
+
+  wsAuthorizerFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Layers:
+        - !Ref lambdaLayer
+      Runtime: nodejs16.x
+      CodeUri: websocketauthorizer/
+      Environment:
+        # Pass cognito userpool & client id to environment variables to use jwt verifier.
+        Variables:
+          USERPOOLID: !Ref UserPool
+          USERPOOLCLIENTID: !Ref UserPoolClient
+
+  wsAuthorizerPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - webSocketApiGatewayApi
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref wsAuthorizerFunction
+      Principal: apigateway.amazonaws.com
+
+  # $connect route
+  webSocketOnConnectRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      RouteKey: $connect
+      ApiId: !Ref webSocketApiGatewayApi
+      # Apply ApiGateway Authorizer to the route request.
+      AuthorizationType: CUSTOM
+      AuthorizerId: !Ref wsAuthorizer
+      OperationName: OnConnectRoute
+      Target: !Sub integrations/${webSocketOnConnectIntegration}
+  
+  # Proxy integration to Lambda
+  webSocketOnConnectIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref webSocketApiGatewayApi
+      Description: OnConnect Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${onConnectLambda.Arn}/invocations
+
+  onConnectLambdaPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - webSocketApiGatewayApi
+    Properties:
+      FunctionName: !Ref onConnectLambda
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${webSocketApiGatewayApi}/*"
+
+  onConnectLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Runtime: nodejs16.x
+      CodeUri: websocketapi/connect
+      MemorySize: 256
+      Timeout: 120
+
+
+
+  # stream route
+  webSocketStreamRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      RouteKey: stream
+      ApiId: !Ref webSocketApiGatewayApi
+      AuthorizationType: NONE
+      OperationName: StreamRoute
+      Target: !Sub integrations/${webSocketStreamIntegration}
+  
+  webSocketStreamIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref webSocketApiGatewayApi
+      Description: Stream Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${streamLambda.Arn}/invocations
+
+
+  streamLambdaPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - webSocketApiGatewayApi
+    Properties:
+      FunctionName: !Ref streamLambda
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${webSocketApiGatewayApi}/*"
+
+  streamLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Runtime: nodejs16.x
+      CodeUri: websocketapi/stream
+      Layers:
+        - !Ref deepGramLayer
+      MemorySize: 256
+      Timeout: 120
+      Policies:
+        # Required for sending data back to clients
+        - Statement:
+          - Effect: Allow
+            Action:
+              - execute-api:ManageConnections
+            Resource:
+              - !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${webSocketApiGatewayApi}/*
+
+  # Default Route:
+  wsDefaultRoute:
+    Type: AWS::ApiGatewayV2::Route
+    Properties:
+      RouteKey: $default
+      ApiId: !Ref webSocketApiGatewayApi
+      AuthorizationType: NONE
+      OperationName: Default
+      Target: !Sub integrations/${wsDefaultIntegration}
+  
+  wsDefaultIntegration:
+    Type: AWS::ApiGatewayV2::Integration
+    Properties:
+      ApiId: !Ref webSocketApiGatewayApi
+      Description: Default Integration
+      IntegrationType: AWS_PROXY
+      IntegrationUri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${defaultLambda.Arn}/invocations
+
+
+  defaultLambdaPermission:
+    Type: AWS::Lambda::Permission
+    DependsOn:
+      - webSocketApiGatewayApi
+    Properties:
+      FunctionName: !Ref defaultLambda
+      Action: lambda:InvokeFunction
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${webSocketApiGatewayApi}/*"
+
+
+  defaultLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: index.handler
+      Runtime: nodejs16.x
+      CodeUri: websocketapi/stream
+      Layers:
+        - !Ref deepGramLayer
+      MemorySize: 256
+      Timeout: 120
+      Policies:
+        # Required for sending data back to clients
+        - Statement:
+          - Effect: Allow
+            Action:
+              - execute-api:ManageConnections
+            Resource:
+              - !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${webSocketApiGatewayApi}/*
+
+
+  # Store websocket connection session state
+  sessionStateTable:
+    Type: AWS::DynamoDB::Table
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      TableName:
+        !Sub
+          - 'wsSessionState-${RandomGUID}'
+          - { RandomGUID: !Select [0, !Split ["-", !Select [2, !Split ["/", !Ref AWS::StackId ]]]]}
+      AttributeDefinitions:
+      - AttributeName: connectionId
+        AttributeType: S
+      - AttributeName: meetingId
+        AttributeType: S
+      KeySchema:
+      - AttributeName: connectionId
+        KeyType: HASH
+      BillingMode: PAY_PER_REQUEST
+
+      GlobalSecondaryIndexes:
+      - IndexName: meetingIdIndex
+        KeySchema:
+        - AttributeName: meetingId
+          KeyType: HASH
+        - AttributeName: connectionId
+          KeyType: RANGE
+        Projection:
+          ProjectionType: ALL
+
+
+Outputs:
+
+  WebSocketURL:
+    Description: "WSS Protocol URL to connect to"
+    Value: !Sub wss://${webSocketApiGatewayApi}.execute-api.${AWS::Region}.amazonaws.com/${webSocketApiProdStage}
+  
+      

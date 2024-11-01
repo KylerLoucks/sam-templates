@@ -1,0 +1,570 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Github V2 Source action, Build ECR image and deploy to ECS service
+
+
+Parameters:
+
+
+  pAppName:
+    Type: String
+    Description: Used to name resources deployed by this stack
+    Default: ecs-deploy
+
+  # CodePipeline
+  # GitHub Repo
+
+  pRepoOwner:
+    Type: String
+    Description: Owner not username. If the repo owner is an organization, enter organization name.
+    Default: organization/username
+
+  pRepoName:
+    Type: String
+    Default: MyRepository
+
+  pCodestarConnectionArn:
+    Type: String
+    Description: ARN of the CodeStar Connection.
+    Default: arn:aws:codestar-connections:us-east-1:313588322221:connection/e6cec00c-84fd-4370-b355-5291eaa602bc
+
+  pTriggerBranch:
+    Type: String
+    Description: Branch to trigger CodePipeline off of.
+    Default: master
+
+  # Enable CRON trigger for pipeline
+  pEnableDailyTrigger:
+    Type: String
+    Description: Enable or disable codepipeline daily trigger (ENABLED or DISABLED)
+    Default: DISABLED
+    AllowedValues:
+      - ENABLED
+      - DISABLED
+
+  # CodeBuild
+  pCodeBuildComputeType:
+    Type: String
+    Description: CodeBuild Compute Type
+    Default: BUILD_GENERAL1_SMALL
+    AllowedValues:
+      - BUILD_GENERAL1_SMALL
+      - BUILD_GENERAL1_MEDIUM
+      - BUILD_GENERAL1_LARGE
+      - BUILD_GENERAL1_XLARGE
+
+  pCodeBuildImage:
+    Type: String
+    Description: Base image used by CodeBuild
+    Default: aws/codebuild/standard:7.0
+
+  pBuildSpecPath:
+    Type: String
+    Description: Path and name for the Buildspec in repo
+    Default: buildspec.yml
+
+  
+  # ECS Deploy provider
+  pEcsServiceName:
+    Type: String
+    Description: Name of the ECS Service to update tasks with the new image
+    
+  pEcsClusterName:
+    Type: String
+    Description: Name of the ECS Cluster that hosts the ECS Services used for deployments
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterLabels:
+      pAppName:
+        default: Application Name
+      pRepoOwner:
+        default: GitHub Repository Owner
+      pRepoName:
+        default: GitHub Repository Name
+      pCodestarConnectionArn:
+        default: Codestar Connection Arn
+      pTriggerBranch:
+        default: GitHub Trigger Branch
+      pCodeBuildComputeType:
+        default: CodeBuild Compute Type
+      pCodeBuildImage:
+        default: CodeBuild Docker Image
+      pBuildSpecPath:
+        default: Buildspec file path
+
+      pEcsClusterName:
+        default: ECS Cluster Name
+      pEcsServiceName:
+        default: ECS Service Name
+
+
+    ParameterGroups:
+      - Label:
+          default: CodePipeline Settings
+        Parameters:
+          - pAppName
+      - Label:
+          default: CodePipeline Source Settings
+        Parameters:
+          - pRepoOwner
+          - pRepoName
+          - pCodestarConnectionArn
+          - pTriggerBranch
+      - Label:
+          default: CodeBuild Settings
+        Parameters:
+          - pCodeBuildComputeType
+          - pCodeBuildImage
+          - pBuildSpecPath
+      - Label:
+          default: CodeDeploy Settings
+        Parameters:
+          - pEcsClusterName
+          - pEcsServiceName
+
+Resources:
+
+
+  ecrRepo:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Ref pAppName
+      EmptyOnDelete: false
+      LifecyclePolicy:
+        LifecyclePolicyText: |
+          {
+            "rules": [
+              {
+                "rulePriority": 1,
+                "description": "Keep last 8 images",
+                "selection": {
+                  "tagStatus": "any",
+                  "countType": "imageCountMoreThan",
+                  "countNumber": 8
+                },
+                "action": {
+                  "type": "expire"
+                }
+              }
+            ]
+          }
+
+
+
+
+  # IAM Role - CodeBuild
+  codeBuildServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${pAppName}-build-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - codebuild.amazonaws.com
+            Action:
+              - sts:AssumeRole
+      Policies:
+        - PolicyName: CloudWatchLogs
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${pAppName}-build
+                  - !Sub arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/${pAppName}-build:*
+        - PolicyName: S3ArtifactBucket
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:GetObjectVersion
+                  - s3:PutObject
+                Resource:
+                  - !Sub arn:aws:s3:::${artifactBucket}
+                  - !Sub arn:aws:s3:::${artifactBucket}/*
+        - PolicyName: GitCloneConnection
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codestar-connections:UseConnection
+                Resource:
+                  - !Ref pCodestarConnectionArn
+        - PolicyName: ECR
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:PutLifecyclePolicy
+                  - ecr:PutImageTagMutability
+                  - ecr:PutImageScanningConfiguration
+                  - ecr:BatchGetImage
+                  - ecr:CompleteLayerUpload
+                  - ecr:DescribeImages
+                  - ecr:TagResource
+                  - ecr:ListTagsForResource
+                  - ecr:UploadLayerPart
+                  - ecr:InitiateLayerUpload
+                  - ecr:BatchCheckLayerAvailability
+                  - ecr:PutImage
+                Resource:
+                  - !GetAtt ecrRepo.Arn
+        - PolicyName: ECR-Token
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecr:GetAuthorizationToken
+                Resource: "*"
+        - PolicyName: DatabaseDumpS3Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject
+                  - s3:List*
+                  - s3:GetObjectVersion
+                Resource:
+                  - !Sub arn:aws:s3:::${pDumpBucketName}
+                  - !Sub arn:aws:s3:::${pDumpBucketName}/*
+
+  codeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${pAppName}-build
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: CodeBuild Project
+      Environment:
+        ComputeType: !Ref pCodeBuildComputeType
+        Image: !Ref pCodeBuildImage
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: ACCOUNT_ID
+            Value: !Ref AWS::AccountId
+            Type: PLAINTEXT
+
+          - Name: REPOSITORY_URI
+            Value: !GetAtt ecrRepo.RepositoryUri
+            Type: PLAINTEXT
+
+      ServiceRole: !GetAtt codeBuildServiceRole.Arn
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Ref pBuildSpecPath
+      TimeoutInMinutes: 480
+
+  codeBuildLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/codebuild/${codeBuildProject}
+      RetentionInDays: 7
+
+  # IAM Role - CodePipeline
+
+  codePipelineServiceRole:
+      Type: AWS::IAM::Role
+      Properties:
+        RoleName: !Sub ${pAppName}-pipeline-role
+        AssumeRolePolicyDocument:
+          Version: 2012-10-17
+          Statement:
+            - Effect: Allow
+              Principal:
+                Service:
+                  - codepipeline.amazonaws.com
+              Action:
+                - sts:AssumeRole
+        Policies:
+          - PolicyName: s3Artifacts
+            PolicyDocument:
+              Version: 2012-10-17
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - s3:PutObject
+                    - s3:GetObject
+                    - s3:GetObjectVersion
+                  Resource:
+                    - !Sub arn:aws:s3:::${artifactBucket}
+                    - !Sub arn:aws:s3:::${artifactBucket}/*
+          - PolicyName: codeBuildTrigger
+            PolicyDocument:
+              Version: 2012-10-17
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - codebuild:BatchGetBuilds
+                    - codebuild:StartBuild
+                    - codebuild:BatchGetBuildBatches
+                    - codebuild:StartBuildBatch
+                  Resource:
+                    - !GetAtt codeBuildProject.Arn
+                - Effect: Allow
+                  Action:
+                    - codestar-connections:UseConnection
+                  Resource:
+                    - "*"
+          # - PolicyName: ecsUpdate
+          #   PolicyDocument:
+          #     Version: 2012-10-17
+          #     Statement:
+          #       - Effect: Allow
+          #         Action:
+          #           - ecs:*
+          #           - ecr:*
+          #         Resource:
+          #           - "*"
+          - PolicyName: iamPassRole
+            PolicyDocument:
+              Version: 2012-10-17
+              Statement:
+                - Effect: Allow
+                  Action:
+                    - iam:PassRole
+                  Resource:
+                    - "*"
+
+
+
+ # CodePipeline
+
+  artifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${pAppName}-pipeline-artifacts-${AWS::AccountId}-${AWS::Region}
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # Artifact bucket cleanup
+  DeleteObjectStorage:
+    Type: Custom::S3DeleteObjectsLambda
+    Properties:
+      ServiceToken: !GetAtt DeleteS3ObjectsFunction.Arn
+      Bucket: !Ref artifactBucket
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        -
+          PolicyName: S3Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Sid: AllowLogging
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+              -
+                Sid: DeleteBucketObjects
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:ListBucketVersions
+                  - s3:GetObject
+                  - s3:DeleteObject
+                  - s3:DeleteObjectVersion
+                Resource:
+                  - !Sub arn:aws:s3:::${artifactBucket}
+                  - !Sub arn:aws:s3:::${artifactBucket}/*
+
+  DeleteS3ObjectsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Deletes objects from buckets provisioned by CloudFormation
+      Handler: index.handler
+      Runtime: python3.11
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: 120
+      Code:
+        ZipFile: |
+          import os
+          import json
+          import cfnresponse
+          import boto3
+          import logging
+
+          from botocore.exceptions import ClientError
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          s3 = boto3.resource('s3')
+
+          def handler(event, context):
+            logger.info("Received event: %s" % json.dumps(event))
+            bucket = s3.Bucket(event['ResourceProperties']['Bucket'])
+
+            result = cfnresponse.SUCCESS
+
+            try:
+              if event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
+                result = cfnresponse.SUCCESS
+              elif event['RequestType'] == 'Delete':
+                result = delete_objects(bucket)
+            except ClientError as e:
+              logger.error('Error: %s', e)
+              result = cfnresponse.FAILED
+
+            cfnresponse.send(event, context, result, {})
+
+          def delete_objects(bucket):
+            bucket.object_versions.delete()
+            bucket.objects.all().delete()
+            return cfnresponse.SUCCESS
+
+  cleanupLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${DeleteS3ObjectsFunction}
+      RetentionInDays: 7
+
+  codePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      ArtifactStore:
+        Location: !Ref artifactBucket
+        Type: S3
+      Name: !Sub ${pAppName}-pipeline
+      RoleArn: !GetAtt codePipelineServiceRole.Arn
+      PipelineType: V2
+      RestartExecutionOnUpdate: false
+      # Variables:
+      #   - Name: PR_ID
+      #     Description: Pull Request ID
+      #   - Name: PR_EVENT
+      #     Description: 'Type of PR event. Valid values: [opened, synchronize, reopened, closed]'
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: Source
+              Namespace: SourceVariables
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: 1
+              Configuration:
+                FullRepositoryId: !Sub ${pRepoOwner}/${pRepoName}
+                ConnectionArn: !Ref pCodestarConnectionArn
+                BranchName: !Ref pTriggerBranch
+                DetectChanges: true
+                OutputArtifactFormat: CODEBUILD_CLONE_REF # Code Build Git Full Clone
+              OutputArtifacts:
+                - Name: SourceArtifact
+        - Name: Build
+          Actions:
+            - Name: CodeBuild
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              Configuration:
+                ProjectName: !Ref codeBuildProject
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildArtifact
+              RunOrder: 1
+        - Name: ManualApproval
+          ActionTypeId:
+            Category: Approval
+            Owner: AWS
+            Provider: Manual
+            Version: 1
+          Configuration:
+            CustomData: "Approve deployment to ECS."
+            ExternalEntityLink: !Sub "https://github.com/${pRepoOwner}/${pRepoName}/commit/#{SourceVariables.CommitId}"
+          RunOrder: 1
+        - Name: DeployECS
+          Actions:
+            - Name: 
+              ActionTypeId:
+                Category: Deploy
+                Owner: AWS
+                Provider: ECS
+                Version: 1
+                InputArtifacts:
+                  - Name: BuildArtifact
+              Configuration:
+                ClusterName: !Ref pEcsClusterName
+                ServiceName: !Ref pEcsServiceName 
+                FileName: imagedefinitions.json # name of the artifact file output for updating the ecs task defintion
+              RunOder: 1
+                
+                 
+
+
+  # Pipeline CRON execution
+
+  eventBridgeInvokePipelineRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub ${pAppName}-eventbridge-invoke-pipeline-role
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: events.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: InvokePipeline
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action: codepipeline:StartPipelineExecution
+                Resource: !Sub arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${codePipeline}
+
+  dailyTriggerRule:
+    Type: AWS::Events::Rule
+    Properties:
+      Name: !Sub ${pAppName}-daily-trigger
+      ScheduleExpression: cron(59 23 * * ? *)
+      State: !Ref pEnableDailyTrigger
+      Targets:
+        - Arn: !Sub arn:aws:codepipeline:${AWS::Region}:${AWS::AccountId}:${codePipeline}
+          Id: CodePipelineTarget
+          RoleArn: !GetAtt eventBridgeInvokePipelineRole.Arn
+
+
+Outputs:
+
+  Version:
+    Description: Template Version
+    Value: ecs-pipeline-in-place-0.1

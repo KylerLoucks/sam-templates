@@ -1,0 +1,31 @@
+FROM public.ecr.aws/docker/library/mongo:5.0.26 as builder
+
+ARG MONGO_DUMP_DIR="dumpfiles"
+
+# Copy dump file(s) into dump location
+COPY ${MONGO_DUMP_DIR} /dumpfiles/
+
+# needed for initialization
+ENV MONGO_INITDB_ROOT_USERNAME=root
+ENV MONGO_INITDB_ROOT_PASSWORD=root
+
+
+# docker-entrypoint.sh does DB init, but also runs the mongo daemon. We only want to run initialization, otherwise the build process will be running forever.
+# To resolve this, we replace the `exec "$@"` line at the end of the `docker-entrypoint.sh` script with a simple echo command.
+RUN ["sed", "-i", "s/exec \"$@\"/echo \"not running $@\"/", "/usr/local/bin/docker-entrypoint.sh"]
+
+
+# Make sure the DB import script is ran on initialization
+COPY mongoimport.sh /docker-entrypoint-initdb.d/
+
+# Grant permissions for the script to be executable
+RUN chmod +x /docker-entrypoint-initdb.d/mongoimport.sh
+
+RUN ["/usr/local/bin/docker-entrypoint.sh", "mongod"]
+
+
+
+FROM public.ecr.aws/docker/library/mongo:5.0.26
+
+# Copy mongodb database data from builder
+COPY --from=builder /data/db /data/db

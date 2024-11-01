@@ -1,0 +1,71 @@
+AWSTemplateFormatVersion: 2010-09-09
+
+Description: >
+  Deploys ECS Fargate Cluster
+
+Parameters:
+  pClusterName:
+    Type: String
+    Default: ''
+    Description: ECS Cluster Name
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the Virtual Private Network (VPC)
+
+
+
+Resources:
+  # "If you name the namespace 'example.com' and an ECS service 'backend' the resulting DNS name for this service is: 'backend.example.com'"
+  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-servicediscovery-privatednsnamespace.html
+  serviceDiscoveryNameSpace:
+    Type: AWS::ServiceDiscovery::PrivateDnsNamespace
+    Properties:
+      Vpc: !Ref pVpcId
+      Name: !Sub ${pClusterName}.cloudmap.internal
+
+
+  fargateCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Ref pClusterName
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE_SPOT
+          Base: 0 # how many tasks (minimum) can be ran on this strategy
+          Weight: 50
+        - CapacityProvider: FARGATE
+          Base: 20
+          Weight: 50
+      ServiceConnectDefaults: # AWS Service Connect
+        Namespace: !GetAtt serviceDiscoveryNameSpace.Arn
+
+# Export Follows CDK Naming Convention (StackName:OutputName)
+Outputs:
+  ServiceDiscoveryNamespaceArn:
+    Description: The ARN of the Service Discovery Namespace
+    Value: !GetAtt serviceDiscoveryNameSpace.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:ServiceDiscoveryNamespaceArn
+
+  ServiceDiscoveryNamespaceId:
+    Description: The ID of the Service Discovery Namespace
+    Value: !Ref serviceDiscoveryNameSpace
+    Export:
+      Name: !Sub ${AWS::StackName}:ServiceDiscoveryNamespaceId
+
+  FargateClusterArn:
+    Description: The ARN of the Fargate Cluster
+    Value: !GetAtt fargateCluster.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:FargateClusterArn
+
+  FargateClusterName:
+    Description: The name of the Fargate Cluster
+    Value: !Ref fargateCluster
+    Export:
+      Name: !Sub ${AWS::StackName}:FargateClusterName

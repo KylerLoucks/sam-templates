@@ -1,0 +1,371 @@
+
+
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Creates a standalone EC2 Host for ECS Clusters
+
+Parameters:
+  pAppName:
+    Type: String
+    Default: pr1
+    Description: Application Name
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the Virtual Private Network (VPC)
+    Default: vpc-09ef4a53e9290ca17
+  pPrivateSubnetId1:
+    Type: String
+    Default: subnet-01086857935bfcf34
+  pPrivateSubnetId2:
+    Type: String
+    Default: subnet-056e57e04fea05dd5
+  pR53HostedZoneId:
+    Type: String
+    Description: Route 53 hosted zone ID
+    Default: Z0323068C9DQS081P13G
+  pHostedZoneName:
+    Type: String
+    Description: Route53 Hosted Zone Domain Name (E.g. dev.mdsnrdfd.com)
+    Default: dev.mdsnrdfd.com
+  pPublicSubnetId1:
+    Type: String
+    Default: subnet-0598f465e77230bd5
+  pPublicSubnetId2:
+    Type: String
+    Default: subnet-0d650820a97fa5ba3
+
+  pECSAMI:
+    Description: "The Amazon Machine Image ID used for the cluster"
+    Type: "AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>"
+    Default: "/aws/service/ecs/optimized-ami/amazon-linux-2023/recommended/image_id"
+
+  # Container Ports
+  pMySQLPort:
+    Type: Number
+    Default: 3306
+
+  # # Secrets
+  # pMySQLSecretArn:
+  #   Type: String
+  #   Description: >
+  #     Arn of the AWS Secrets Manager secret to use for MySQL container username and password
+  #     NOTE: the secret name cannot contain characters other than: a-zA-Z0-9_.-
+  #     NOTE2: the secret key/value must be 'username' and 'password'
+
+
+  pMysqlEcrImageUri:
+    Type: String
+    Default: 174743933558.dkr.ecr.us-east-1.amazonaws.com/mysql-ephemeral:20240509
+    Description: > 
+      URI of the ECR image used for MySQL Task Definition. 
+      e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
+
+
+
+
+Resources:
+
+  # BACKEND SERVICES
+  serviceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow all traffic from self and ALB Security Group
+      VpcId: !Ref pVpcId
+
+  # Allow everything that has this security group attached
+  serviceSelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt serviceSecurityGroup.GroupId
+      IpProtocol: -1
+      FromPort: -1
+      ToPort: -1
+      SourceSecurityGroupId: !GetAtt serviceSecurityGroup.GroupId
+
+  serviceVpcIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt serviceSecurityGroup.GroupId
+      IpProtocol: -1  # Allows all protocols
+      FromPort: -1    # Allows all ports
+      ToPort: -1      # Allows all ports
+      CidrIp: 10.20.0.0/16  # Allow traffic from VPC
+
+  # ECS task role
+  taskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        # Ecs Exec into Fargate containers https://aws.amazon.com/blogs/containers/new-using-amazon-ecs-exec-access-your-containers-fargate-ec2/
+        # Also requires `ssmmessages` Interface VPC endpoint: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-exec.html#ecs-exec-troubleshooting
+        - PolicyName: EcsExec
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowEcsExec
+                Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: "*"
+        - PolicyName: CloudWatchLogs
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowCreateLogGroup
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Sid: AllowLogStreams
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/*:*"
+        
+  taskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: Secrets
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: GetSecrets
+                Action: secretsmanager:GetSecretValue
+                Effect: Allow
+                Resource: arn:aws:secretsmanager:*:*:secret:*
+              - Sid: GetSSMParams
+                Action: ssm:GetParameters
+                Effect: Allow
+                Resource: arn:aws:ssm:*:*:parameter/*
+      # Allows pulling ECR image and pushing logs to CW
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+
+  mysqlTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${pAppName}-mysql
+      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
+      TaskRoleArn: !GetAtt taskRole.Arn
+      Cpu: 4096 # 2048
+      Memory: 8192 # 4096
+      RequiresCompatibilities:
+        - EC2
+      NetworkMode: awsvpc
+      ContainerDefinitions:
+        - Name: mysql
+          Image: !Ref pMysqlEcrImageUri
+          PortMappings:
+            - ContainerPort: !Ref pMySQLPort
+              Protocol: tcp
+          Environment:
+            - Name: MYSQL_ROOT_PASSWORD
+              Value: root
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref mysqlLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+          MountPoints:
+            - SourceVolume: mysql-storage
+              ContainerPath: /var/lib/mysql
+      Volumes:
+        - Name: mysql-storage
+          DockerVolumeConfiguration:
+            Scope: task # 'task' automatically provisions storage on the EC2 instance. Storage is deleted when the task terminates. use 'shared' to persist storage
+            Driver: local
+
+
+  mysqlLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/mysql/${pAppName}
+      RetentionInDays: 7
+
+
+  ECSInstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - !Ref ECSInstanceRole
+
+  ECSInstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: ECSInstancePolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ecs:*
+                  - ecr:*
+                  - ec2:*
+                  - logs:*
+                  - s3:*
+                Resource: "*"
+      ManagedPolicyArns:
+        # See reference: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/security-iam-awsmanpol.html#security-iam-awsmanpol-AmazonEC2ContainerServiceforEC2Role
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceforEC2Role
+        # This managed policy allows us to connect to the instance using SSM
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  ec2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.large
+      # KeyName: !Ref KeyName
+      ImageId: !Ref pECSAMI # ami-0c55b159cbfafe1f0  # Use the latest Amazon ECS optimized AMI
+      IamInstanceProfile: !Ref ECSInstanceProfile
+      SecurityGroupIds:
+        - !GetAtt serviceSecurityGroup.GroupId
+      SubnetId: !Ref pPrivateSubnetId1
+
+      # Add the Instance into the ECS cluster
+      # https://docs.aws.amazon.com/AmazonECS/latest/developerguide/launch_container_instance.html
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash
+          echo ECS_CLUSTER=${fargateCluster} >> /etc/ecs/ecs.config
+
+          # Prevent the 'DockerTimeoutError: Could not transition to 'created' error
+          echo ECS_CONTAINER_START_TIMEOUT=10m >> /etc/ecs/ecs.config
+          echo ECS_CONTAINER_CREATE_TIMEOUT=10m >> /etc/ecs/ecs.config
+
+
+          # mkfs -t ext4 /dev/xvdf
+          # mkdir -p /mnt/mysql-data
+          # mount /dev/xvdf /mnt/mysql-data
+      BlockDeviceMappings:
+        - DeviceName: /dev/xvda
+          Ebs:
+            VolumeSize: 400  # Root volume size in GB
+            VolumeType: gp3
+            Iops: 6000
+        # - DeviceName: /dev/xvdf
+        #   Ebs:
+        #     VolumeSize: 500  # MySQL data volume size in GB
+        #     VolumeType: gp3
+      Tags:
+        - Key: Name
+          Value: !Sub mysql-ephemeral-${pAppName}
+
+  mysqlService:
+    DependsOn:
+      - ec2Instance
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref fargateCluster
+      ServiceName: mysql
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true # allows `docker exec` for an interactive terminal inside the container
+      LaunchType: EC2
+      # CapacityProviderStrategy:
+      #   - Base: 0
+      #     CapacityProvider: !Ref CapacityProvider
+      #     Weight: 1
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: true
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: 
+            - !Ref pPrivateSubnetId1
+            - !Ref pPrivateSubnetId2
+      PropagateTags: SERVICE
+      ServiceRegistries: 
+        - RegistryArn: !GetAtt mysqlServiceDiscoveryService.Arn
+          Port: !Ref pMySQLPort
+      TaskDefinition: !Ref mysqlTaskDefinition
+      Tags: 
+        - Key: managed-by
+          Value: SAM
+        - Key: ephemeral:app
+          Value: !Ref pAppName
+
+
+  fargateCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${pAppName}-cluster
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE_SPOT
+          Base: 0 # how many tasks (minimum) can be ran on this strategy
+          Weight: 50
+        - CapacityProvider: FARGATE
+          Base: 20
+          Weight: 50
+      ServiceConnectDefaults: # AWS Service Connect
+        Namespace: !GetAtt serviceDiscoveryNameSpace.Arn
+
+# CLOUD MAP
+  serviceDiscoveryNameSpace:
+    Type: AWS::ServiceDiscovery::PrivateDnsNamespace
+    Properties:
+      Vpc: !Ref pVpcId
+      Name: !Sub ${pAppName}.cloudmap.internal
+
+
+  # mysql
+  mysqlServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: mysql-ecs # Name must be unique from what is given for ECS service 'ServiceConnectConfiguration.PortName'. 
+      Description: Service discovery for mongo service
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 60
+          - Type: SRV
+            TTL: 60
+        RoutingPolicy: MULTIVALUE
+      NamespaceId: !GetAtt serviceDiscoveryNameSpace.Id

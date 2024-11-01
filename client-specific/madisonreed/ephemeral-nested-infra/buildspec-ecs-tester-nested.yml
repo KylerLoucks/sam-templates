@@ -1,0 +1,139 @@
+version: 0.2
+env:
+  git-credential-helper: yes
+  exported-variables:
+    - IMAGE_TAG
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 16
+    commands:
+      - pip3 install --upgrade aws-sam-cli
+
+      # color advisor build
+      # clone the main branch of color advisor repo and build 
+      # (this works as long as the codestar connection has access to this repo)
+      - git clone https://github.com/MadisonReed/color-advisor-microservice.git
+      - cd color-advisor-microservice
+      - echo listing color advisor microservice files...
+      - ls -ltra
+      - mkdir -p ~/.ssh && echo "$SSH_KEY_FOR_SUBMODULE" > ~/.ssh/id_rsa && chmod 600 ~/.ssh/id_rsa
+      - npm run init-submodules
+      - npm run update-submodules
+      - npm i
+      - npm run build
+      - cd ../
+  pre_build:
+    commands:
+      - echo Logging into ECR...
+      - $(aws ecr get-login --no-include-email --region $AWS_DEFAULT_REGION)
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - IMAGE_TAG=${COMMIT_HASH:-latest}
+
+      # - GLOBAL_TZ='PDT\|PST'
+      # - NODE_PATH=$(pwd)/mr_modules
+      # - NODE_ENV=ecs
+
+
+
+
+
+      - echo Listing Source Files...
+      # list all files by most recently modified in reverse order
+      - ls -ltra
+
+
+  build:
+    commands:
+      - echo Build started on `date`
+
+      # - echo node $(node -v) \(npm $(npm -v)\)
+      # - bin/prod-node-modules.sh -t build
+      # - bin/generateSecureConfig.js -e $NODE_ENV --microservice || true # TODO: no fail for now
+      # - bin/downloadGeoIpDBFromS3.sh # needed for apiserver?
+      # - bin/generateCodebaseJson # needed for apiserver?
+      # - npm run gulp-build-website > gulpBuildWebsite.log 2>&1
+      # - cd website
+      # - npm ci > npmInstall.log 2>&1
+      # - npm run buildProduction > buildProduction.log 2>&1
+      # - npm run postBuildProduction > postBuildProduction.log 2>&1 || true # TODO: no fail for now
+      # - cd ../
+
+
+      - echo Building the Docker images...
+
+
+      # build TOPHAT, WEBSITE, API SERVER images
+      - echo Building Website...
+
+      # ecs tester dockerfile
+      - docker build -f ephemeralenv/docker-flask-frontend/Dockerfile -t $WEBSITE_REPOSITORY_URI:$IMAGE_TAG ephemeralenv/docker-flask-frontend/  
+
+
+      # # WEBSITE
+      # - |
+      #   docker build -f docker/website/Dockerfile -t $WEBSITE_REPOSITORY_URI:$IMAGE_TAG . \
+      #     --build-arg AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION \
+      #     --build-arg ACCOUNT_ID=$ACCOUNT_ID \
+      #     --build-arg BASE_IMAGE_REPO_NAME=$BASE_IMAGE_REPO_NAME \
+      #     --build-arg BASE_IMAGE_TAG=$BASE_IMAGE_TAG \
+      #     --build-arg NODE_ENV=$NODE_ENV \
+      - echo Building API Server...
+      # # API SERVER
+      # - |
+      #   docker build -f docker/apiserver/Dockerfile -t $API_SERVER_REPOSITORY_URI:$IMAGE_TAG . \
+      #     --build-arg AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION \
+      #     --build-arg ACCOUNT_ID=$ACCOUNT_ID \
+      #     --build-arg BASE_IMAGE_REPO_NAME=$BASE_IMAGE_REPO_NAME \
+      #     --build-arg BASE_IMAGE_TAG=$BASE_IMAGE_TAG \
+      #     --build-arg NODE_ENV=$NODE_ENV \
+      - echo Building Tophat...
+      # # TOPHAT
+      # - |
+      #   docker build -f docker/apiserver/Dockerfile -t $TOPHAT_REPOSITORY_URI:$IMAGE_TAG . \
+      #     --build-arg AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION \
+      #     --build-arg ACCOUNT_ID=$ACCOUNT_ID \
+      #     --build-arg BASE_IMAGE_REPO_NAME=$BASE_IMAGE_REPO_NAME \
+      #     --build-arg BASE_IMAGE_TAG=$BASE_IMAGE_TAG \
+      #     --build-arg NODE_ENV=$NODE_ENV \
+
+      # prepare nested stack
+      - echo Building Nested API/ECS Stack...
+      - sam build -t ephemeralenv/root.yml
+
+  post_build:
+    commands:
+      - echo Build completed on `date`
+      - echo Pushing Website Docker image...
+
+      - docker push $WEBSITE_REPOSITORY_URI:$IMAGE_TAG
+
+      - echo Pushing Tophat Docker image...
+      # - docker push $TOPHAT_REPOSITORY_URI:$IMAGE_TAG
+
+      - echo Pushing API Server Docker image...
+      # - docker push $API_SERVER_REPOSITORY_URI:$IMAGE_TAG
+
+      # Deploy ECS and API
+      - |
+        sam deploy -t ephemeralenv/root.yml \
+          --config-env ephemeral \
+          --parameter-overrides \
+            "pAppName=${APP_NAME} \
+            pVpcId=vpc-09ef4a53e9290ca17 \
+            pPrivateSubnetId1=subnet-01086857935bfcf34 \ 
+            pPrivateSubnetId2=subnet-056e57e04fea05dd5 \
+            pPublicSubnetId1=subnet-0598f465e77230bd5 \
+            pPublicSubnetId2=subnet-0d650820a97fa5ba3 \
+            pR53HostedZoneId=Z0323068C9DQS081P13G \
+            pWebsiteEcrImageUri=${WEBSITE_REPOSITORY_URI}:${IMAGE_TAG} \
+            pACMCertificateArn=arn:aws:acm:us-east-1:174743933558:certificate/07f48ca4-3dcf-4ed7-b4df-147b3412be62" \
+            pNodeEnv=development \
+            pEpsagonToken="-" \
+          --stack-name ${APP_NAME}-ephemeral \
+          --tags CleanupDate=$(date -u -d "+10 days" '+%Y-%m-%dT%H:%M:%SZ') \
+          --no-confirm-changeset \
+          --on-failure DELETE
+
+ 

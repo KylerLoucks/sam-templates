@@ -1,0 +1,7 @@
+{
+    "name": "stream",
+    "version": "1.0.0",
+    "description": "recieves audio stream and transcribes from deepgram"
+
+}
+  

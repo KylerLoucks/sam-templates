@@ -1,0 +1,450 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: 'AWS::Serverless-2016-10-31'
+Description: AWS CloudFormation stack to set up infrastructure required for the FWA ETL process
+Parameters:
+  AppName:
+    Type: String
+    Default: GlueETL
+    Description: Unique Name for App Resources
+  pPrivateSubnet1a:
+    Type: AWS::EC2::Subnet::Id
+  pPrivateSubnet1b:
+    Type: AWS::EC2::Subnet::Id
+  pOpenPaymentsECR:
+    Type: String
+    Description: ECR Repo containing the container image for the OpenPayments scheduled data crawler.
+
+
+
+Resources:
+
+  dataBucket:
+    Type: AWS::S3::Bucket
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      BucketName:
+        !Sub
+          - fwa-datasets-${RandomGUID}
+          - { RandomGUID: !Select [0, !Split ["-", !Select [2, !Split ["/", !Ref AWS::StackId ]]]]}
+
+  processedDataBucket:
+    Type: AWS::S3::Bucket
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      BucketName:
+        !Sub
+          - fwa-processed-datasets-${RandomGUID}
+          - { RandomGUID: !Select [0, !Split ["-", !Select [2, !Split ["/", !Ref AWS::StackId ]]]]}
+
+  # Dataset Storage
+  datasetInfoTable:
+    Type: AWS::DynamoDB::Table
+    UpdateReplacePolicy: Retain
+    DeletionPolicy: Retain
+    Properties:
+      TableName: 
+        !Sub
+          - dataset-info-${RandomGUID}
+          - { RandomGUID: !Select [0, !Split ["-", !Select [2, !Split ["/", !Ref AWS::StackId ]]]]}
+      BillingMode: PAY_PER_REQUEST
+      AttributeDefinitions:
+        - AttributeName: provider
+          AttributeType: S
+      KeySchema:
+        # Partition Key
+        - AttributeName: provider
+          KeyType: HASH
+        # - AttributeName: timestamp
+        #   KeyType: RANGE
+
+
+# =================================
+# ========== ECS CLUSTER ==========
+# =================================
+
+  # OpenPayments Fargate Cluster
+  fargateCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName:
+        !Sub
+          - fwa-cluster-${RandomGUID}
+          - { RandomGUID: !Select [0, !Split ["-", !Select [2, !Split ["/", !Ref AWS::StackId ]]]]}
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+  
+
+  taskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      # Allows pulling ECR image and pushing logs to CW
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+  # ECS task role
+  taskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: CloudWatchLogs
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowCreateLogGroup
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Sid: AllowLogStreams
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/*:*"
+        - PolicyName: DynamoDBAccess
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Sid: DynamoDBAccess
+                Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${datasetInfoTable}
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - s3:GetObject*
+                  - s3:GetBucket*
+                  - s3:List*
+                  - s3:DeleteObject*
+                  - s3:PutObject
+                  - s3:PutObjectLegalHold
+                  - s3:PutObjectRetention
+                  - s3:PutObjectTagging
+                  - s3:PutObjectVersionTagging
+                  - s3:Abort*
+                Resource:
+                  - !Sub arn:aws:s3:::${dataBucket}
+                  - !Sub arn:aws:s3:::${dataBucket}/*
+        - PolicyName: StateMachineSendState
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - states:SendTaskSuccess
+                  - states:SendTaskFailure
+                Resource: "*"
+        
+
+  openPaymentsLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/OpenPayments
+      RetentionInDays: 90
+
+  taskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
+      TaskRoleArn: !GetAtt taskRole.Arn
+      Cpu: "256"
+      Memory: "512"
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      EphemeralStorage:
+        SizeInGiB: 50
+        
+      ContainerDefinitions:
+        - Name: OpenPayments
+          Image: !Ref pOpenPaymentsECR
+          
+          Environment:
+            - Name: OPENPAYMENTS_URL
+              Value: https://download.cms.gov/openpayments/PGYR18_P063023.ZIP
+            - Name: DATA_BUCKET
+              Value: !Ref dataBucket
+            - Name: DATASET_INFO_TABLE
+              Value: !Ref datasetInfoTable
+          
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref openPaymentsLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+
+
+
+# ==================================
+# ============ GLUE ETL ============
+# ==================================
+
+  glueServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - glue.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonS3FullAccess
+        - arn:aws:iam::aws:policy/service-role/AWSGlueServiceRole
+
+  athenaDatabase:
+    Type: AWS::Glue::Database
+    Properties:
+      CatalogId: !Sub ${AWS::AccountId}
+      DatabaseInput:
+        Name:
+          !Sub
+            - polyview-fwa-dataset-${RandomGUID}
+            - { RandomGUID: !Select [0, !Split ["-", !Select [2, !Split ["/", !Ref AWS::StackId ]]]]}
+
+  # Merge OpenPayments dataset ETL
+  openPaymentsMergeEtl:
+    Type: AWS::Glue::Job
+    Properties:
+      Name: 
+        !Sub
+          - openpayments-merge-csvs-${RandomGUID}
+          - { RandomGUID: !Select [0, !Split ["-", !Select [2, !Split ["/", !Ref AWS::StackId ]]]]}
+      Role: !GetAtt glueServiceRole.Arn
+      WorkerType: G.1X
+      NumberOfWorkers: 10
+      ExecutionClass: STANDARD
+      GlueVersion: 4.0
+      Command:
+        Name: glueetl # Spark job type
+        PythonVersion: 3
+        ScriptLocation: !Sub s3://aws-glue-assets-${AWS::AccountId}-${AWS::Region}/scripts/openpayments-merge-csvs.py
+      DefaultArguments:
+        "--SOURCE_BUCKET_NAME": !Ref dataBucket
+        "--DEST_BUCKET_NAME": !Ref processedDataBucket
+        "--job-bookmark-option": job-bookmark-enable
+        "--enable-metrics": true
+        "--enable-spark-ui": true
+        "--enable-job-insights": true
+        "--enable-continuous-cloudwatch-log": true
+        "--spark-event-logs-path": !Sub "s3://aws-glue-assets-${AWS::AccountId}-${AWS::Region}/sparkHistoryLogs/"
+        "--TempDir": !Sub "s3://aws-glue-assets-${AWS::AccountId}-${AWS::Region}/temporary/"
+
+  openPaymentsCrawler:
+    Type: AWS::Glue::Crawler
+    Properties:
+      DatabaseName: !Ref athenaDatabase
+      Name: 
+        !Sub
+          - openpayments-crawler-${RandomGUID}
+          - { RandomGUID: !Select [0, !Split ["-", !Select [2, !Split ["/", !Ref AWS::StackId ]]]]}
+      Role: !GetAtt glueServiceRole.Arn
+      Description: Crawl OpenPayments dataset to create an Athena Catalog Table
+      Targets:
+        S3Targets: 
+          - Path: !Sub s3://${processedDataBucket}/OpenPayments
+      SchemaChangePolicy:
+        UpdateBehavior: "UPDATE_IN_DATABASE"
+        DeleteBehavior: "DEPRECATE_IN_DATABASE"
+      Configuration: >
+        {
+          "Version": 1.0,
+          "Grouping": {"TableGroupingPolicy": "CombineCompatibleSchemas"},
+          "CrawlerOutput": {
+            "Partitions": {
+              "AddOrUpdateBehavior": "InheritFromTable"
+            }
+          },
+          "CreatePartitionIndex": false
+        }
+      TablePrefix: '' 
+      RecrawlPolicy:
+        RecrawlBehavior: "CRAWL_EVERYTHING"
+      CrawlerSecurityConfiguration: '' 
+
+
+
+
+# ==================================
+# ========= STATE MACHINES =========
+# ==================================
+  openPaymentsStateMachine:
+    Type: AWS::Serverless::StateMachine
+    Properties:
+      Definition:
+        StartAt: RunFargateTask
+        States:
+          RunFargateTask:
+            Type: Task
+            Resource: arn:aws:states:::ecs:runTask.waitForTaskToken
+            Next: CheckDataUpdated
+            Parameters:
+              LaunchType: FARGATE
+              Cluster: !Ref fargateCluster
+              TaskDefinition: !Ref taskDefinition
+              NetworkConfiguration:
+                AwsvpcConfiguration:
+                  Subnets: 
+                   - !Ref pPrivateSubnet1a
+                   - !Ref pPrivateSubnet1b
+                  AssignPublicIp: DISABLED
+              # Override task def env vars
+              Overrides:
+                ContainerOverrides:
+                  - Name: OpenPayments # Replace with the name of the container in the task definition
+                    Environment:
+                      - Name: TASK_TOKEN
+                        'Value.$': "$$.Task.Token"
+                      - Name: OPENPAYMENTS_URL
+                        Value: https://download.cms.gov/openpayments/PGYR18_P063023.ZIP
+                      - Name: DATA_BUCKET
+                        Value: !Ref dataBucket
+                      - Name: DATASET_INFO_TABLE
+                        Value: !Ref datasetInfoTable
+          # Check if the response from the fargate task was true for 'datasetUpdated'
+          CheckDataUpdated:
+            Type: Choice
+            Choices:
+              - Variable: "$.datasetUpdated"
+                BooleanEquals: true
+                Next: RunGlueETLJob
+            Default: EndState
+          RunGlueETLJob:
+            Type: Task
+            Resource: arn:aws:states:::glue:startJobRun.sync
+            Parameters:
+              JobName: !Ref openPaymentsMergeEtl
+            Next: RunGlueCrawler
+          RunGlueCrawler:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:glue:startCrawler
+            Parameters:
+              Name: !Ref openPaymentsCrawler
+            Retry:
+              - ErrorEquals:
+                  - Glue.EntityNotFoundException
+                BackoffRate: 1
+                IntervalSeconds: 1
+                MaxAttempts: 0
+                Comment: EntityNotFoundException - Fail
+              - ErrorEquals:
+                  - Glue.CrawlerRunningException
+                BackoffRate: 1
+                IntervalSeconds: 1
+                MaxAttempts: 0              
+            Next: GetGlueCrawler
+            ResultPath: $.response.start_crawler
+            Catch:
+              - ErrorEquals:
+                  - Glue.CrawlerRunningException
+                Next: GetGlueCrawler
+                Comment: Crawler Already Running, continue to monitor
+                ResultPath: $.response.start_crawler
+          GetGlueCrawler:
+            Type: Task
+            Resource: arn:aws:states:::aws-sdk:glue:getCrawler
+            Parameters:
+              Name: !Ref openPaymentsCrawler
+            ResultPath: $.response.get_crawler
+            Next: IsRunning?
+          IsRunning?:
+            Type: Choice
+            Choices:
+              - Or:
+                  - Variable: $.response.get_crawler.Crawler.State
+                    StringEquals: RUNNING # Valid states are READY, RUNNING, STOPPING
+                  - Variable: $.response.get_crawler.Crawler.State
+                    StringEquals: STOPPING
+                Next: WaitForCrawlerCompletion
+            Default: EndState
+          WaitForCrawlerCompletion:
+            Type: Wait
+            Seconds: 5
+            Next: GetGlueCrawler
+          EndState:
+            Type: Succeed
+      Role: !GetAtt stateMachineExecutionRole.Arn
+      Events:
+        CronSchedule:
+          Type: Schedule
+          Properties:
+            Schedule: cron(0 8 1 1 ? *)  # Every 1st of January @ 8 AM UTC. Data updates yearly at the beginning of the year (Jan 1st?)
+            Enabled: False
+
+
+  stateMachineExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: states.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: StateMachineExecutionPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - lambda:InvokeFunction
+                  - glue:StartJobRun
+                  - glue:GetJobRun
+                  - glue:GetJobRuns
+                  - glue:BatchStopJobRun
+                  - glue:StartCrawler
+                  - glue:GetCrawler
+                  - ecs:DescribeTaskDefinition
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecs:RunTask
+                  - ecs:DescribeTasks
+                Resource:
+                  - !GetAtt fargateCluster.Arn
+                  - !Ref taskDefinition
+              - Sid: PassExecutionRole
+                Effect: Allow
+                Action:
+                  - iam:PassRole
+                Resource: !GetAtt taskExecutionRole.Arn

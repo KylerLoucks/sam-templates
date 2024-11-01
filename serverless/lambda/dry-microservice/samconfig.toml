@@ -1,0 +1,13 @@
+version = 0.1
+
+[default]
+[default.deploy]
+[prod.deploy.parameters]
+stack_name = "lambda-dry-microservice"
+resolve_s3 = true
+s3_prefix = "lambda-dry-microservice"
+region = "us-east-1"
+confirm_changeset = true
+capabilities = "CAPABILITY_IAM"
+parameter_overrides = []
+image_repositories = []

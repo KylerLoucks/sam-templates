@@ -1,0 +1,55 @@
+version: 0.2
+env:
+  git-credential-helper: yes
+  exported-variables:
+    - IMAGE_TAG
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 16
+  pre_build:
+    commands:
+      - GLOBAL_TZ='PDT\|PST'
+      - echo Logging in to Amazon ECR...
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - IMAGE_TAG=${COMMIT_HASH:=latest}
+      
+      - NODE_PATH=$(pwd)/mr_modules
+      - NODE_ENV=ecs
+      # Try to pull the latest image for caching and faster builds
+      - docker pull $REPOSITORY_URI:latest || true
+  build:
+    commands:
+      - echo Build started on $(date)
+      - echo node $(node -v) \(npm $(npm -v)\)
+      - bin/prod-node-modules.sh -t build
+      - bin/generateSecureConfig.js -e $NODE_ENV --microservice
+      - bin/downloadGeoIpDBFromS3.sh # required for website
+      - bin/generateCodebaseJson # required for website
+      - npm run gulp-build-website
+      - cd website
+      - npm i
+      - npm run buildProduction > buildProduction.log 2>&1
+      - npm run postBuildProduction
+      - cd ../
+      - echo Building the Docker images...
+      - |
+        docker build --cache-from=$REPOSITORY_URI:latest -f docker/website/Dockerfile -t $REPOSITORY_URI:latest . \
+          --build-arg AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION \
+          --build-arg ACCOUNT_ID=$ACCOUNT_ID \
+          --build-arg BASE_IMAGE_REPO_NAME=$BASE_IMAGE_REPO_NAME \
+          --build-arg BASE_IMAGE_TAG=$BASE_IMAGE_TAG \
+          --build-arg NODE_ENV=$NODE_ENV \
+      - docker tag $REPOSITORY_URI:latest $REPOSITORY_URI:$IMAGE_TAG
+  post_build:
+    commands:
+      - echo Build completed on $(date)
+      - echo Pushing the Docker image...
+      - docker push $REPOSITORY_URI:latest
+      - docker push $REPOSITORY_URI:$IMAGE_TAG
+
+cache:
+  paths:
+    - 'node_modules/**/*'

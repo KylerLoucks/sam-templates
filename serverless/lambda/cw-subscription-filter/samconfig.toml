@@ -1,0 +1,22 @@
+version = 0.1
+
+[default.build.parameters]
+cached = true
+parallel = true
+
+[default.local_start_api.parameters]
+force_image_build = true
+
+
+
+[kyler.deploy.parameters]
+stack_name = "fwa-etl-backend"
+resolve_s3 = true
+resolve_image_repos = true
+s3_prefix = "fwa-backend"
+region = "us-east-1"
+capabilities = "CAPABILITY_NAMED_IAM"
+parameter_overrides = [
+    "pAlertsEmail=kylerreeseloucks@gmail.com",
+]
+confirm_changeset = true

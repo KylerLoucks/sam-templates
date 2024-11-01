@@ -1,0 +1,356 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: AWS::Serverless-2016-10-31
+
+Resources:
+  # ================================
+  # ========= API GATEWAY ==========
+  # ================================
+  ApiGatewayLogRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - apigateway.amazonaws.com
+            Action: sts:AssumeRole
+      Path: /
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonAPIGatewayPushToCloudWatchLogs
+
+  # Enable logs for the API:
+  ApiAccountLogRole:
+    Type: AWS::ApiGateway::Account
+    Properties:
+      CloudWatchRoleArn: !GetAtt ApiGatewayLogRole.Arn
+
+  # Log group for logging access to all API Gateway Stages.
+  StageAccessLogGroup:
+    Type: AWS::Logs::LogGroup
+    UpdateReplacePolicy: Delete
+    DeletionPolicy: Delete
+    Properties:
+      LogGroupName: !Sub /apigateway/${AWS::StackName}-accesslogs
+      RetentionInDays: 30
+
+  # Rest API
+  ApiGatewayApi:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: REST-API
+      Description: REST API
+
+
+
+
+  # API Deployment
+  ApiGatewayDeployment:
+    DependsOn:
+      - FunctionMethod
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId: !Ref ApiGatewayApi
+
+
+  # API Gateway Stage: dev
+  DevStage:
+    Type: AWS::ApiGateway::Stage
+    Properties:
+      StageName: dev
+      RestApiId: !Ref ApiGatewayApi
+      DeploymentId: !GetAtt ApiGatewayDeployment.DeploymentId
+      Variables:
+        lambdaAlias: live  # Define the Lambda version or alias for dev
+      MethodSettings:
+        - DataTraceEnabled: true
+          HttpMethod: "*"
+          LoggingLevel: INFO
+          ResourcePath: "/*"
+      AccessLogSetting:
+        DestinationArn: !GetAtt StageAccessLogGroup.Arn
+        Format: '{ "requestId": "$context.requestId", "ip": "$context.identity.sourceIp", "caller": "$context.identity.caller", "requestTime": "$context.requestTimeEpoch", "httpMethod": "$context.httpMethod", "resourcePath": "$context.resourcePath", "status": "$context.status", "protocol": "$context.protocol", "responseLength": "$context.responseLength" }'
+      # Optional, Enable Request Caching
+      CacheClusterEnabled: false
+      CacheClusterSize: 0.5 # size in GB
+  
+
+  # MUST SET LAMBDA TO POST, GET request DOESNT WORK for StageVariables!!!
+  # https://github.com/aws/serverless-application-model/issues/430
+  # https://docs.aws.amazon.com/apigateway/latest/developerguide/set-up-lambda-integrations.html
+  FunctionMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref ApiGatewayApi
+      ResourceId: !GetAtt ApiGatewayApi.RootResourceId
+      HttpMethod: POST
+      AuthorizationType: NONE
+      Integration:
+        IntegrationHttpMethod: POST
+        Type: AWS_PROXY
+        Uri: !Join
+          - ''
+          - - 'arn:aws:apigateway:'
+            - !Ref 'AWS::Region'
+            - ':lambda:path/2015-03-31/functions/'
+            - !GetAtt LambdaFunction.Arn
+            - ':'
+            - '$'
+            - '{stageVariables.lambdaAlias}'
+            - '/invocations'
+  # !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaFunction.Arn}/invocations
+
+  LambdaFunctionPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !GetAtt LambdaFunction.Arn
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayApi}/*/*/*
+
+
+  # =============================================
+  # ========= Alias & Versions (CI/CD) ==========
+  # =============================================
+
+  # Creates the initial Function version. A new version is not created unless you specify to publish a new version with the CLI.
+  # A new version WILL NOT be made when you run `sam deploy` again.
+  #
+  # CI/CD setup:
+  # LATEST_VERSION=$(aws lambda publish-version --function-name testingapi --query 'Version' --output text)
+  # aws lambda update-alias --function-name <function-name> --name staging --function-version $LATEST_VERSION
+  Version:
+    Type: AWS::Lambda::Version
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties: 
+      FunctionName: !Ref LambdaFunction
+
+  StagingAlias:
+    Type: AWS::Lambda::Alias
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties: 
+      FunctionName: !Ref LambdaFunction
+      FunctionVersion: !GetAtt Version.Version
+      Name: staging
+
+  StagingAliasPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref StagingAlias
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayApi}/*/*/*
+
+  DevAlias:
+    Type: AWS::Lambda::Alias
+    DeletionPolicy: Retain
+    UpdateReplacePolicy: Retain
+    Properties: 
+      FunctionName: !Ref LambdaFunction
+      FunctionVersion: !GetAtt Version.Version
+      Name: dev
+
+  DevAliasPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      Action: lambda:InvokeFunction
+      FunctionName: !Ref DevAlias
+      Principal: apigateway.amazonaws.com
+      SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayApi}/*/*/*
+
+  # =====================================
+  # ========= Lambda Functions ==========
+  # =====================================
+
+  LambdaFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt LambdaRole.Arn
+      FunctionName: testingapi
+      Runtime: nodejs20.x
+      Timeout: 30
+      Handler: index.handler
+      CodeUri: function/
+
+      # Events:
+      #   ProxyApiRoot:
+      #     Type: Api
+      #     Properties:
+      #       RestApiId: !Ref ApiGatewayApi
+      #       Path: /
+      #       Method: POST
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaVPCAccessExecutionRole
+      Policies:
+        - PolicyName: LambdaLogPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - apigateway:*
+                Effect: Allow
+                Resource: "*"
+
+
+
+
+
+
+# DefinitionBody example (Using swagger)
+# https://github.com/awslabs/aws-api-gateway-developer-portal/blob/main/cloudformation/template.yaml
+  # ApiGatewayApi:
+  #   Type: AWS::Serverless::Api
+  #   Properties:
+  #     StageName: prod
+  #     # AccessLogSetting:
+  #     #   DestinationArn: !GetAtt AccessLogGroup.Arn
+  #     #   Format: '{ "requestId": "$context.requestId", "ip": "$context.identity.sourceIp", "caller": "$context.identity.caller", "requestTime": "$context.requestTimeEpoch", "httpMethod": "$context.httpMethod", "resourcePath": "$context.resourcePath", "status": "$context.status", "protocol": "$context.protocol", "responseLength": "$context.responseLength" }'
+  #     # MethodSettings:
+  #     #   - HttpMethod: "*"
+  #     #     ResourcePath: /*
+  #     #     LoggingLevel: INFO
+
+  #     # AlwaysDeploy: true # Setting this will make it always deploy to every stage available (not good for production workloads)
+
+  #     # Stage Variables
+  #     Variables:
+  #       lambdaAlias: live
+
+  #     Cors:
+  #       AllowMethods: "'POST, GET, OPTIONS'"
+  #       AllowHeaders: "'Authorization'"
+  #       AllowOrigin: "'*'"
+  #       MaxAge: "'600'"
+      # Auth:
+      #   Authorizers:
+      #     LambdaAuthorizer:
+      #       FunctionArn: <Function-ARN>
+      #       FunctionPayloadType: REQUEST
+      #       Identity:
+      #         Headers:
+      #           - Authorization
+
+      # Swagger example:
+      # DefinitionBody:
+      #   swagger: 2.0
+      #   info:
+      #     title: !Sub ${AWS::StackName}-backend-api
+      #     version: 2016-09-02T22:37:24Z
+      #   basePath: /
+      #   schemes:
+      #     - https
+      #   paths:
+      #     /:
+      #       get: # method
+      #         security:
+      #           - sigv4: []
+      #         produces:
+      #           - application/json
+      #         responses: {}
+      #         x-amazon-apigateway-integration:
+      #           # uri: !Sub arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/arn:aws:lambda:${AWS::Region}:${AWS::AccountId}:function:testingapi/invocations
+      #           uri: !Join
+      #             - ''
+      #             - - 'arn:aws:apigateway:'
+      #               - !Ref 'AWS::Region'
+      #               - ':lambda:path/2015-03-31/functions/'
+      #               - !GetAtt LambdaFunction.Arn
+      #               - ':'
+      #               - '$'
+      #               - '{stageVariables.lambdaAlias}'
+      #               - '/invocations'
+      #           httpMethod: GET
+      #           type: aws_proxy
+
+
+
+  # LambdaAliasInvokePermission:
+  #   Type: AWS::Lambda::Permission
+  #   Properties: 
+  #     FunctionName: !Ref LambdaFunction.Alias  # References the live alias created by AutoPublishAlias
+  #     Action: lambda:InvokeFunction
+  #     Principal: apigateway.amazonaws.com  # Allow API Gateway to invoke the Lambda function
+  #     SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayApi}/*/GET/
+
+  # Lambda layer example
+  # lambdaLayer:
+  #   Type: AWS::Serverless::LayerVersion
+  #   Description: The AWS SDK with support for Deepgram.
+  #   Metadata:
+  #     BuildMethod: nodejs16.x
+  #   Properties:
+  #     LayerName: aws-lambda-auth-layer
+  #     Description: Custom Authorizer Layer
+  #     ContentUri: deepgrampackages/
+  #     CompatibleRuntimes:
+  #       - nodejs16.x
+
+  # Used for having a catch all for specifying the headers allowed
+  # See {proxy+} options lambda code for example code for this API function
+  # ApiGatewayProxyResource:
+  #   Type: AWS::ApiGateway::Resource
+  #   Properties:
+  #     RestApiId: !Ref ApiGatewayApi
+  #     ParentId: !GetAtt ApiGatewayApi.RootResourceId
+  #     PathPart: ${proxy+}
+
+
+  # OptionsApiMethod:
+  #   Type: AWS::ApiGateway::Method
+  #   Properties:
+  #     RestApiId: !Ref ApiGatewayApi
+  #     ResourceId: !Ref ApiGatewayProxyResource
+  #     HttpMethod: OPTIONS
+  #     AuthorizationType: NONE
+  #     Integration:
+  #       IntegrationHttpMethod: POST
+  #       Type: AWS_PROXY
+  #       Uri: !Join
+  #           - ''
+  #           - - 'arn:aws:apigateway:'
+  #             - !Ref "AWS::Region"
+  #             - ':lambda:path/2015-03-31/functions/'
+  #             - !GetAtt OptionsFunction.Arn
+  #             - ':${stageVariables.lambdaAlias}/invocations'
+
+  # LambdaPermissionForApiGateway:
+  #   Type: AWS::Lambda::Permission
+  #   Properties:
+  #     FunctionName: !Ref OptionsFunction
+  #     Action: lambda:InvokeFunction
+  #     Principal: apigateway.amazonaws.com
+  #     SourceArn: !Sub arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${ApiGatewayApi}/*/*
+
+  # OptionsFunction:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     Role: !GetAtt LambdaRole.Arn
+  #     Runtime: nodejs20.x
+  #     Handler: index.handler
+  #     Timeout: 90
+  #     CodeUri: {proxy+} options lambda/
+  #     AutoPublishAlias: live
+  #     Environment:
+  #       Variables:
+  #         MY_ENV: Hello World
+
+

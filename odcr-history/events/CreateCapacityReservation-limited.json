@@ -1,0 +1,90 @@
+{
+    "_comment": "--------------------- LIMITED Capacity Reservation Example (User Creates Reservation that will expire at a specified time): -------------------------",
+
+    "version": "0",
+    "id": "bfaeac7f-a57f-ddc8-2058-2e2aa99fd13d",
+    "detail-type": "AWS API Call via CloudTrail",
+    "source": "aws.ec2",
+    "account": "123456789012",
+    "time": "2018-12-18T00:23:14Z",
+    "region": "us-east-1",
+    "resources": [],
+    "detail": {
+
+        "eventVersion": "1.08",
+        "userIdentity": {
+            "type": "AssumedRole",
+            "principalId": "AROAYJS4TH7HKS36UETR4:kloucks",
+            "arn": "arn:aws:sts::570351108046:assumed-role/cloud303-rnd/kloucks",
+            "accountId": "570351108046",
+            "accessKeyId": "ASIAYJS4TH7HF4BKUYHW",
+            "sessionContext": {
+                "sessionIssuer": {
+                    "type": "Role",
+                    "principalId": "AROAYJS4TH7HKS36UETR4",
+                    "arn": "arn:aws:iam::570351108046:role/cloud303-rnd",
+                    "accountId": "570351108046",
+                    "userName": "cloud303-rnd"
+                },
+                "webIdFederationData": {},
+                "attributes": {
+                    "creationDate": "2023-01-31T17:20:06Z",
+                    "mfaAuthenticated": "false"
+                }
+            }
+        },
+        "eventTime": "2023-01-31T17:50:27Z",
+        "eventSource": "ec2.amazonaws.com",
+        "eventName": "CreateCapacityReservation",
+        "awsRegion": "us-west-2",
+        "sourceIPAddress": "72.107.234.197",
+        "userAgent": "AWS Internal",
+        "requestParameters": {
+            "CreateCapacityReservationRequest": {
+                "EndDateType": "limited",
+                "Tenancy": "default",
+                "InstanceCount": 1,
+                "AvailabilityZone": "us-west-2a",
+                "InstancePlatform": "Linux/UNIX",
+                "EphemeralStorage": false,
+                "InstanceMatchCriteria": "open",
+                "InstanceType": "t2.micro",
+                "EndDate": "2023-01-31T18:00:00Z",
+                "EbsOptimized": false
+            }
+        },
+        "responseElements": {
+            "CreateCapacityReservationResponse": {
+                "xmlns": "http://ec2.amazonaws.com/doc/2016-11-15/",
+                "capacityReservation": {
+                    "ephemeralStorage": false,
+                    "ebsOptimized": false,
+                    "endDate": "2023-01-31T18:00:00.000Z",
+                    "instancePlatform": "Linux/UNIX",
+                    "instanceType": "t2.micro",
+                    "tenancy": "default",
+                    "availableInstanceCount": 1,
+                    "ownerId": 570351108046,
+                    "totalInstanceCount": 1,
+                    "availabilityZone": "us-west-2a",
+                    "capacityReservationId": "cr-0d774edb7f58a8c17",
+                    "endDateType": "limited",
+                    "capacityReservationArn": "arn:aws:ec2:us-west-2:570351108046:capacity-reservation/cr-0d774edb7f58a8c17",
+                    "state": "active",
+                    "instanceMatchCriteria": "open",
+                    "startDate": "2023-01-31T17:50:27.000Z",
+                    "createDate": "2023-01-31T17:50:27.000Z"
+                },
+                "requestId": "1c6d93b2-0576-473e-8fe3-6ee4e1702079"
+            }
+        },
+        "requestID": "1c6d93b2-0576-473e-8fe3-6ee4e1702079",
+        "eventID": "3a2437e6-8690-4c91-a9b1-e019570b2935",
+        "readOnly": false,
+        "eventType": "AwsApiCall",
+        "managementEvent": true,
+        "recipientAccountId": "570351108046",
+        "eventCategory": "Management",
+        "sessionCredentialFromConsole": "true"
+    }
+}

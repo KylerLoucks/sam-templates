@@ -1,0 +1,120 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Root Application to deploy nested API and ECS stacks
+
+Parameters:
+
+  pAppName:
+    Type: String
+    Default: pr1
+    Description: Application Name
+  
+  # Networking
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the Virtual Private Network (VPC)
+  pPrivateSubnetId1:
+    Type: String
+  pPrivateSubnetId2:
+    Type: String
+  pPublicSubnetId1:
+    Type: String
+  pPublicSubnetId2:
+    Type: String
+  pACMCertificateArn:
+    Type: String
+    Description: ACM cert ARN for ECS ALB and API Domain
+  pR53HostedZoneId:
+    Type: String
+    Description: Route 53 hosted zone
+
+  # ECS Container Ports
+  pWebsitePort:
+    Type: Number
+    Default: 80
+  pMongoPort:
+    Type: Number
+    Default: 27017
+  pRedisPort:
+    Type: Number
+    Default: 6379
+  pMySQLPort:
+    Type: Number
+    Default: 3306
+  pPostgresPort:
+    Type: Number
+    Default: 5432
+
+  # ECS Container Images
+  pWebsiteEcrImageUri:
+    Type: String
+    Description: > 
+      URI of the ECR image used for Website Task Definition. 
+      e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
+
+  # Api Variables
+  pNodeEnv:
+    Description: "Required. Set Node Environment Variable"
+    Type: String
+  pEpsagonToken:
+    Description: "Required. Epsagon token"
+    Type: String
+  pMSSecGroupA:
+    Description: "Required. Primary Security Group"
+    Type: String
+    Default: sg-0a34349137fd5086d
+  pMSSecGroupB:
+    Description: "Required. Secondary Security Group"
+    Type: String
+    Default: sg-0a1053b02521d09b3
+
+
+Resources:
+
+
+  Api:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location: api/template.yml
+      Parameters:
+        pAppName: !Ref pAppName
+        pR53HostedZoneId: !Ref pR53HostedZoneId
+        pACMCertificateArn: !Ref pACMCertificateArn
+
+        NodeEnv: !Ref pNodeEnv
+        EpsagonToken: !Ref pEpsagonToken
+        MSSubnet: !Ref pPublicSubnetId1
+        MSSecGroupA: !Ref pMSSecGroupA
+        MSSecGroupB: !Ref pMSSecGroupB
+
+
+  Ecs:
+    Type: AWS::Serverless::Application
+    Properties:
+      Location: ecs/madisonreed-ecs-tester.yml
+      Parameters:
+        pAppName: !Ref pAppName
+        pR53HostedZoneId: !Ref pR53HostedZoneId
+        pACMCertificateArn: !Ref pACMCertificateArn
+        pVpcId: !Ref pVpcId
+        pPrivateSubnetId1: !Ref pPrivateSubnetId1
+        pPrivateSubnetId2: !Ref pPrivateSubnetId2
+        pPublicSubnetId1: !Ref pPublicSubnetId1
+        pPublicSubnetId2: !Ref pPublicSubnetId2
+        pColorAdvisorApiUrl: !GetAtt Api.Outputs.ColorAdvisorApiUrl
+        pWebsiteEcrImageUri: !Ref pWebsiteEcrImageUri
+        pWebsitePort: !Ref pWebsitePort
+        pMongoPort: !Ref pMongoPort
+        pRedisPort: !Ref pRedisPort
+        pMySQLPort: !Ref pMySQLPort
+        pPostgresPort: !Ref pPostgresPort
+
+Outputs:
+  AppUrl:
+    Description: Application URL endpoint
+    Value: !GetAtt Ecs.Outputs.websiteUrl
+
+  ColorAdvisorApiEndpoint:
+    Description: ColorAdvisor API endpoint
+    Value: !GetAtt Api.Outputs.ColorAdvisorApiUrl

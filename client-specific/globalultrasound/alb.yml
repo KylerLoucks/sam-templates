@@ -1,0 +1,481 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Deploys Alb for Laravel, Wordpress, and Orthanc
+
+Parameters:
+
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the Virtual Private Network (VPC)
+
+  pSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: List of Public Subnet IDs for the Internet Facing Load Balancer
+
+  pWordpressContainerPort:
+    Type: Number
+    Description: Wordpress Container Port Number
+    Default: 80
+
+  pLaravelContainerPort:
+    Type: Number
+    Description: Laravel Container Port Number
+    Default: 80
+
+  pDomainName:
+    Type: String
+    Description: Domain Name
+    Default: globalultrasoundinstitute.com
+
+  pACMCertificateArn:
+    Type: String
+    Description: ACM Certificate ARN
+
+  pOrthancContainerPort:
+    Type: Number
+    Description: Orthanc Container Port Number
+    Default: 8042
+
+  pLaravelDnsPrefix:
+    Type: String
+    Description: Laravel DNS Prefix
+    Default: laraveldev
+
+  pOrthancDnsPrefix:
+    Type: String
+    Description: Orthanc DNS Prefix
+    Default: orthancdev
+
+  pWordpressDnsPrefix:
+    Type: String
+    Description: Wordpress DNS Prefix
+    Default: wordpressdev
+
+Resources:
+
+  albSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for ALB allowing HTTP
+      VpcId: !Ref pVpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0 
+
+  loadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      IpAddressType: ipv4
+      Scheme: internal #internet-facing
+      SecurityGroups:
+        - !GetAtt albSecurityGroup.GroupId
+      Subnets: !Ref pSubnetIds
+      Type: application
+
+  # Listener to redirect HTTP traffic to HTTPS
+  httpListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties: 
+      DefaultActions: 
+        # - Type: "fixed-response"
+        #   FixedResponseConfig:
+        #     StatusCode: "503"
+        #     ContentType: "text/plain"
+        #     MessageBody: "You have reached an invalid domain."
+        # - Type: forward
+        #   TargetGroupArn: !Ref laravelTg
+
+        - Type: redirect
+          RedirectConfig: 
+            Port: 443
+            Protocol: HTTPS
+            StatusCode: HTTP_301
+      LoadBalancerArn: !Ref loadBalancer
+      Port: 80
+      Protocol: HTTP
+
+  httpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties: 
+      Certificates: 
+        - CertificateArn: !Ref pACMCertificateArn
+      DefaultActions: 
+        - Type: "fixed-response"
+          FixedResponseConfig:
+            StatusCode: "503"
+            ContentType: "text/plain"
+            MessageBody: "You have reached an invalid domain."
+        # - Type: forward
+        #   TargetGroupArn: !Ref wordpressTg
+      LoadBalancerArn: !Ref loadBalancer
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: ELBSecurityPolicy-2016-08
+
+  # ==============================
+  #         Target Groups
+  # ==============================
+  wordpressBlueTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    UpdateReplacePolicy: Delete
+    Properties:
+      Name: wordpress-blue-TG-HTTPS
+      Port: !Ref pWordpressContainerPort
+      TargetType: ip
+      VpcId: !Ref pVpcId
+      Protocol: HTTP
+
+      HealthCheckPath: /
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: HTTP
+      HealthyThresholdCount: 4
+      UnhealthyThresholdCount: 4
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      Matcher:
+        HttpCode: 200-499
+
+      # TargetGroupAttributes:
+      #   - Key: stickiness.enabled
+      #     Value: !Ref pEnableTgStickySession
+      #   - Key: stickiness.lb_cookie.duration_seconds
+      #     Value: !Ref pTgStickyDuration
+      #   - Key: stickiness.type
+      #     Value: lb_cookie
+      #   - Key: deregistration_delay.timeout_seconds
+      #     Value: "180"
+      Tags:
+        - Key: Name
+          Value: wordpress-blue-TG-HTTPS
+        - Key: controlled-by
+          Value: !Sub cloudformation-${AWS::StackName}
+
+
+  wordpressGreenTg:
+    UpdateReplacePolicy: Delete
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: wordpress-green-TG-HTTPS
+      Port: !Ref pWordpressContainerPort
+      TargetType: ip
+      VpcId: !Ref pVpcId
+      Protocol: HTTP
+
+      HealthCheckPath: /
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: HTTP
+      HealthyThresholdCount: 4
+      UnhealthyThresholdCount: 4
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      Matcher:
+        HttpCode: 200-499
+      Tags:
+        - Key: Name
+          Value: wordpress-green-TG-HTTPS
+        - Key: controlled-by
+          Value: !Sub cloudformation-${AWS::StackName}
+
+  laravelBlueTG:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    UpdateReplacePolicy: Delete
+    Properties:
+      Name: laravel-blue-TG-HTTPS
+      Port: !Ref pLaravelContainerPort
+      TargetType: ip
+      VpcId: !Ref pVpcId
+      Protocol: HTTP
+
+      HealthCheckPath: /
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: HTTP
+      HealthyThresholdCount: 4
+      UnhealthyThresholdCount: 4
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      Matcher:
+        HttpCode: 200-499
+
+      # TargetGroupAttributes:
+      #   - Key: stickiness.enabled
+      #     Value: !Ref pEnableTgStickySession
+      #   - Key: stickiness.lb_cookie.duration_seconds
+      #     Value: !Ref pTgStickyDuration
+      #   - Key: stickiness.type
+      #     Value: lb_cookie
+      #   - Key: deregistration_delay.timeout_seconds
+      #     Value: "180"
+      Tags:
+        - Key: Name
+          Value: laravel-blue-TG-HTTPS
+        - Key: controlled-by
+          Value: !Sub cloudformation-${AWS::StackName}
+
+  laravelGreenTG:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    UpdateReplacePolicy: Delete
+    Properties:
+      Name: laravel-green-TG-HTTPS
+      Port: !Ref pLaravelContainerPort
+      TargetType: ip
+      VpcId: !Ref pVpcId
+      Protocol: HTTP
+
+      HealthCheckPath: /
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: HTTP
+      HealthyThresholdCount: 4
+      UnhealthyThresholdCount: 4
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      Matcher:
+        HttpCode: 200-499
+
+      # TargetGroupAttributes:
+      #   - Key: stickiness.enabled
+      #     Value: !Ref pEnableTgStickySession
+      #   - Key: stickiness.lb_cookie.duration_seconds
+      #     Value: !Ref pTgStickyDuration
+      #   - Key: stickiness.type
+      #     Value: lb_cookie
+      #   - Key: deregistration_delay.timeout_seconds
+      #     Value: "180"
+      Tags:
+        - Key: Name
+          Value: laravel-green-TG-HTTPS
+        - Key: controlled-by
+          Value: !Sub cloudformation-${AWS::StackName}
+  
+  orthancGreenTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    UpdateReplacePolicy: Delete
+    Properties:
+      Name: orthanc-green-TG-HTTPS
+      Port: !Ref pOrthancContainerPort
+      TargetType: ip
+      VpcId: !Ref pVpcId
+      Protocol: HTTP
+
+      HealthCheckPath: /
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: HTTP
+      HealthyThresholdCount: 4
+      UnhealthyThresholdCount: 4
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      Matcher:
+        HttpCode: 200-499
+      Tags:
+        - Key: Name
+          Value: orthanc-green-TG-HTTPS
+        - Key: controlled-by
+          Value: !Sub cloudformation-${AWS::StackName}
+  
+  orthancBlueTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    UpdateReplacePolicy: Delete
+    Properties:
+      Name: orthanc-blue-TG-HTTPS
+      Port: !Ref pOrthancContainerPort
+      TargetType: ip
+      VpcId: !Ref pVpcId
+      Protocol: HTTP
+
+      HealthCheckPath: /
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: HTTP
+      HealthyThresholdCount: 4
+      UnhealthyThresholdCount: 4
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      Matcher:
+        HttpCode: 200-499
+
+      # TargetGroupAttributes:
+      #   - Key: stickiness.enabled
+      #     Value: !Ref pEnableTgStickySession
+      #   - Key: stickiness.lb_cookie.duration_seconds
+      #     Value: !Ref pTgStickyDuration
+      #   - Key: stickiness.type
+      #     Value: lb_cookie
+      #   - Key: deregistration_delay.timeout_seconds
+      #     Value: "180"
+      Tags:
+        - Key: Name
+          Value: laravel-blue-TG-HTTPS
+        - Key: controlled-by
+          Value: !Sub cloudformation-${AWS::StackName}
+
+
+  # ==============================
+  #        Listener Rules
+  # ==============================
+  laravelBGRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref httpsListener
+      Priority: 2
+      Actions:
+        - Type: forward
+          ForwardConfig:
+            TargetGroups: 
+              - TargetGroupArn: !Ref laravelBlueTG
+                Weight: 100
+              - TargetGroupArn: !Ref laravelGreenTG
+                Weight: 0
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub ${pLaravelDnsPrefix}.${pDomainName}
+
+
+  orthancBGRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref httpsListener
+      Priority: 3
+      Actions:
+        - Type: forward
+          ForwardConfig:
+            TargetGroups: 
+              - TargetGroupArn: !Ref orthancBlueTg
+                Weight: 100
+              - TargetGroupArn: !Ref orthancGreenTg
+                Weight: 0
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub ${pOrthancDnsPrefix}.${pDomainName}
+
+
+  wordpressBGRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      ListenerArn: !Ref httpsListener
+      Priority: 1
+      Actions:
+        - Type: forward
+          ForwardConfig:
+            TargetGroups: 
+              - TargetGroupArn: !Ref wordpressBlueTg
+                Weight: 100
+              - TargetGroupArn: !Ref wordpressGreenTg
+                Weight: 0
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub ${pWordpressDnsPrefix}.${pDomainName}
+
+  # ==============================
+  #        R53 Hosted Zone
+  # ==============================
+
+  PrivateHostedZone:
+      Type: AWS::Route53::HostedZone
+      Properties:
+        Name: !Ref pDomainName
+        VPCs: 
+          - VPCId: !Ref pVpcId
+            VPCRegion: !Ref AWS::Region
+        HostedZoneConfig:
+          Comment: Private hosted zone for internal DNS resolution
+
+  DNSRecords:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneId: !Ref PrivateHostedZone
+      RecordSets:
+        - Name: !Ref pDomainName
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt loadBalancer.DNSName
+            HostedZoneId: !GetAtt loadBalancer.CanonicalHostedZoneID
+        - Name: !Sub ${pLaravelDnsPrefix}.${pDomainName}
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt loadBalancer.DNSName
+            HostedZoneId: !GetAtt loadBalancer.CanonicalHostedZoneID
+        - Name: !Sub ${pOrthancDnsPrefix}.${pDomainName}
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt loadBalancer.DNSName
+            HostedZoneId: !GetAtt loadBalancer.CanonicalHostedZoneID
+        - Name: !Sub ${pWordpressDnsPrefix}.${pDomainName}
+          Type: A
+          AliasTarget:
+            DNSName: !GetAtt loadBalancer.DNSName
+            HostedZoneId: !GetAtt loadBalancer.CanonicalHostedZoneID
+
+
+  # wordpressRule:
+  #   Type: AWS::ElasticLoadBalancingV2::ListenerRule
+  #   Properties:
+  #     ListenerArn: !Ref httpsListener
+  #     Priority: 5
+  #     Actions:
+  #       - Type: forward
+  #         TargetGroupArn: !Ref wordpressTg
+  #     Conditions:
+  #       # - Field: path-pattern
+  #       #   PathPatternConfig:
+  #       #     Values: [/orthanc/*]
+  #       - Field: host-header
+  #         HostHeaderConfig:
+  #           Values: 
+  #             - !Sub ${pWordpressDnsPrefix}.${pDomainName}
+
+Outputs:
+  albSecurityGroup:
+    Description: Security Group for ALB
+    Value: !Ref albSecurityGroup
+    Export:
+      Name: !Sub alb-security-group-${AWS::StackName}
+  laravelBlueTg:
+    Description: Blue Target Group for Laravel
+    Value: !Ref laravelBlueTG
+    Export:
+      Name: !Sub laravel-blue-tg-${AWS::StackName}
+  laravelGreenTg:
+    Description: Green Target Group for Laravel
+    Value: !Ref laravelGreenTG
+    Export:
+      Name: !Sub laravel-green-tg-${AWS::StackName}
+  orthancBlueTg:
+    Description: Target Group for Laravel
+    Value: !Ref orthancBlueTg
+    Export:
+      Name: !Sub orthancBlueTg-${AWS::StackName}
+  orthancGreenTg:
+    Description: Target Group for Laravel
+    Value: !Ref orthancGreenTg
+    Export:
+      Name: !Sub orthancGreenTg-${AWS::StackName}
+  wordpressBlueTg:
+    Description: Target Group for Wordpress
+    Value: !Ref wordpressBlueTg
+    Export:
+      Name: !Sub wordpressBlueTg-${AWS::StackName}
+  wordpressGreenTg:
+    Description: Target Group for Wordpress
+    Value: !Ref wordpressGreenTg
+    Export:
+      Name: !Sub wordpressGreenTg-${AWS::StackName}
+  clusterALB:
+    Description: Cluster ALB
+    Value: !Ref loadBalancer
+    Export:
+      Name: !Sub cluster-alb-${AWS::StackName}
+  PrivateHostedZoneId:
+    Description: ID of the Private Hosted Zone
+    Value: !Ref PrivateHostedZone
+    Export:
+      Name: !Sub private-hosted-zone-id-${AWS::StackName}

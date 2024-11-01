@@ -1,0 +1,5 @@
+{
+    "name": "websocketauthorizer",
+    "version": "1.0.0",
+    "description": "JavaScript implementation of lambda custom authorizer for cognito and api gateway websockets"
+}

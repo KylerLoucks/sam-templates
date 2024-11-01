@@ -1,0 +1,122 @@
+AWSTemplateFormatVersion: 2010-09-09
+Transform: 'AWS::Serverless-2016-10-31'
+Description: AWS SAM stack for deploying various S3 event triggers
+
+
+Globals:
+  Function:
+    Runtime: python3.9
+    Handler: app.lambda_handler
+    Tracing: Active
+
+Parameters:
+  pBucketName:
+    Type: String
+    Default: my-s3-bucket
+    Description: Name of S3 bucket that will be used to listen for object upload events.
+
+Resources:
+  
+  # Optional Layer for AWS SDK for Node.Js
+  NodeLayer:
+    Type: AWS::Serverless::LayerVersion
+    Description: The AWS SDK.
+    Metadata:
+      BuildMethod: nodejs16.x
+    Properties:
+      LayerName: node-layer
+      Description: Dependencies Layer
+      ContentUri: dependencies/node
+      CompatibleRuntimes:
+        - nodejs16.x
+
+  # Optional Layer for Python based lambdas
+  PythonLayer:
+    Type: AWS::Serverless::LayerVersion
+    Description: Layer that can be used with all Python based Lambda functions
+    Metadata:
+      BuildMethod: python3.10
+    Properties:
+      LayerName: python-layer
+      Description: Layer that can be used with all Python based Lambda functions
+      ContentUri: dependencies/python
+      CompatibleRuntimes:
+        - python3.10
+  
+  lambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+      Policies:
+        - PolicyName: XRayPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - xray:PutTraceSegments
+                  - xray:PutTelemetryRecords
+                Resource: '*'
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+  
+  # Make sure CloudTrail is enabled with Data Write events enabled
+  mp4EventBridgeLambda:
+    Type: AWS::Serverless::Function
+    Properties:
+      Role: !GetAtt lambdaRole.Arn
+      Timeout: 60
+      Environment:
+        Variables:
+          ACCOUNT_ID: !Sub ${AWS::AccountId}
+      Runtime: python3.9
+      Architectures:
+        - x86_64
+      Handler: app.lambda_handler
+      CodeUri: mp4eventlambda/
+      Events:
+        EventBridgeTrigger:
+            Type: CloudWatchEvent
+            Properties:
+              Pattern:
+                source:
+                  - aws.s3
+                detail:
+                  eventSource:
+                    - s3.amazonaws.com
+                  eventName:
+                    - PutObject
+                    - CompleteMultipartUpload
+                  requestParameters:
+                    bucketName:
+                      - !Ref pBucketName
+                    key:
+                      - suffix: ".mp4"
+
+  # Regular S3 Event Notification Trigger for all ObjectCreate events (not using eventbridge)
+  # bucketEventsLambda:
+  #   Type: AWS::Serverless::Function
+  #   Properties:
+  #     Role: !GetAtt lambdaRole.Arn
+  #     Timeout: 60
+  #     Runtime: nodejs16.x
+  #     Handler: index.handler
+  #     Environment:
+  #       Variables:
+  #         ACCOUNT_ID: !Sub ${AWS::AccountId}
+  #     CodeUri: s3events/
+  #     Events:
+  #       s3Trigger:
+  #         Type: S3
+  #         Properties:
+  #           Bucket: !Ref pBucketName
+  #           Events: 
+  #             - s3:ObjectCreated:*
