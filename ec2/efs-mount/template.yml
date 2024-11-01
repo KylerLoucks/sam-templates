@@ -1,0 +1,144 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Deploys an EC2 instance with S3 and SSM permissions
+
+Parameters:
+  pAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: Mapping to retrieve the latest Ubuntu AMI. Do not change this value.
+    Default: /aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id
+    AllowedValues:
+      - /aws/service/canonical/ubuntu/server/22.04/stable/current/arm64/hvm/ebs-gp2/ami-id # arm64
+      - /aws/service/canonical/ubuntu/server/22.04/stable/current/amd64/hvm/ebs-gp2/ami-id # x86
+    
+  pEFSFileSystemId:
+    Type: String
+    Description: Id of the EFS filesystem to mount to the EC2 instance.
+    Default: fs-09ba1106f7317fee0
+
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Id of the VPC to deploy the instance to.
+  
+  pEc2InstanceSubnet:
+    Type: AWS::EC2::Subnet::Id
+    Description: VPC public subnet ID for instance deployment
+
+
+
+
+Resources:
+  # IAM Role for EC2 Instance with S3 and SSM Permissions
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: S3AndSSMAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Allows access to S3
+              - Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:ListBuckets
+                  - s3:GetObject
+                  - s3:PutObject
+                Resource: "arn:aws:s3:::*"
+              # Allows access to SSM
+              - Effect: Allow
+                Action:
+                  - ssm:DescribeInstanceInformation
+                  - ssm:GetCommandInvocation
+                  - ssm:ListCommandInvocations
+                  - ssm:SendCommand
+                  - ssm:StartSession
+                  - ec2messages:GetMessages
+                  - ec2messages:AcknowledgeMessage
+                  - ec2messages:SendReply
+                  - ec2messages:DeleteMessage
+                Resource: "*"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  # Instance Profile for EC2 Instance
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - Ref: EC2InstanceRole
+
+  # Security Group for EC2 Instance
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH and HTTP access
+      VpcId: !Ref pVpcId
+      SecurityGroupIngress:
+        # - IpProtocol: tcp
+        #   FromPort: 22
+        #   ToPort: 22
+        #   CidrIp: 0.0.0.0/0  # Only use this for testing. Restrict IPs in production.
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+
+  # EC2 Instance
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: t3.medium
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      ImageId: !Ref pAmiId # ami-0c55b159cbfafe1f0  # Amazon Linux 2 AMI ID (replace with the latest AMI ID in your region)
+      SecurityGroupIds:
+        - !GetAtt EC2SecurityGroup.GroupId  # Ensure SecurityGroupIds is specified
+      SubnetId: !Ref pEc2InstanceSubnet
+      Tags:
+        - Key: Name
+          Value: CopyFilesToEFS
+      UserData: 
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          apt update -y
+          apt install -y unzip apt python3-pip
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip && ./aws/install
+
+          # install cfn-signal
+          curl "https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.zip" -o cfn-bootstrap.zip
+          unzip cfn-bootstrap.zip
+          cd aws-cfn-bootstrap-2.0
+          chmod +x ./setup.py
+          python3 setup.py install
+          cd ..
+
+          # Install efs-utils on ubuntu
+          apt-get -y install git binutils rustc cargo pkg-config libssl-dev
+          git clone https://github.com/aws/efs-utils
+          cd efs-utils
+          ./build-deb.sh
+          apt-get -y install ./build/amazon-efs-utils*deb
+          mkdir /mnt/efs
+          mount -t efs ${pEFSFileSystemId}:/ /mnt/efs
+          aws s3 cp s3://wordpress-files-backup-us-west-1-848137391192/ /mnt/efs/wp --recursive
+
+          # Signal CloudFormation
+          /usr/local/bin/cfn-signal --stack ${AWS::StackId} --resource EC2Instance --region ${AWS::Region} --exit-code $? 
+
+          # echo "${pEFSFileSystemId}:/ /mnt/efs efs defaults,_netdev 0 0" >> /etc/fstab
+
+    CreationPolicy:
+      ResourceSignal:
+        Timeout: PT3H # Timeout of 3 hours
+
+Outputs:
+  InstanceId:
+    Description: The EC2 instance ID
+    Value: !Ref EC2Instance
