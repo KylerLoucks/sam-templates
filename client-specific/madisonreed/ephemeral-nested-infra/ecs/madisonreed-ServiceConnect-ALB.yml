@@ -119,39 +119,6 @@ Parameters:
 
 Resources:
 
-# # ElastiCache REDIS
-#   RedisSecurityGroup:
-#     Type: AWS::EC2::SecurityGroup
-#     Properties:
-#       GroupDescription: Allow access to Ephemeral Redis from VPC
-#       VpcId: !Ref pVpcId
-#       SecurityGroupIngress:
-#         - IpProtocol: tcp
-#           FromPort: 6379
-#           ToPort: 6379
-#           CidrIp: 10.20.0.0/16
-
-#   RedisSubnetGroup:
-#     Type: AWS::ElastiCache::SubnetGroup
-#     Properties:
-#       Description: Subnet group for Redis
-#       SubnetIds:
-#         - !Ref pPrivateSubnetId1
-
-#   RedisCluster:
-#     Type: AWS::ElastiCache::CacheCluster
-#     Properties:
-#       CacheNodeType: cache.t2.micro
-#       Engine: redis
-#       EngineVersion: 7.1
-#       NumCacheNodes: 1
-#       CacheSubnetGroupName: !Ref RedisSubnetGroup
-#       VpcSecurityGroupIds:
-#         - !Ref RedisSecurityGroup
-#       Tags:
-#         - Key: Name
-#           Value: !Sub ${pAppName}-RedisCluster
-
 
   # ==============================================
   # ================= LOG GROUPS =================
@@ -860,6 +827,9 @@ Resources:
       - redisService
       - apiServerService
       - socketioService
+      - ecsLoadBalancer
+      - httpsListener
+      - websiteTg
     Type: AWS::ECS::Service
     Properties:
       Cluster: !Ref fargateCluster
@@ -1121,6 +1091,9 @@ Resources:
       - mongoService
       - mysqlService
       - redisService
+      - ecsLoadBalancer
+      - httpsListener
+      - apiServerTg
     Type: AWS::ECS::Service
     Properties:
       Cluster: !Ref fargateCluster
@@ -1184,6 +1157,9 @@ Resources:
       - mongoService
       - mysqlService
       - redisService
+      - ecsLoadBalancer
+      - httpsListener
+      - topHatTg
     Type: AWS::ECS::Service
     Properties:
       Cluster: !Ref fargateCluster
@@ -1246,6 +1222,9 @@ Resources:
       - mongoService
       - mysqlService
       - redisService
+      - ecsLoadBalancer
+      - httpsListener
+      - socketioTg
     Type: AWS::ECS::Service
     Properties:
       Cluster: !Ref fargateCluster
@@ -1684,7 +1663,6 @@ Resources:
   autoScalingRole:
     Type: AWS::IAM::Role
     Properties:
-      RoleName: AutoScalingRole
       AssumeRolePolicyDocument:
         Version: 2012-10-17
         Statement:
@@ -1825,206 +1803,29 @@ Resources:
       ScalableDimension: ecs:service:DesiredCount
       ServiceNamespace: ecs
 
-  AutoScalingTargetMongo:
-    Type: AWS::ApplicationAutoScaling::ScalableTarget
-    Properties:
-      MaxCapacity: 1
-      MinCapacity: 1
-      ScheduledActions:
-        - ScheduledActionName: schedule-scale-to-zero
-          Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
-          ScalableTargetAction:
-            MaxCapacity: 0
-            MinCapacity: 0
-        - ScheduledActionName: schedule-scale-up
-          Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
-          ScalableTargetAction:
-            MaxCapacity: 1
-            MinCapacity: 1
-      ResourceId: !Join ["/", [service, !Ref fargateCluster, !GetAtt mongoService.Name]]
-      RoleARN: !GetAtt autoScalingRole.Arn
-      ScalableDimension: ecs:service:DesiredCount
-      ServiceNamespace: ecs
-
-  AutoScalingTargetMysql:
-    Type: AWS::ApplicationAutoScaling::ScalableTarget
-    Properties:
-      MaxCapacity: 1
-      MinCapacity: 1
-      ScheduledActions:
-        - ScheduledActionName: schedule-scale-to-zero
-          Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
-          ScalableTargetAction:
-            MaxCapacity: 0
-            MinCapacity: 0
-        - ScheduledActionName: schedule-scale-up
-          Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
-          ScalableTargetAction:
-            MaxCapacity: 1
-            MinCapacity: 1
-      ResourceId: !Join ["/", [service, !Ref fargateCluster, !GetAtt mysqlService.Name]]
-      RoleARN: !GetAtt autoScalingRole.Arn
-      ScalableDimension: ecs:service:DesiredCount
-      ServiceNamespace: ecs
-
-  # # Scale based on CPU usage metric
-  # AutoScalingPolicy:
-  #   Type: AWS::ApplicationAutoScaling::ScalingPolicy
+  # AutoScalingTargetMongo:
+  #   Type: AWS::ApplicationAutoScaling::ScalableTarget
+  #   DependsOn: mongoService
   #   Properties:
-  #     PolicyName: ServiceAutoScalingPolicy
-  #     PolicyType: TargetTrackingScaling
-  #     ScalingTargetId: !Ref AutoScalingTarget
-  #     TargetTrackingScalingPolicyConfiguration:
-  #       PredefinedMetricSpecification:
-  #         PredefinedMetricType: ECSServiceAverageCPUUtilization
-  #       ScaleInCooldown: 10
-  #       ScaleOutCooldown: 10
-  #       TargetValue: 70
+  #     MaxCapacity: 1
+  #     MinCapacity: 1
+  #     ScheduledActions:
+  #       - ScheduledActionName: schedule-scale-to-zero
+  #         Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
+  #         ScalableTargetAction:
+  #           MaxCapacity: 0
+  #           MinCapacity: 0
+  #       - ScheduledActionName: schedule-scale-up
+  #         Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
+  #         ScalableTargetAction:
+  #           MaxCapacity: 1
+  #           MinCapacity: 1
+  #     ResourceId: !Join ["/", [service, !Ref fargateCluster, !GetAtt mongoService.Name]]
+  #     RoleARN: !GetAtt autoScalingRole.Arn
+  #     ScalableDimension: ecs:service:DesiredCount
+  #     ServiceNamespace: ecs
 
-
-  # ==================================================
-  # =============== Connection Tester! ===============
-  # ==================================================
-
-  # connTestTaskDefinition:
-  #   Type: AWS::ECS::TaskDefinition
-  #   Properties:
-  #     ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
-  #     TaskRoleArn: !GetAtt taskRole.Arn
-  #     Cpu: 512
-  #     Memory: 1024
-  #     RequiresCompatibilities:
-  #       - FARGATE
-  #     NetworkMode: awsvpc
-  #     RuntimePlatform:
-  #       CpuArchitecture: X86_64
-  #       OperatingSystemFamily: LINUX
-
-  #     ContainerDefinitions:
-  #       - Name: conntest
-  #         # changes to the Image will cause a new deployment to the ECS service, replacing the old deployment.
-  #         Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/connectiontest
-  #         PortMappings:
-  #           - Name: conntest
-  #             ContainerPort: !Ref pWebsitePort
-  #             Protocol: tcp # tcp | udp
-  #             AppProtocol: http
-  #         Environment:
-  #           # REDIS
-  #           - Name: REDIS_HOST
-  #             Value: !Sub redis.${pAppName}.cloudmap.internal # Reference Cloud Map Namespace
-  #           - Name: REDIS_PORT
-  #             Value: !Ref pRedisPort
-
-  #           # MYSQL
-  #           - Name: MYSQL_HOST
-  #             Value: !Sub mysql.${pAppName}.cloudmap.internal
-  #           - Name: MYSQL_PORT
-  #             Value: !Ref pMySQLPort
-  #           - Name: MYSQL_USER
-  #             Value: root
-  #           - Name: MYSQL_PASSWORD
-  #             Value: root
-  #           - Name: MYSQL_DB
-  #             Value: tophat
-
-  #           # MONGO
-  #           - Name: MONGO_HOST
-  #             Value: !Sub mongo.${pAppName}.cloudmap.internal
-  #           - Name: MONGO_PORT
-  #             Value: !Ref pMongoPort
-
-
-  #         LogConfiguration:
-  #           LogDriver: awslogs
-  #           Options:
-  #             awslogs-group: !Ref connTestLogGroup
-  #             awslogs-region: !Sub ${AWS::Region}
-  #             awslogs-stream-prefix: ecs
-
-  # connTestLogGroup:
-  #   Type: AWS::Logs::LogGroup
-  #   Properties:
-  #     LogGroupName: !Sub /ecs/conntest/${pAppName}
-  #     RetentionInDays: 7
-
-
-  # connTestService:
-  #   # Dependency is required due to the fact that we must deploy backwards 
-  #   # from a traditional deployment (database > API > Web UI)
-  #   DependsOn:
-  #     - redisService
-  #     - mongoService
-  #     - mysqlService
-  #   Type: AWS::ECS::Service
-  #   Properties:
-  #     Cluster: !Ref fargateCluster
-  #     ServiceName: conntest
-  #     DeploymentController: 
-  #       Type: ECS
-  #     DesiredCount: 1
-  #     EnableECSManagedTags: true
-  #     EnableExecuteCommand: true
-  #     LaunchType: FARGATE
-  #     # Allows the ability for updates to create a new task before draining the old task.
-  #     # https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_DeploymentConfiguration.html
-  #     DeploymentConfiguration:
-  #       MinimumHealthyPercent: 100
-  #       MaximumPercent: 200
-  #     NetworkConfiguration: 
-  #       AwsvpcConfiguration:
-  #         AssignPublicIp: DISABLED
-  #         SecurityGroups:
-  #           - !GetAtt serviceSecurityGroup.GroupId
-  #         Subnets: 
-  #           - !Ref pPrivateSubnetId1
-  #           - !Ref pPrivateSubnetId2
-  #     PlatformVersion: LATEST
-  #     PropagateTags: SERVICE
-  #     # Expose containers running on this Service to Cloud Map Service Connect.
-  #     # Allows using Cloud Map to connect ECS Services between/within clusters without ELBs
-  #     ServiceConnectConfiguration:
-  #       Enabled: true
-  #       Services:
-  #         - PortName: conntest
-  #           ClientAliases:
-  #             - Port: !Ref pWebsitePort
-  #       # Service Connect Agent logs location
-  #       LogConfiguration:
-  #         LogDriver: awslogs
-  #         Options:
-  #           awslogs-group: !Ref connTestLogGroup
-  #           awslogs-region: !Sub ${AWS::Region}
-  #           awslogs-stream-prefix: service-connect-agent
-  #     # Used to connect via Route53 record for Private DNS (VPN only)
-  #     ServiceRegistries: 
-  #       - RegistryArn: !GetAtt connTestServiceDiscoveryService.Arn
-  #         Port: !Ref pWebsitePort
-  #     TaskDefinition: !Ref connTestTaskDefinition
-  #     Tags: 
-  #       - Key: managed-by
-  #         Value: SAM
-  #       - Key: ephemeral:app
-  #         Value: !Ref pAppName
-
-  # Used to be able to connect via VPN and DNS route to the Web UI (DNS record could be stale)
-  # connTestServiceDiscoveryService:
-  #   Type: AWS::ServiceDiscovery::Service
-  #   Properties:
-  #     Name: connectiontest # Name must be unique from what is given for ECS service 'ServiceConnectConfiguration.PortName'. 
-  #     Description: Service discovery for connection test service
-  #     DnsConfig:
-  #       DnsRecords:
-  #         - Type: A
-  #           TTL: 60
-  #         - Type: SRV
-  #           TTL: 60
-  #       RoutingPolicy: MULTIVALUE
-  #     NamespaceId: !GetAtt serviceDiscoveryNameSpace.Id
-
-
-  # # Scheduled Autoscaling for Connection Tester!
-  # AutoScalingTargetConnTester:
+  # AutoScalingTargetMysql:
   #   Type: AWS::ApplicationAutoScaling::ScalableTarget
   #   Properties:
   #     MaxCapacity: 1
@@ -2040,10 +1841,125 @@ Resources:
   #         ScalableTargetAction:
   #           MaxCapacity: 1
   #           MinCapacity: 1
-  #     ResourceId: !Join ["/", [service, !Ref fargateCluster, !GetAtt connTestService.Name]]
+  #     ResourceId: !Join ["/", [service, !Ref fargateCluster, !GetAtt mysqlService.Name]]
   #     RoleARN: !GetAtt autoScalingRole.Arn
   #     ScalableDimension: ecs:service:DesiredCount
   #     ServiceNamespace: ecs
+
+  # CLEANUP CUSTOM RESOURCE
+
+  # Artifact bucket cleanup
+  Cleanup:
+    Type: Custom::S3DeleteObjectsLambda
+    Properties:
+      ServiceToken: !GetAtt CleanupFunction.Arn
+
+  CleanupLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        -
+          PolicyName: CleanupPermissions
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Sid: DeleteBucketObjects
+                Effect: Allow
+                Action:
+                  - "lambda:*"
+                  - "events:*"
+                  - "logs:*"
+                  - "s3:DeleteObject"
+                  - "s3:DeleteObjectVersion"
+                Resource: "*"
+
+  CleanupFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Deletes objects from buckets provisioned by CloudFormation
+      Handler: index.handler
+      Runtime: python3.10
+      Role: !GetAtt CleanupLambdaRole.Arn
+      Environment:
+        Variables:
+          PREFIX: !Ref pAppName
+      Timeout: 120
+      Code:
+        ZipFile: |
+          import os 
+          import json
+          import cfnresponse
+          import boto3
+          import logging
+
+          from botocore.exceptions import ClientError
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          prefix = os.environ.get('PREFIX')
+          lambda_client = boto3.client('lambda')
+          eventbridge_client = boto3.client('events')
+
+          def handler(event, context):
+            logger.info("Received event: %s" % json.dumps(event))
+            request_type = event.get('RequestType')
+           
+
+            result = cfnresponse.SUCCESS
+
+            try:
+              if request_type == 'Create' or request_type == 'Update':
+                result = cfnresponse.SUCCESS
+              elif request_type == 'Delete':
+                result = cleanup(prefix)
+            except ClientError as e:
+              logger.error('Error: %s', e)
+              result = cfnresponse.FAILED
+
+            cfnresponse.send(event, context, result, {})
+
+          def cleanup(prefix):        
+            paginator = lambda_client.get_paginator('list_functions')
+            for page in paginator.paginate():
+                for function in page['Functions']:
+                    function_name = function['FunctionName']
+                    if function_name.startswith(prefix):
+                        logger.info(f"Deleting Lambda function: {function_name}")
+                        lambda_client.delete_function(FunctionName=function_name)
+
+            paginator = eventbridge_client.get_paginator('list_rules')
+            for page in paginator.paginate(NamePrefix=prefix):
+                for rule in page['Rules']:
+                    rule_name = rule['Name']
+                    logger.info(f"Deleting EventBridge rule: {rule_name}")
+                    
+                    # List targets before removing the rule
+                    targets = eventbridge_client.list_targets_by_rule(Rule=rule_name)
+                    if targets['Targets']:
+                        target_ids = [target['Id'] for target in targets['Targets']]
+                        eventbridge_client.remove_targets(Rule=rule_name, Ids=target_ids)
+                    
+                    # Delete the rule
+                    eventbridge_client.delete_rule(Name=rule_name)
+
+            return cfnresponse.SUCCESS
+            
+  cleanupLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${CleanupFunction}
+      RetentionInDays: 7
 
 Outputs:
   websiteUrl:
