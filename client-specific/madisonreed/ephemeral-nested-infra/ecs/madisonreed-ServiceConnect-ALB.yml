@@ -119,6 +119,39 @@ Parameters:
 
 Resources:
 
+# # ElastiCache REDIS
+#   RedisSecurityGroup:
+#     Type: AWS::EC2::SecurityGroup
+#     Properties:
+#       GroupDescription: Allow access to Ephemeral Redis from VPC
+#       VpcId: !Ref pVpcId
+#       SecurityGroupIngress:
+#         - IpProtocol: tcp
+#           FromPort: 6379
+#           ToPort: 6379
+#           CidrIp: 10.20.0.0/16
+
+#   RedisSubnetGroup:
+#     Type: AWS::ElastiCache::SubnetGroup
+#     Properties:
+#       Description: Subnet group for Redis
+#       SubnetIds:
+#         - !Ref pPrivateSubnetId1
+
+#   RedisCluster:
+#     Type: AWS::ElastiCache::CacheCluster
+#     Properties:
+#       CacheNodeType: cache.t2.micro
+#       Engine: redis
+#       EngineVersion: 7.1
+#       NumCacheNodes: 1
+#       CacheSubnetGroupName: !Ref RedisSubnetGroup
+#       VpcSecurityGroupIds:
+#         - !Ref RedisSecurityGroup
+#       Tags:
+#         - Key: Name
+#           Value: !Sub ${pAppName}-RedisCluster
+
 
   # ==============================================
   # ================= LOG GROUPS =================
@@ -1934,9 +1967,18 @@ Resources:
             for page in paginator.paginate():
                 for function in page['Functions']:
                     function_name = function['FunctionName']
+
                     if function_name.startswith(prefix):
-                        logger.info(f"Deleting Lambda function: {function_name}")
-                        lambda_client.delete_function(FunctionName=function_name)
+                        # Retrieve the tags for the Lambda function
+                        tags = lambda_client.list_tags(Resource=function['FunctionArn']).get('Tags', {})
+                        
+                        # Check if this Lambda was deployed by SAM, if it is managed by SAM, dont delete it since SAM will handle deletion.
+                        if tags.get('lambda:createdBy') == "SAM":
+                            logger.info(f"Skipping function deployed by SAM: {function_name}")
+                            continue
+                        else:
+                          logger.info(f"Deleting Lambda function: {function_name}")
+                          lambda_client.delete_function(FunctionName=function_name)
 
             paginator = eventbridge_client.get_paginator('list_rules')
             for page in paginator.paginate(NamePrefix=prefix):
