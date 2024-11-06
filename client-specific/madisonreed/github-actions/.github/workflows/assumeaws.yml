@@ -18,7 +18,7 @@ on:
 jobs: 
   deploy: 
     # Only trigger workflow when target branch matches criteria
-    if: startsWith(github.head_ref, 'c303') || startsWith(github.head_ref, 'mr-c303')
+    if: startsWith(github.head_ref, 'c303')
     runs-on: ubuntu-latest 
     #These permissions are needed to interact with GitHub's OIDC Token endpoint. 
     permissions: 
@@ -75,6 +75,7 @@ jobs:
             pApiServerBuildSpecPath=ephemeralenv/buildspec-apiserver.yml \
             pDeployBuildSpecPath=ephemeralenv/buildspec-deploy.yml \
             pPilkoBuildSpecPath=ephemeralenv/buildspec-pilko.yml \
+            pLabelPRBuildSpecPath=ephemeralenv/buildspec-labels.yml \
           --stack-name pr${{github.event.pull_request.number}}-pipeline \
           --tags CleanupDate=$(date -u -d "+10 days" '+%Y-%m-%dT%H:%M:%SZ') \
           --no-confirm-changeset \
@@ -96,3 +97,4 @@ jobs:
           echo "PR was closed, cleaning up resources..."
           aws cloudformation delete-stack --stack-name pr${{github.event.pull_request.number}}-ephemeral --output text
           aws cloudformation delete-stack --stack-name pr${{github.event.pull_request.number}}-pipeline --output text
+          aws cloudformation delete-stack --stack-name pr${{github.event.pull_request.number}}-coloradvisor --output text
