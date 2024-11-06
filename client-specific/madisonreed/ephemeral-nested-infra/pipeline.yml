@@ -146,6 +146,12 @@ Resources:
       RepositoryName: !Sub tophat-${pAppName}
       EmptyOnDelete: true
 
+  lambdaFunctionsRepo:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub lambda-functions-${pAppName}-ecs
+      EmptyOnDelete: true
+
   # IAM Role - CodeBuild
 
   codeBuildServiceRole:
@@ -228,6 +234,7 @@ Resources:
                   - !GetAtt ecrTophatRepo.Arn
                   - !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/mysql-ephemeral
                   - !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/mongo-ephemeral
+                  - !GetAtt lambdaFunctionsRepo.Arn
         - PolicyName: BASE-ECR
           PolicyDocument: 
             Version: 2012-10-17 
@@ -593,7 +600,7 @@ Resources:
         Type: CODEPIPELINE
       Description: Deploy/Update Lambdas
       Environment:
-        ComputeType: !Ref pCodeBuildComputeType
+        ComputeType: BUILD_GENERAL1_MEDIUM
         Image: !Ref pCodeBuildImage
         Type: LINUX_CONTAINER
         PrivilegedMode: true
@@ -613,6 +620,10 @@ Resources:
             Value: root
           - Name: MYSQL_USER
             Value: root
+
+          - Name: EPHEMERAL_ID 
+            Value: !Ref pAppName 
+            Type: PLAINTEXT
 
           - Name: DOMAIN_NAME
             Value: !Sub ${pAppName}.${pHostedZoneName}
