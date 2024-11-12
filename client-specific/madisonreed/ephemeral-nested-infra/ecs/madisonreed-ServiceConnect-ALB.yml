@@ -879,8 +879,8 @@ Resources:
         MinimumHealthyPercent: 100
         MaximumPercent: 200
         DeploymentCircuitBreaker:
-          Enable: false
-          Rollback: true
+          Enable: true
+          Rollback: false
       HealthCheckGracePeriodSeconds: 0 # Set to zero to ensure deployment never fails
       LoadBalancers: 
         - ContainerName: website
@@ -940,7 +940,7 @@ Resources:
         MaximumPercent: 200
         DeploymentCircuitBreaker:
           Enable: true
-          Rollback: true
+          Rollback: false
       NetworkConfiguration: 
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
@@ -1013,7 +1013,7 @@ Resources:
         MaximumPercent: 200
         DeploymentCircuitBreaker:
           Enable: true
-          Rollback: true
+          Rollback: false
       NetworkConfiguration: 
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
@@ -1073,8 +1073,8 @@ Resources:
         MinimumHealthyPercent: 100
         MaximumPercent: 200
         DeploymentCircuitBreaker:
-          Enable: false
-          Rollback: true
+          Enable: true
+          Rollback: false
       NetworkConfiguration: 
         AwsvpcConfiguration:
           AssignPublicIp: DISABLED
@@ -1140,8 +1140,8 @@ Resources:
         MinimumHealthyPercent: 66
         MaximumPercent: 200
         DeploymentCircuitBreaker:
-          Enable: false
-          Rollback: true
+          Enable: true
+          Rollback: false
       HealthCheckGracePeriodSeconds: 0
       LoadBalancers: 
         - ContainerName: apiserver
@@ -1206,8 +1206,8 @@ Resources:
         MinimumHealthyPercent: 66
         MaximumPercent: 200
         DeploymentCircuitBreaker:
-          Enable: false
-          Rollback: true
+          Enable: true
+          Rollback: false
       HealthCheckGracePeriodSeconds: 0
       LoadBalancers: 
         - ContainerName: tophat
@@ -1271,8 +1271,8 @@ Resources:
         MinimumHealthyPercent: 66
         MaximumPercent: 200
         DeploymentCircuitBreaker:
-          Enable: false
-          Rollback: true
+          Enable: true
+          Rollback: false
       HealthCheckGracePeriodSeconds: 0
       LoadBalancers: 
         - ContainerName: socketio
@@ -1313,10 +1313,6 @@ Resources:
           Value: SAM
         - Key: ephemeral:app
           Value: !Ref pAppName
-
-
-
-
 
   # =================================================
   # ================= TARGET GROUPS =================
@@ -1914,6 +1910,8 @@ Resources:
                   - "logs:*"
                   - "s3:DeleteObject"
                   - "s3:DeleteObjectVersion"
+                  - "cloudformation:ListStacks"
+                  - "cloudformation:ListStackResources"
                 Resource: "*"
 
   CleanupFunction:
@@ -1942,6 +1940,7 @@ Resources:
 
           prefix = os.environ.get('PREFIX')
           lambda_client = boto3.client('lambda')
+          cloudformation_client = boto3.client('cloudformation')
           eventbridge_client = boto3.client('events')
 
           def handler(event, context):
@@ -1962,6 +1961,51 @@ Resources:
 
             cfnresponse.send(event, context, result, {})
 
+
+          def get_cloudformation_managed_rules(prefix):
+              managed_rules = set()
+              paginator = cloudformation_client.get_paginator('list_stacks')
+              
+              # List only active stacks with the specified prefix
+              for page in paginator.paginate(StackStatusFilter=['CREATE_COMPLETE', 'UPDATE_COMPLETE']):
+                  for stack_summary in page['StackSummaries']:
+                      stack_name = stack_summary['StackName']
+                      
+                      # Check if stack name starts with the specified prefix
+                      if stack_name.startswith(prefix):
+                          # Get resources in each matching stack
+                          resources = cloudformation_client.list_stack_resources(StackName=stack_name)
+                          for resource in resources['StackResourceSummaries']:
+                              if resource['ResourceType'] == 'AWS::Events::Rule':
+                                  managed_rules.add(resource['PhysicalResourceId'])  # Store the rule name or ARN
+                              
+              return managed_rules
+
+          def cleanup_unmanaged_eventbridge_rules(prefix):
+              # Get CloudFormation-managed rules for stacks with the specified prefix
+              managed_rules = get_cloudformation_managed_rules(prefix)
+              
+              paginator = eventbridge_client.get_paginator('list_rules')
+              for page in paginator.paginate(NamePrefix=prefix):
+                  for rule in page['Rules']:
+                      rule_name = rule['Name']
+                      
+                      # Skip deletion if the rule is managed by CloudFormation
+                      if rule_name in managed_rules:
+                          logger.info(f"Skipping CloudFormation-managed rule: {rule_name}")
+                          continue
+                      
+                      logger.info(f"Deleting EventBridge rule: {rule_name}")
+                      
+                      # List and remove targets
+                      targets = eventbridge_client.list_targets_by_rule(Rule=rule_name)
+                      if targets['Targets']:
+                          target_ids = [target['Id'] for target in targets['Targets']]
+                          eventbridge_client.remove_targets(Rule=rule_name, Ids=target_ids)
+                      
+                      # Delete the rule
+                      eventbridge_client.delete_rule(Name=rule_name)            
+
           def cleanup(prefix):        
             paginator = lambda_client.get_paginator('list_functions')
             for page in paginator.paginate():
@@ -1972,30 +2016,20 @@ Resources:
                         # Retrieve the tags for the Lambda function
                         tags = lambda_client.list_tags(Resource=function['FunctionArn']).get('Tags', {})
                         
-                        # Check if this Lambda was deployed by SAM, if it is managed by SAM, dont delete it since SAM will handle deletion.
-                        if tags.get('lambda:createdBy') == "SAM":
-                            logger.info(f"Skipping function deployed by SAM: {function_name}")
+                        # Check if this Lambda is managed by Cloudformation, if it is, dont delete it since cfn will handle deletion.
+                        if tags.get('resource:createdBy') == "Cloudformation":
+                            logger.info(f"Skipping function deployed by Cloudformation: {function_name}")
                             continue
                         else:
                           logger.info(f"Deleting Lambda function: {function_name}")
                           lambda_client.delete_function(FunctionName=function_name)
 
-            paginator = eventbridge_client.get_paginator('list_rules')
-            for page in paginator.paginate(NamePrefix=prefix):
-                for rule in page['Rules']:
-                    rule_name = rule['Name']
-                    logger.info(f"Deleting EventBridge rule: {rule_name}")
-                    
-                    # List targets before removing the rule
-                    targets = eventbridge_client.list_targets_by_rule(Rule=rule_name)
-                    if targets['Targets']:
-                        target_ids = [target['Id'] for target in targets['Targets']]
-                        eventbridge_client.remove_targets(Rule=rule_name, Ids=target_ids)
-                    
-                    # Delete the rule
-                    eventbridge_client.delete_rule(Name=rule_name)
+            cleanup_unmanaged_eventbridge_rules(prefix)
 
             return cfnresponse.SUCCESS
+      Tags:
+        - Key: resource:createdBy
+          Value: Cloudformation
             
   cleanupLambdaLogGroup:
     Type: AWS::Logs::LogGroup
