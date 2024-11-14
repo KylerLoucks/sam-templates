@@ -1,0 +1,182 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >
+  Deploys Laravel Task Definition
+
+
+Parameters:
+  pMySQLDBStackName:
+    Type: String
+    Description: Name of the stack exporting the required values
+    Default: aurora-mysql
+  pS3StorageStackName:
+    Type: String
+    Description: Name of the stack that deploys s3 storage
+    Default: gusi-storage
+  DBUsername:
+    Type: String
+    Description: Username for the MySQL database
+    Default: master
+  pCPU:
+    Type: Number
+    Description: The number of CPUs for the instance or service.
+    Default: 256
+  pMemory:
+    Type: Number
+    Description: The number of CPUs for the instance or service.
+    Default: 512
+  pImageVersion:
+    Type: String
+    Description: The version tag of the container image.
+    Default: latest
+  pEcrRepo:
+    Type: String
+    Description: The ECR repository name.
+    Default: gusi-laravel
+
+Resources:
+
+  # IAM Role for ECS Task Execution
+  ecsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/SecretsManagerReadWrite
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole
+        - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+      Policies:
+        - PolicyName: Auth-AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameters
+                  - secretsmanager:GetSecretValue
+                  - kms:Decrypt
+                Resource: "*"
+
+  taskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: EcsExec
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowEcsExec
+                Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: "*"
+        - PolicyName: CloudWatchLogs
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowCreateLogGroup
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Sid: AllowLogStreams
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/*:*"
+
+
+  # ECS Task Definition for Laravel
+  laravelTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: laravel-task
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform: 
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      Cpu: !Ref pCPU
+      Memory: !Ref pMemory
+      ExecutionRoleArn: !GetAtt ecsExecutionRole.Arn
+      TaskRoleArn: !GetAtt  taskRole.Arn
+      ContainerDefinitions:
+        - Name: laravel-container
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${pEcrRepo}:${pImageVersion}
+          Essential: true
+          PortMappings:
+            - ContainerPort: 80
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: laravel
+          Environment:
+            - Name: DB_CONNECTION
+              Value: mysql
+            - Name: DB_HOST
+              Value: !ImportValue 
+                Fn::Sub: ${pMySQLDBStackName}:RdsProxyEndpoint
+            - Name: DB_PORT
+              Value: 3306
+            - Name: DB_DATABASE
+              Value: wordpress
+            - Name: DB_USERNAME
+              Value: !Ref DBUsername
+            - Name: L5_SWAGGER_USE_ABSOLUTE_PATH
+              Value: false
+            - Name: AWS_BUCKET
+              Value: !ImportValue
+                Fn::Sub: ${pS3StorageStackName}:storageBucketName
+          Secrets:
+            - Name: DB_PASSWORD
+              ValueFrom: !Join 
+                - ''
+                - - !ImportValue 
+                    Fn::Sub: ${pMySQLDBStackName}:RdsSecretArn
+                  - ':password::'
+
+  # CloudWatch Log Group for the container logs
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/laravel
+      RetentionInDays: 7
+
+Outputs:
+      
+  LogGroupName:
+    Description: "The name of the CloudWatch Log Group"
+    Value: !Ref LogGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-LogGroupName'
+
+  TaskDefinitionArn:
+    Description: ECS Task Definition ARN
+    Value: !Ref laravelTaskDefinition
+    Export:
+      Name: !Sub ${AWS::StackName}:TaskDefinitionArn

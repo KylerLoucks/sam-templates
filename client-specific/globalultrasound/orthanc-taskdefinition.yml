@@ -1,11 +1,10 @@
 AWSTemplateFormatVersion: 2010-09-09
-Description: >
-  Deploys Orthanc Task Definition
-
+Description: Deploys an Orthanc and Dicom task definitions.
 
 Parameters:
-
+    
 # ECS Settings
+
   pServicePrefix:
     Type: String
     Description: Name of ECS Service
@@ -92,7 +91,7 @@ Parameters:
   pWPS3BucketName:
     Description: 'Bucket name That used to save images.'
     Type: String
-    Default: 'gusiclips-qav1'
+    Default: 'gusiclips-637423663399-us-east-1'
 
   pOrthancPGPluginEnable:
     Description: 'Orthanc Enable Postgres plugin.'
@@ -107,7 +106,7 @@ Parameters:
   pWPS3Endpoint:
     Description: 'AWS S3 Parent Folder that save images inside it.'
     Type: String
-    Default: "https://gusiclips-qav1.s3.us-east-1.amazonaws.com/app_images/"
+    Default: "https://gusiclips-637423663399-us-east-1.s3.us-east-1.amazonaws.com/app_images/"
 
   pWPS3URLPrefix:
     Description: 'AWS S3 URL Prefix.'
@@ -128,13 +127,18 @@ Parameters:
     Type: String
     Description: The ID of the EFS System.
     Default: "fs-09ba1106f7317fee0"
+  
+  pDicomServicePrefix:
+    Type: String
+    Description: Name of the Orthanc Dicom Server.
+    Default: orthanc-dicom
 
 Resources:
-
   # IAM Role for ECS Task Execution
   ecsExecutionRole:
     Type: AWS::IAM::Role
     Properties:
+      RoleName: OrthancECSExecutionRole
       AssumeRolePolicyDocument:
         Version: '2012-10-17'
         Statement:
@@ -161,48 +165,40 @@ Resources:
                   - kms:Decrypt
                 Resource: "*"
 
-  taskRole:
+  # IAM Role for ECS Task Execution
+  ecsTaskRole:
     Type: AWS::IAM::Role
     Properties:
-      Path: /
+      RoleName: OrthancECSTaskRole
       AssumeRolePolicyDocument:
-        Version: 2012-10-17
+        Version: '2012-10-17'
         Statement:
           - Effect: Allow
             Principal:
-              Service:
-                - ecs-tasks.amazonaws.com
+              Service: ecs-tasks.amazonaws.com
             Action: sts:AssumeRole
       Policies:
-        - PolicyName: EcsExec
-          PolicyDocument: 
-            Version: 2012-10-17
+        - PolicyName: Auth-AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
             Statement:
-              - Sid: AllowEcsExec
+                Sid: AllowBucketAccess
                 Effect: Allow
                 Action:
-                  - ssmmessages:CreateControlChannel
-                  - ssmmessages:CreateDataChannel
-                  - ssmmessages:OpenControlChannel
-                  - ssmmessages:OpenDataChannel
-                Resource: "*"
-        - PolicyName: CloudWatchLogs
-          PolicyDocument: 
-            Version: 2012-10-17
-            Statement:
-              - Sid: AllowCreateLogGroup
-                Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
-              - Sid: AllowLogStreams
-                Effect: Allow
-                Action:
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/*:*"
+                  - s3:*
+                Resource: 
+                  - !Sub arn:aws:s3:::${pWPS3BucketName}/*
 
 
+
+
+  ecsTaskDefinitionLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub ${pServicePrefix}-service-log-group
+      RetentionInDays: 60
+
+  ## Task Definition
   ecsTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
@@ -210,7 +206,7 @@ Resources:
       Cpu: !Ref pContainerCpu
       Memory: !Ref pContainerMemory
       ExecutionRoleArn: !GetAtt ecsExecutionRole.Arn
-      TaskRoleArn: !GetAtt taskRole.Arn
+      TaskRoleArn: !GetAtt ecsTaskRole.Arn
       NetworkMode: awsvpc
       RequiresCompatibilities:
       - FARGATE
@@ -228,7 +224,7 @@ Resources:
           LogConfiguration:
             LogDriver: awslogs
             Options:
-              awslogs-group: !Ref LogGroup
+              awslogs-group: !Ref ecsTaskDefinitionLogGroup
               awslogs-region: !Ref AWS::Region
               awslogs-stream-prefix: !Sub ${pServicePrefix}-service
           Environment:
@@ -273,6 +269,10 @@ Resources:
               Value: !Ref pMysqlDBUsername
             - Name: GUSI_PACS_AWS_S3_BUCKET
               Value: !Ref pWPS3BucketName
+            - Name: GUSI_PACS_AWS_S3_KEY
+              Value: !Ref pWPS3Key
+            - Name: GUSI_PACS_AWS_S3_SECRET_KEY
+              Value: !Ref pWPS3SecretKey
             - Name: GUSI_PACS_AWS_S3_PARENT_FOLDER
               Value: !Ref pWPS3ParentFolder
             - Name: GUSI_PACS_AWS_S3_UNSIGNED
@@ -305,22 +305,143 @@ Resources:
             RootDirectory: /
             TransitEncryption: ENABLED
 
-  LogGroup:
+
+  DicomTaskDefinitionLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub ${pServicePrefix}-service-log-group
+      LogGroupName: !Sub ${pDicomServicePrefix}-service-log-group
       RetentionInDays: 60
 
-Outputs:
-      
-  LogGroupName:
-    Description: "The name of the CloudWatch Log Group"
-    Value: !Ref LogGroup
-    Export:
-      Name: !Sub '${AWS::StackName}-LogGroupName'
 
-  TaskDefinitionArn:
-    Description: ECS Task Definition ARN
-    Value: !Ref wordpressTaskDefinition
+
+## DICOM Task Definition
+  dicomEcsTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${pDicomServicePrefix}-service
+      Cpu: !Ref pContainerCpu
+      Memory: !Ref pContainerMemory
+      ExecutionRoleArn: !GetAtt ecsExecutionRole.Arn
+      TaskRoleArn: !GetAtt ecsTaskRole.Arn
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+        - FARGATE
+      RuntimePlatform: 
+        CpuArchitecture: !Ref pCpuArchitecture
+        OperatingSystemFamily: LINUX
+      ContainerDefinitions:
+        - Name: !Sub ${pDicomServicePrefix}-service
+          Cpu: !Ref pContainerCpu
+          Memory: !Ref pContainerMemory
+          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${pEcrRepo}:${pImageVersion}'
+          PortMappings:
+            - ContainerPort: !Ref pDicomPort
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref DicomTaskDefinitionLogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Sub ${pDicomServicePrefix}-service
+          Environment:
+            - Name: ORTHANC__POSTGRESQL__HOST
+              Value: !ImportValue 
+                Fn::Sub: ${pPostgresStackName}:RdsWriterAddress
+              # Value: {'Fn::ImportValue': !Sub '${ParentPostgresDBStack}-DNSName'}
+            - Name: ORTHANC__POSTGRESQL__PORT
+              Value: !Ref pOrthancDBPort
+            - Name: ORTHANC__POSTGRESQL__USERNAME
+              Value: !Ref pOrthancDBUserName
+            - Name: ORTHANC__POSTGRESQL__DATABASE
+              Value: !Ref pOrthancDBName
+            - Name: POSTGRESQL_PLUGIN_ENABLED
+              Value: !Ref pOrthancPGPluginEnable
+            - Name: ORTHANC__NAME
+              Value: "GUSI"
+            - Name: VERBOSE_ENABLED
+              Value:  "true"
+            - Name: VERBOSE_STARTUP 
+              Value: "true"
+            - Name: ORTHANC__PYTHON_SCRIPT
+              Value: "/opt/app/gusi/gusi_onstart.py"
+            - Name: ORTHANC__PYTHON_VERBOSE
+              Value: "true"
+            - Name: ORTHANC__AUTHENTICATION_ENABLED
+              Value: "true"
+            - Name: ORTHANC__DICOM_SERVER_ENABLED
+              Value: "true"
+            - Name: ORTHANC__REGISTERED_USERS
+              Value: |
+                  {"gusi": "gusi"}
+            - Name: GUSI_BE_DB_CONNECTION
+              Value: !Ref pWPDBConnection
+            - Name: GUSI_BE_DB_PORT
+              Value: !Ref pMysqlDBPort
+            - Name: GUSI_BE_DB_HOST
+              Value:   {'Fn::ImportValue': !Sub '${pMysqlStackName}:RdsProxyEndpoint'}
+            - Name: GUSI_BE_DB_NAME
+              Value: !Ref pMysqlDBname 
+            - Name: GUSI_BE_DB_USER
+              Value: !Ref pMysqlDBUsername
+            - Name: GUSI_PACS_AWS_S3_BUCKET
+              Value: !Ref pWPS3BucketName
+            - Name: GUSI_PACS_AWS_S3_KEY
+              Value: !Ref pWPS3Key
+            - Name: GUSI_PACS_AWS_S3_SECRET_KEY
+              Value: !Ref pWPS3SecretKey
+            - Name: GUSI_PACS_AWS_S3_PARENT_FOLDER
+              Value: !Ref pWPS3ParentFolder
+            - Name: GUSI_PACS_AWS_S3_UNSIGNED
+              Value: ""
+            - Name: GUSI_PACS_AWS_S3_ENDPOINT
+              Value: !Ref pWPS3Endpoint
+            - Name: GUSI_PACS_AWS_S3_URL_PREFIX
+              Value: !Ref pWPS3URLPrefix
+          Secrets:
+            - Name: ORTHANC__POSTGRESQL__PASSWORD
+              ValueFrom: !Join 
+                - ''
+                - - !ImportValue 
+                    Fn::Sub: ${pPostgresStackName}:RdsSecretArn
+                  - ':password::'
+            - Name: GUSI_BE_DB_PASSWD
+              ValueFrom: !Join 
+                - ''
+                - - !ImportValue 
+                    Fn::Sub: ${pMysqlStackName}:RdsSecretArn
+                  - ':password::'
+          MountPoints:
+          - ContainerPath: /var/lib/orthanc/db
+            SourceVolume: !Ref pEFSVolumeName      
+
+      Volumes:
+        - Name: !Ref pEFSVolumeName
+          EFSVolumeConfiguration:
+            FilesystemId: !Ref pFileSystemID
+            RootDirectory: /
+            TransitEncryption: ENABLED
+
+Outputs:
+
+  OrthancTaskDefinitionArn:
+    Description: "The ARN of the Orthanc ECS Task Definition"
+    Value: !Ref ecsTaskDefinition
     Export:
-      Name: !Sub ${AWS::StackName}:TaskDefinitionArn
+      Name: !Sub '${AWS::StackName}-DicomTaskDefinitionArn'
+
+  DicomTaskDefinitionArn:
+    Description: "The ARN of the Dicom ECS Task Definition"
+    Value: !Ref dicomEcsTaskDefinition
+    Export:
+      Name: !Sub '${AWS::StackName}-DicomTaskDefinitionArn'
+
+  OrthancLogGroupName:
+    Description: "The name of the Orthanc CloudWatch Log Group"
+    Value: !Ref ecsTaskDefinitionLogGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-OrthancLogGroupName'
+
+  DicomLogGroupName:
+    Description: "The name of the Dicom CloudWatch Log Group"
+    Value: !Ref DicomTaskDefinitionLogGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-DicomLogGroupName'

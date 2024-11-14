@@ -25,6 +25,11 @@ Parameters:
     Default: 1
     Description: Minimum number of tasks ECS can run
 
+  pBuildTag:
+    Type: String
+    Default: latest
+    Description: Commit ID to use from ECR Repo
+
   pServicePrefix:
     Type: String
     Description: Name of ECS Service
@@ -39,6 +44,29 @@ Parameters:
     Type: Number
     Description: The port exposed to the EC2 instance from the container
     Default: 4242
+
+  pContainerMemory:
+    Type: Number
+    Description: The amount (in MiB) of memory to present to the container
+    Default: 512
+
+  pContainerCpu:
+    Type: Number
+    Description: The amount of CPU to present to the container
+    Default: 256
+
+  pHostPort:
+    Type: Number
+    Default: 0
+    Description: The port exposed on the ECS instance - set to 0 for dynamic port selection
+
+  pPortProtocol:
+    Type: String
+    Default: tcp
+    AllowedValues:
+      - tcp
+      - udp
+    Description: Port Mappings Protocol
 
   pFargateClusterName:
     Type: String
@@ -55,7 +83,23 @@ Parameters:
   pNLBStackName:
     Type: String
     Description: Name of the NLB stack exporting the required values
-    Default: orthanc-nlb
+    Default: NLB-blue-green
+  
+  pDicomServicePrefix:
+    Type: String
+    Description: Name of the Orthanc Dicom Server.
+    Default: orthanc-dicom
+
+
+  pOrthancTaskDefinitionArn:
+    Type: String
+    Description: Arn of the TaskDefinition used for the Orthanc service.
+    Default: arn:aws:ecs:us-east-1:637423663399:task-definition/orthanc-server-service
+
+  pDicomTaskDefinitionArn:
+    Type: String
+    Description: Arn of the TaskDefinition used for the Dicom service.
+    Default: arn:aws:ecs:us-east-1:637423663399:task-definition/orthanc-dicom-service
 
 # Environment
   pEnvironmentTag:
@@ -83,7 +127,12 @@ Metadata:
           - pDesiredCount
           - pMaxTasks
           - pMinTasks
-          - pContainerPort  
+          - pContainerPort
+          - pContainerMemory
+          - pContainerCpu
+          - pHostPort
+          - pPortProtocol
+          - pBuildTag
       - Label:
           default: Task Definition Settings
         Parameters:
@@ -101,6 +150,14 @@ Metadata:
         default: ECS Service Min Tasks
       pContainerPort:
         default: ECS Container Port
+      pContainerMemory:
+        default: Container RAM needed
+      pContainerCpu:
+        default: Container CPU needed
+      pPortProtocol:
+        default: ECS Container Port Mappings Protocol
+      pBuildTag:
+        default: ECR Image Build Tag
       pEnvironmentTag:
         default: Environment Tag
 
@@ -130,10 +187,11 @@ Resources:
       ToPort: -1      # Allows all ports
       CidrIp: 10.2.0.0/16
 
-## ECS service.
+  ## ECS service.
 
   ecsService:
     Type: AWS::ECS::Service
+    DependsOn: ecsExecutionRole
     Properties:
       LoadBalancers:
         - ContainerName: !Sub ${pServicePrefix}-service
@@ -147,10 +205,10 @@ Resources:
           TargetGroupArn: !Join 
             - ''
             - - !ImportValue 
-                Fn::Sub: orthanc-tg-${pNLBStackName}
+                Fn::Sub: orthanc-blue-tg-${pNLBStackName}
       Cluster: !Ref pFargateClusterName
       DesiredCount: !Ref pDesiredCount
-      TaskDefinition: !Ref pTaskDefinitionArn
+      TaskDefinition: !Ref pOrthancTaskDefinitionArn
       LaunchType: FARGATE
       ServiceName : !Sub ${pServicePrefix}-service
       DeploymentController:
@@ -161,6 +219,34 @@ Resources:
           AssignPublicIp: ENABLED
           SecurityGroups:
             - !GetAtt serviceSecurityGroup.GroupId
+
+
+  ## DICOM ECS Service
+  dicomEcsService:
+    Type: AWS::ECS::Service
+    DependsOn: ecsExecutionRole
+    Properties:
+      LoadBalancers:
+        - ContainerName: !Sub ${pDicomServicePrefix}-service
+          ContainerPort: !Ref pDicomPort
+          TargetGroupArn: !Join 
+            - ''
+            - - !ImportValue 
+                Fn::Sub: orthanc-blue-tg-${pNLBStackName}
+      Cluster: !Ref pFargateClusterName
+      DesiredCount: !Ref pDesiredCount
+      TaskDefinition: !Ref pDicomTaskDefinitionArn
+      LaunchType: FARGATE
+      ServiceName: !Sub ${pDicomServicePrefix}-service
+      DeploymentController:
+        Type: CODE_DEPLOY
+      NetworkConfiguration:
+        AwsvpcConfiguration:
+          Subnets: !Ref pSubnetIds
+          AssignPublicIp: ENABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+
 
 # Outbound rule for ECS service to EFS
   serviceSecurityGroupEFSOutbound:
@@ -190,144 +276,10 @@ Resources:
       ToPort: 5432
       CidrIp: 0.0.0.0/0
 
-
-# IAM Role for Auto Scaling
-  autoScalingRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: AutoScalingRole
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: application-autoscaling.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceAutoscaleRole
-        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole
-      Policies:
-        - PolicyName: AutoScalingPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - autoscaling:DescribeScalingActivities
-                  - autoscaling:DescribeScalingGroups
-                  - autoscaling:DescribeScalingPolicies
-                  - autoscaling:DescribeScheduledActions
-                  - autoscaling:PutScalingPolicy
-                  - autoscaling:PutScheduledAction
-                Resource: '*'
-        - PolicyName: ELBAccessPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - elasticloadbalancing:RegisterTargets
-                  - elasticloadbalancing:DeregisterTargets
-                  - elasticloadbalancing:DescribeTargetHealth
-                Resource: "*"
-  serviceSecurityGroup:
-      Type: AWS::EC2::SecurityGroup
-      Properties:
-        GroupDescription: Allow all traffic from self and ALB Security Group
-        VpcId: !Ref pVpcId
-
-
-  ecsServiceScalingTarget:
-    Type: AWS::ApplicationAutoScaling::ScalableTarget
-    DependsOn: ecsService
-    Properties:
-      MaxCapacity: !Ref pMaxTasks
-      MinCapacity: !Ref pMinTasks
-      ResourceId: !Sub "service/${pFargateClusterName}/${pServicePrefix}-service"
-      RoleARN: !GetAtt autoScalingRole.Arn
-      ScalableDimension: ecs:service:DesiredCount
-      ServiceNamespace: ecs
-
-
-  ecsServiceScaleUpPolicy:
-    Type: AWS::ApplicationAutoScaling::ScalingPolicy
-    DependsOn: ecsServiceScalingTarget
-    Properties:
-        PolicyName: scale-up
-        PolicyType: StepScaling
-        ScalingTargetId: !Ref ecsServiceScalingTarget
-        StepScalingPolicyConfiguration:
-            AdjustmentType: PercentChangeInCapacity
-            Cooldown: 60
-            MetricAggregationType: Average
-            StepAdjustments:
-              - MetricIntervalLowerBound: 0
-                ScalingAdjustment: 100
-
-  alarmEcsServiceScaleUp:
-    Type: AWS::CloudWatch::Alarm
-    DependsOn: ecsServiceScaleUpPolicy
-    Properties:
-        EvaluationPeriods: 1
-        Statistic: Average
-        Threshold: 80
-        AlarmName: !Sub ${pServicePrefix}-service-high-cpu
-        AlarmDescription: !Sub Alarm if ${pServicePrefix}-service is running HIGH on CPU
-        Period: 60
-        AlarmActions:
-          - !Ref ecsServiceScaleUpPolicy
-        Namespace: AWS/ECS
-        Dimensions:
-          - Name: ClusterName
-            Value: !Ref pFargateClusterName
-          - Name: ServiceName
-            Value: !Sub ${pServicePrefix}-service
-        ComparisonOperator: GreaterThanThreshold
-        MetricName: CPUUtilization
-
-  ecsServiceScaleDownPolicy:
-    Type: AWS::ApplicationAutoScaling::ScalingPolicy
-    DependsOn: ecsServiceScalingTarget
-    Properties:
-        PolicyName: scale-down
-        PolicyType: StepScaling
-        ScalingTargetId: !Ref ecsServiceScalingTarget
-        StepScalingPolicyConfiguration:
-            AdjustmentType: PercentChangeInCapacity
-            Cooldown: 300
-            MetricAggregationType: Average
-            StepAdjustments:
-              - MetricIntervalUpperBound: 0
-                ScalingAdjustment: -25
-
-  alarmEcsServiceScaleDown:
-    Type: AWS::CloudWatch::Alarm
-    Properties:
-        EvaluationPeriods: 1
-        Statistic: Average
-        Threshold: 60
-        AlarmName: !Sub ${pServicePrefix}-service-low-cpu
-        AlarmDescription: !Sub Alarm if ${pServicePrefix}-service is running LOW on CPU
-        Period: 60
-        OKActions:
-          - !Ref ecsServiceScaleDownPolicy
-        Namespace: AWS/ECS
-        Dimensions:
-          - Name: ClusterName
-            Value: !Ref pFargateClusterName
-          - Name: ServiceName
-            Value: !Sub ${pServicePrefix}-service
-        ComparisonOperator: GreaterThanThreshold
-        MetricName: CPUUtilization
-
-
 Outputs:
+
   ServiceArn:
     Description: "The ARN of the ECS Service"
     Value: !Ref ecsService
     Export:
       Name: !Sub '${AWS::StackName}-ServiceArn'
-
-  ECSServiceName:
-    Description: Service Name
-    Value: !Ref ecsService
