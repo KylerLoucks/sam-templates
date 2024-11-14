@@ -1,0 +1,1075 @@
+AWSTemplateFormatVersion: "2010-09-09"
+#------------------------------------------------------
+# Parameters
+#------------------------------------------------------
+Parameters:
+
+  pCodestarConnectionArn:
+    Type: String
+    Description: ARN of the CodeStar Connection.
+    Default: "arn:aws:codeconnections:us-east-1:637423663399:connection/87448ca8-729a-4dae-9f6f-5a42b6e79ed4"
+
+  pRepoOwner:
+    Type: String
+    Description: The owner of the GitHub repository
+    Default: "gusi-dcm"
+
+  pRepoName:
+    Type: String
+    Description: The name of the GitHub repository to use
+    Default: "pacs_backend"
+
+  pTriggerBranch:
+    Type: String
+    Description: The branch of the GitHub repository
+    Default: "rc0"
+
+  GitHubArtifactOutput:
+    Type: String
+    Description: The name of the CodeBuild artifact output
+    Default: orthanc-github-artifact
+
+  CodeBuildProjectName:
+    Type: String
+    Description: CodeBuild project name
+    Default: codebuild-orthanc
+
+  pCodeBuildProjectNameDicom:
+    Type: String
+    Description: CodeBuild project name
+    Default: codebuild-orthanc-dicom
+
+  EcrRepoName:
+    Type: String
+    Description: The name of the ECR repository to store the deployment image in
+    Default: gusi-orthanc
+
+  EcsClusterName: 
+    Type: String
+    Description: The name of the ECS cluster
+    Default: gusi-cluster
+
+  pDicomServiceName:
+    Type: String
+    Description: The name of the Orthanc Dicom service
+    Default: orthanc-dicom-service
+
+  CodePipelineName:
+    Type: String
+    Description: The name of the CodePipeline
+    Default: orthanc-pipeline
+
+  CodePipelineS3BucketPrefix:
+    Type: String
+    Description: The name of the S3 bucket to store the deployment code in
+    Default: "gusiclips-qav1"
+
+  ContainerName:
+    Type: String
+    Description: The name of the Container 
+    Default: orthanc-server-service
+
+  pDicomContainerName:
+    Type: String
+    Description: The name of the Container 
+    Default: orthanc-dicom-service
+
+  pAppName:
+    Type: String
+    Description: The name of the app
+    Default: orthanc
+  
+  pAlbStackName:
+    Type: String
+    Description: Name of the ECS cluster stack exporting the required values
+    Default: cluster-alb-gusi
+  
+  pTerminateWaitTime:
+    Type: Number
+    Description: The number of minutes to wait before terminating the blue instances
+    Default: 10
+
+  pHTTPSBlueTargetGroupName:
+    Type: String
+    Description: The name of the blue target group
+    Default: orthanc-blue-TG-HTTPS
+
+  pHTTPSGreenTargetGroupName:
+    Type: String
+    Description: The name of the green target group
+    Default: orthanc-green-TG-HTTPS
+
+  pBlueTargetGroupName:
+    Type: String
+    Description: The name of the blue target group
+    Default: Orthanc-blue-TG-TCP
+
+  pGreenTargetGroupName:
+    Type: String
+    Description: The name of the green target group
+    Default: Orthanc-green-TG-TCP
+
+  pProdListenerArn:
+    Type: String
+    Description: The ARN of the production listener
+    Default: "arn:aws:elasticloadbalancing:us-east-1:637423663399:listener/app/cluste-loadB-v62ICZeesaVp/e7a6c80527081d34/ae0f99f676529736"
+
+  pNLBListenerArn:
+    Type: String
+    Description: The ARN of the NLB listener
+    Default: "arn:aws:elasticloadbalancing:us-east-1:637423663399:listener/net/ECS-DicomNlb/79f13036bd70a6c5/03399f368b6bb2a3"
+
+  pTrafficPercentage:
+    Type: Number
+    Description: The percentage of traffic to route to the green target group
+    Default: 50
+
+  pTrafficInterval:
+    Type: Number
+    Description: The interval in minutes to wait before routing all traffic to the green target group
+    Default: 1
+  
+  pEcsClusterName: 
+    Type: String
+    Description: The name of the ECS cluster
+    Default: gusi-cluster
+
+  pServiceName: 
+    Type: String
+    Description: The name of the ECS service
+    Default: orthanc-server-service
+
+  DeployAlarmEnabled:
+    Type: String
+    AllowedValues: ["true", "false"]
+    Default: "true"
+    Description: Enable or disable the deployment alarm configuration
+  
+  pCodeBuildArtifactOutput:
+    Type: String
+    Description: The name of the CodeBuild artifact output
+    Default: codebuild_artifact_orthanc
+
+  pCodeBuildArtifactOutputDicom:
+    Type: String
+    Description: The name of the CodeBuild artifact output
+    Default: codebuild_dicom_artifact
+  
+  pDeploymentType:
+    Type: String
+    AllowedValues:
+      - Canary
+      - Linear
+      - AllAtOnce
+    Description: The type of deployment strategy (Canary, Linear, or AllAtOnce)
+    Default: Canary
+  
+  pDicomDeploymentType:
+    Type: String
+    Description: The type of deployment strategy (Canary, Linear, or AllAtOnce)
+    Default: AllAtOnce
+  
+  AlbArnSuffix:
+    Type: String
+    Description: Suffix of ALB
+    Default: internal/internal-cluste-loadB-v62ICZeesaVp/506213757
+  
+  NlbArnSuffix:
+    Type: String
+    Description: Suffix of Nlb
+    Default: ECS-DicomNlb-79f13036bd70a6c5
+
+  BlueTgArnSuffix:
+    Type: String
+    Description: Suffix of BlueTG
+    Default: targetgroup/Orthanc-blue-TG-TCP/c92d2950a938753c
+  
+  HTTPSBlueTgArnSuffix:
+    Type: String
+    Description: Suffix of HTTPS BlueTG
+    Default: targetgroup/orthanc-blue-TG-HTTPS/70fd113eb06df1a1
+
+  HTTPSGreenTgArnSuffix:
+    Type: String
+    Description: Suffix of HTTPS BlueTG
+    Default: targetgroup/orthanc-green-TG-HTTPS/6eb0f70582cd4e5b
+
+  GreenTgArnSuffix:
+    Type: String
+    Description: Suffix of GreenTG
+    Default: targetgroup/Orthanc-green-TG-TCP/671b78b5a4e2dcd0
+
+  pNLBStackName:
+    Type: String
+    Description: NLB Stack Name
+    Default: NLB-blue-green
+
+Conditions:
+  IsCanary: !Equals [!Ref pDeploymentType, "Canary"]
+  IsLinear: !Equals [!Ref pDeploymentType, "Linear"]
+  IsAllAtOnce: !Equals [!Ref pDicomDeploymentType, "AllAtOnce"]
+  
+
+Resources:
+  #------------------------------------------------------
+  # IAM role for codedpipeline
+  #------------------------------------------------------
+  RoleForCodePipeline:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: codepipeline.amazonaws.com
+      Policies:
+        - PolicyName: CodePipelinePolicyDemo
+          PolicyDocument: |
+            {
+                "Statement": [
+                    {
+                        "Action": [
+                            "iam:PassRole"
+                        ],
+                        "Resource": "*",
+                        "Effect": "Allow",
+                        "Condition": {
+                            "StringEqualsIfExists": {
+                                "iam:PassedToService": [
+                                    "cloudformation.amazonaws.com",
+                                    "elasticbeanstalk.amazonaws.com",
+                                    "ec2.amazonaws.com",
+                                    "ecs-tasks.amazonaws.com"
+                                ]
+                            }
+                        }
+                    },
+                    {
+                        "Action": [
+                            "codedeploy:CreateDeployment",
+                            "codedeploy:GetApplication",
+                            "codedeploy:GetApplicationRevision",
+                            "codedeploy:GetDeployment",
+                            "codedeploy:GetDeploymentConfig",
+                            "codedeploy:RegisterApplicationRevision"
+                        ],
+                        "Resource": "*",
+                        "Effect": "Allow"
+                    },
+                    {
+                        "Action": [
+                            "codestar-connections:UseConnection"
+                        ],
+                        "Resource": "*",
+                        "Effect": "Allow"
+                    },
+                    {
+                        "Action": [
+                            "elasticbeanstalk:*",
+                            "ec2:*",
+                            "elasticloadbalancing:*",
+                            "autoscaling:*",
+                            "cloudwatch:*",
+                            "s3:*",
+                            "sns:*",
+                            "cloudformation:*",
+                            "rds:*",
+                            "sqs:*",
+                            "ecs:*"
+                        ],
+                        "Resource": "*",
+                        "Effect": "Allow"
+                    },
+                    {
+                        "Action": [
+                            "lambda:InvokeFunction",
+                            "lambda:ListFunctions"
+                        ],
+                        "Resource": "*",
+                        "Effect": "Allow"
+                    },
+                    {
+                        "Action": [
+                            "opsworks:CreateDeployment",
+                            "opsworks:DescribeApps",
+                            "opsworks:DescribeCommands",
+                            "opsworks:DescribeDeployments",
+                            "opsworks:DescribeInstances",
+                            "opsworks:DescribeStacks",
+                            "opsworks:UpdateApp",
+                            "opsworks:UpdateStack"
+                        ],
+                        "Resource": "*",
+                        "Effect": "Allow"
+                    },
+                    {
+                        "Action": [
+                            "cloudformation:CreateStack",
+                            "cloudformation:DeleteStack",
+                            "cloudformation:DescribeStacks",
+                            "cloudformation:UpdateStack",
+                            "cloudformation:CreateChangeSet",
+                            "cloudformation:DeleteChangeSet",
+                            "cloudformation:DescribeChangeSet",
+                            "cloudformation:ExecuteChangeSet",
+                            "cloudformation:SetStackPolicy",
+                            "cloudformation:ValidateTemplate"
+                        ],
+                        "Resource": "*",
+                        "Effect": "Allow"
+                    },
+                    {
+                        "Action": [
+                            "codebuild:BatchGetBuilds",
+                            "codebuild:StartBuild",
+                            "codebuild:BatchGetBuildBatches",
+                            "codebuild:StartBuildBatch"
+                        ],
+                        "Resource": "*",
+                        "Effect": "Allow"
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "devicefarm:ListProjects",
+                            "devicefarm:ListDevicePools",
+                            "devicefarm:GetRun",
+                            "devicefarm:GetUpload",
+                            "devicefarm:CreateUpload",
+                            "devicefarm:ScheduleRun"
+                        ],
+                        "Resource": "*"
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "servicecatalog:ListProvisioningArtifacts",
+                            "servicecatalog:CreateProvisioningArtifact",
+                            "servicecatalog:DescribeProvisioningArtifact",
+                            "servicecatalog:DeleteProvisioningArtifact",
+                            "servicecatalog:UpdateProduct"
+                        ],
+                        "Resource": "*"
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "cloudformation:ValidateTemplate"
+                        ],
+                        "Resource": "*"
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "ecr:DescribeImages"
+                        ],
+                        "Resource": "*"
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "states:DescribeExecution",
+                            "states:DescribeStateMachine",
+                            "states:StartExecution"
+                        ],
+                        "Resource": "*"
+                    },
+                    {
+                        "Effect": "Allow",
+                        "Action": [
+                            "appconfig:StartDeployment",
+                            "appconfig:StopDeployment",
+                            "appconfig:GetDeployment"
+                        ],
+                        "Resource": "*"
+                    }
+                ],
+                "Version": "2012-10-17"
+            }
+
+  #------------------------------------------------------
+  # IAM role for codebuild 
+  #------------------------------------------------------
+  RoleForCodeBuild:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Statement:
+          - Action: sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service: codebuild.amazonaws.com
+      Policies:
+        - PolicyName: !Sub ${AWS::StackName}-CodeBuildPolicyBlueGreen
+          PolicyDocument: !Sub 
+          - |
+            {
+              "Version": "2012-10-17",
+              "Statement": [
+                  {
+                      "Effect": "Allow",
+                      "Resource": [
+                          "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/debug",
+                          "arn:${AWS::Partition}:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/codebuild/debug:*"
+                      ],
+                      "Action": [
+                          "logs:CreateLogGroup",
+                          "logs:CreateLogStream",
+                          "logs:PutLogEvents"
+                      ]
+                  },
+                  {
+                        "Action":
+                            "codestar-connections:UseConnection",
+                        "Resource": "*",
+                        "Effect": "Allow"
+                    },
+                  {
+                        "Action": [
+                            "codebuild:BatchGetBuilds",
+                            "codebuild:StartBuild",
+                            "codebuild:BatchGetBuildBatches",
+                            "codebuild:StartBuildBatch"
+                        ],
+                        "Resource": "*",
+                        "Effect": "Allow"
+                    },
+                  { 
+                      "Action": "secretsmanager:GetSecretValue",
+                      "Resource": "*",
+                      "Effect": "Allow"
+                    },
+                  {
+                      "Effect": "Allow",
+                      "Action": "s3:GetObject",
+                      "Resource": "arn:aws:s3:::orthanc-pipeline-artifacts-637423663399-us-east-1/*"
+                  },
+                  {
+                      "Effect": "Allow",
+                      "Resource": [
+                          "arn:${AWS::Partition}:s3:::${CodePipelineS3BucketPrefix}/*",
+                          "arn:aws:s3:::orthanc-pipeline-artifacts-637423663399-us-east-1/*"
+                      ],
+                      "Action": [
+                          "s3:PutObject",
+                          "s3:GetObject",
+                          "s3:GetObjectVersion",
+                          "s3:GetBucketAcl",
+                          "s3:GetBucketLocation"
+                      ]
+                  },
+                  {
+                      "Effect": "Allow",
+                      "Action": [
+                          "codebuild:CreateReportGroup",
+                          "codebuild:CreateReport",
+                          "codebuild:UpdateReport",
+                          "codebuild:BatchPutTestCases",
+                          "codebuild:BatchPutCodeCoverages"
+                      ],
+                      "Resource": [
+                          "arn:${AWS::Partition}:codebuild:${AWS::Region}:${AWS::AccountId}:report-group/debug-*"
+                      ]
+                  },
+                  {
+                    "Action": ["ecr:*"],
+                    "Resource": "*",
+                    "Effect": "Allow"
+                  },
+                  {
+                       "Action": [
+                           "codecommit:CancelUploadArchive",
+                           "codecommit:GetBranch",
+                           "codecommit:GetCommit",
+                           "codecommit:GetRepository",
+                           "codecommit:GetUploadArchiveStatus",
+                           "codecommit:UploadArchive",
+                           "codecommit:GitPull"
+                       ],
+                       "Resource": "*",
+                       "Effect": "Allow"
+                  }
+              ]
+            }
+          - CodePipelineS3BucketPrefix: !Ref CodePipelineS3BucketPrefix 
+            
+  #------------------------------------------------------
+  # CodeBuild project 
+  #------------------------------------------------------
+  CodeBuildProject:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Ref CodeBuildProjectName
+      ServiceRole: !Ref RoleForCodeBuild
+      Artifacts:
+        Type: CODEPIPELINE
+      Environment:
+        Type: LINUX_CONTAINER
+        Image: aws/codebuild/amazonlinux2-x86_64-standard:5.0
+        ComputeType: BUILD_GENERAL1_SMALL
+        PrivilegedMode: true
+      LogsConfig:
+        CloudWatchLogs:
+          Status: ENABLED
+          GroupName: /aws/codebuild/debug
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Sub
+          - |
+            version: 0.2
+            env:
+              shell: bash
+              variables:
+                REPO_NAME: ${EcrRepoName}
+                CODEBUILD_RESOLVED_SOURCE_VERSION: $CODEBUILD_RESOLVED_SOURCE_VERSION
+                TAG_NAME: "latest"
+            phases:
+              pre_build:
+                commands:
+                  - echo "Listing files to check for appspec.yml:"
+                  - ls -lh
+                  - export TAG_NAME=$(date +%s)
+                  - docker login --username abdulrahman.salama@gmail.com --password Abdelrahman@84
+              build: 
+                commands:
+                  - echo "Building container for service 1"
+                  - docker build --platform linux/amd64 -t $REPO_NAME:$CODEBUILD_RESOLVED_SOURCE_VERSION-$TAG_NAME -t $REPO_NAME:latest .
+                  - docker tag $REPO_NAME:$CODEBUILD_RESOLVED_SOURCE_VERSION-$TAG_NAME ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/$REPO_NAME:$CODEBUILD_RESOLVED_SOURCE_VERSION-$TAG_NAME
+                  - docker tag $REPO_NAME:$CODEBUILD_RESOLVED_SOURCE_VERSION-$TAG_NAME ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/$REPO_NAME:latest
+                  - printf '[{"name":"%s","imageUri":"%s"}]' ${ContainerName} ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/$REPO_NAME:$CODEBUILD_RESOLVED_SOURCE_VERSION-$TAG_NAME > imagedefinitions.json
+                  - printf '[{"name":"%s","imageUri":"%s"}]' ${pDicomContainerName} ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/$REPO_NAME:$CODEBUILD_RESOLVED_SOURCE_VERSION-$TAG_NAME > dicom-imagedefinitions.json
+                  - printf '{"ImageURI":"%s"}' ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/$REPO_NAME:$CODEBUILD_RESOLVED_SOURCE_VERSION-$TAG_NAME >imageDetail.json
+                  - cat imagedefinitions.json 
+                  - cat imageDetail.json
+              post_build:
+                commands:
+                  - aws ecr get-login-password --region ${AWS::Region} | docker login --username AWS --password-stdin ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com
+                  - docker push ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/$REPO_NAME:$CODEBUILD_RESOLVED_SOURCE_VERSION-$TAG_NAME
+                  - docker push ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/$REPO_NAME:latest
+            artifacts:
+              files:
+                - imagedefinitions.json
+                - imageDetail.json
+              secondary-artifacts:
+                ${pCodeBuildArtifactOutput}:
+                  files:
+                    - imagedefinitions.json
+                    - imageDetail.json
+                    - taskdef.json
+                    - appspec.yml
+                  name: ${ContainerName}
+                ${pCodeBuildArtifactOutputDicom}:
+                  files:
+                    - dicom-imagedefinitions.json
+                    - imageDetail.json
+                    - taskdef.json
+                    - appspec.yml
+                  name: ${pDicomContainerName}
+          - CodeBuildArtifactOutput: !Ref pCodeBuildArtifactOutput
+            EcrRepoName: !Ref EcrRepoName
+            # ContainerName: !Ref ContainerName
+      Cache:
+        Type: NO_CACHE
+      Tags:
+        - Key: name
+          Value: !Ref CodeBuildProjectName
+
+  #------------------------------------------------------
+  # CodePipeline - Artifact Bucket & Cleanup Lambda
+  #------------------------------------------------------
+
+  artifactBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub ${pAppName}-pipeline-artifacts-${AWS::AccountId}-${AWS::Region}
+      VersioningConfiguration:
+        Status: Enabled
+      BucketEncryption:
+        ServerSideEncryptionConfiguration:
+          - ServerSideEncryptionByDefault:
+              SSEAlgorithm: AES256
+
+  # Artifact bucket cleanup
+  DeleteObjectStorage:
+    Type: Custom::S3DeleteObjectsLambda
+    Properties:
+      ServiceToken: !GetAtt DeleteS3ObjectsFunction.Arn
+      Bucket: !Ref artifactBucket
+
+  LambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        -
+          PolicyName: S3Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Sid: AllowLogging
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: "*"
+              -
+                Sid: DeleteBucketObjects
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:ListBucketVersions
+                  - s3:GetObject
+                  - s3:DeleteObject
+                  - s3:DeleteObjectVersion
+                Resource:
+                  - !Sub arn:aws:s3:::${artifactBucket}
+                  - !Sub arn:aws:s3:::${artifactBucket}/*
+
+  DeleteS3ObjectsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Deletes objects from buckets provisioned by CloudFormation
+      Handler: index.handler
+      Runtime: python3.11
+      Role: !GetAtt LambdaRole.Arn
+      Timeout: 120
+      Code:
+        ZipFile: |
+          import os
+          import json
+          import cfnresponse
+          import boto3
+          import logging
+
+          from botocore.exceptions import ClientError
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+          s3 = boto3.resource('s3')
+
+          def handler(event, context):
+            logger.info("Received event: %s" % json.dumps(event))
+            bucket = s3.Bucket(event['ResourceProperties']['Bucket'])
+
+            result = cfnresponse.SUCCESS
+
+            try:
+              if event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
+                result = cfnresponse.SUCCESS
+              elif event['RequestType'] == 'Delete':
+                result = delete_objects(bucket)
+            except ClientError as e:
+              logger.error('Error: %s', e)
+              result = cfnresponse.FAILED
+
+            cfnresponse.send(event, context, result, {})
+
+          def delete_objects(bucket):
+            bucket.object_versions.delete()
+            bucket.objects.all().delete()
+            return cfnresponse.SUCCESS
+
+  cleanupLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${DeleteS3ObjectsFunction}
+      RetentionInDays: 7
+
+  #------------------------------------------------------
+  # CodePipeline
+  #------------------------------------------------------
+  CodePipeline:
+    Type: AWS::CodePipeline::Pipeline
+    Properties:
+      Name: !Ref CodePipelineName
+      RoleArn: !GetAtt RoleForCodePipeline.Arn
+      ArtifactStore:
+        Location: !Ref artifactBucket
+        Type: S3
+      Stages:
+        - Name: Source
+          Actions:
+            - Name: GitHubSource
+              ActionTypeId:
+                Category: Source
+                Owner: AWS
+                Provider: CodeStarSourceConnection
+                Version: 1
+              Configuration:
+                FullRepositoryId: !Sub ${pRepoOwner}/${pRepoName}
+                ConnectionArn: !Ref pCodestarConnectionArn
+                BranchName: !Ref pTriggerBranch
+                DetectChanges: true
+                OutputArtifactFormat: CODEBUILD_CLONE_REF
+              OutputArtifacts:
+                - Name: !Ref GitHubArtifactOutput
+        - Name: Build
+          Actions:
+            - Name: CodeBuild
+              ActionTypeId:
+                   Owner: AWS
+                   Category: Build
+                   Version: '1'
+                   Provider: CodeBuild
+              RunOrder: 1
+              Configuration:
+                ProjectName: !Ref CodeBuildProject
+                PrimarySource: !Ref GitHubArtifactOutput
+              InputArtifacts:
+                - Name: !Ref GitHubArtifactOutput
+              OutputArtifacts:
+                - Name: !Ref pCodeBuildArtifactOutput
+                - Name: !Ref pCodeBuildArtifactOutputDicom
+        - Name: Deploy
+          Actions:
+            - Name: DeployOrthancGUI
+              ActionTypeId:
+                  Owner: AWS
+                  Category: Deploy
+                  Version: 1
+                  Provider: CodeDeployToECS
+              RunOrder: 1
+              InputArtifacts:
+                - Name: !Ref pCodeBuildArtifactOutput
+              Configuration:
+                AppSpecTemplateArtifact: !Ref pCodeBuildArtifactOutput
+                ApplicationName: !Ref CodeDeployApp
+                DeploymentGroupName: !Ref CodeDeployDeploymentGroup
+                Image1ArtifactName: !Ref pCodeBuildArtifactOutput 
+                Image1ContainerName: IMAGE1_NAME
+                TaskDefinitionTemplatePath: taskdef.json
+                AppSpecTemplatePath: appspec.yml
+                TaskDefinitionTemplateArtifact: !Ref pCodeBuildArtifactOutput
+            - Name: DeployDicom
+              ActionTypeId:
+                Owner: AWS
+                Category: Deploy
+                Version: 1
+                Provider: CodeDeployToECS
+              Configuration:
+                ApplicationName: !Ref CodeDeployApp
+                DeploymentGroupName: !Ref DicomDeployDeploymentGroup
+                AppSpecTemplateArtifact: !Ref pCodeBuildArtifactOutputDicom
+                Image1ArtifactName: !Ref pCodeBuildArtifactOutputDicom 
+                Image1ContainerName: IMAGE1_NAME
+                AppSpecTemplatePath: appspec.yml
+                TaskDefinitionTemplateArtifact: !Ref pCodeBuildArtifactOutputDicom
+                TaskDefinitionTemplatePath: taskdef.json
+                # FileName: dicom-imagedefinitions.json
+              InputArtifacts:
+                - Name: !Ref pCodeBuildArtifactOutputDicom
+            
+ #------------------------------------------------------
+  # Blue/Green CodeDeploy
+  #------------------------------------------------------
+  CodeDeployServiceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub "${pServiceName}-codedeploy-role"
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: "Allow"
+            Action: "sts:AssumeRole"
+            Principal:
+              Service: "codedeploy.amazonaws.com"
+      Policies:
+        - PolicyName: !Sub "${pServiceName}-codedeploy-policy"
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Sid: "passEcsTaskRole"
+                Effect: "Allow"
+                Action:
+                  - "iam:PassRole"
+                  - "iam:GetRole"
+                Resource: "*"
+              - Sid: "s3Artifacts"
+                Effect: "Allow"
+                Action:
+                  - "s3:PutObject"
+                  - "s3:GetObject"
+                  - "s3:GetObjectVersion"
+                  - "s3:GetBucketAcl"
+                  - "s3:GetBucketLocation"
+                Resource: "*"
+              - Sid: "misc"
+                Effect: "Allow"
+                Action:
+                  - "ecs:DescribeServices"
+                  - "ecs:CreateTaskSet"
+                  - "ecs:UpdateServicePrimaryTaskSet"
+                  - "ecs:DeleteTaskSet"
+                  - "ecs:RegisterTaskDefinition"
+                  - "elasticloadbalancing:DescribeTargetGroups"
+                  - "elasticloadbalancing:DescribeListeners"
+                  - "elasticloadbalancing:ModifyListener"
+                  - "elasticloadbalancing:DescribeRules"
+                  - "elasticloadbalancing:ModifyRule"
+                  - "lambda:InvokeFunction"
+                  - "cloudwatch:DescribeAlarms"
+                  - "sns:Publish"
+                  - "s3:GetObject"
+                  - "s3:GetObjectMetadata"
+                  - "s3:GetObjectVersion"
+                Resource: "*"
+
+  CodeDeployApp:
+    Type: AWS::CodeDeploy::Application
+    Properties:
+      ApplicationName: !Ref pAppName
+      ComputePlatform: ECS
+      # Tags: 
+      #   - Tag
+
+
+  DeploymentConfigCanary:
+    Type: AWS::CodeDeploy::DeploymentConfig
+    Condition: IsCanary
+    Properties:
+      DeploymentConfigName: !Sub "${pServiceName}-canary-deploy-config"
+      ComputePlatform: ECS
+      TrafficRoutingConfig:
+        Type: TimeBasedCanary
+        TimeBasedCanary:
+          CanaryPercentage: !Ref pTrafficPercentage
+          CanaryInterval: !Ref pTrafficInterval
+
+
+  DeploymentConfigLinear:
+    Type: AWS::CodeDeploy::DeploymentConfig
+    Condition: IsLinear
+    Properties:
+      DeploymentConfigName: !Sub "${pServiceName}-linear-deploy-config"
+      ComputePlatform: ECS
+      TrafficRoutingConfig:
+        Type: TimeBasedLinear
+        LinearRoutingConfig:
+          TimeBasedLinear:
+            LinearPercentage: !Ref pTrafficPercentage
+            LinearInterval: !Ref pTrafficInterval
+
+  DeploymentConfigAllAtOnce:
+    Type: AWS::CodeDeploy::DeploymentConfig
+    Condition: IsAllAtOnce
+    Properties:
+      DeploymentConfigName: !Sub "${pServiceName}-allatonce-deploy-config"
+      ComputePlatform: ECS
+      TrafficRoutingConfig:
+        Type: AllAtOnce
+
+  # DicomDeploymentConfigCanary:
+  #   Type: AWS::CodeDeploy::DeploymentConfig
+  #   Condition: IsCanary
+  #   Properties:
+  #     DeploymentConfigName: !Sub "${pDicomServiceName}-canary-deploy-config"
+  #     ComputePlatform: ECS
+  #     TrafficRoutingConfig:
+  #       Type: TimeBasedCanary
+  #       TimeBasedCanary:
+  #         CanaryPercentage: !Ref pTrafficPercentage
+  #         CanaryInterval: !Ref pTrafficInterval
+
+
+  # DicomDeploymentConfigLinear:
+  #   Type: AWS::CodeDeploy::DeploymentConfig
+  #   Condition: IsLinear
+  #   Properties:
+  #     DeploymentConfigName: !Sub "${pDicomServiceName}-linear-deploy-config"
+  #     ComputePlatform: ECS
+  #     TrafficRoutingConfig:
+  #       Type: TimeBasedLinear
+  #       LinearRoutingConfig:
+  #         TimeBasedLinear:
+  #           LinearPercentage: !Ref pTrafficPercentage
+  #           LinearInterval: !Ref pTrafficInterval
+
+  # DicomDeploymentConfigAllAtOnce:
+  #   Type: AWS::CodeDeploy::DeploymentConfig
+  #   Condition: IsAllAtOnce
+  #   Properties:
+  #     DeploymentConfigName: !Sub "${pDicomServiceName}-allatonce-deploy-config"
+  #     ComputePlatform: ECS
+  #     TrafficRoutingConfig:
+  #       Type: AllAtOnce
+
+  # DicomDeploymentConfig:
+  #   Type: AWS::CodeDeploy::DeploymentConfig
+  #   Properties: 
+  #     DeploymentConfigName: !Sub ${pAppName}-dicom-inplace-config
+  #     ComputePlatform: ECS
+  #     MinimumHealthyHosts:
+  #       Type: FLEET_PERCENT
+  #       Value: 100
+
+
+
+  CodeDeployDeploymentGroup:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    DependsOn:
+    - DeploymentConfigCanary
+    # - DeploymentConfigLinear
+    # - DeploymentConfigAllAtOnce
+    Properties:
+      ApplicationName: !Ref CodeDeployApp
+      DeploymentGroupName: !Sub ${pAppName}
+      ServiceRoleArn: !GetAtt CodeDeployServiceRole.Arn
+      DeploymentConfigName: 
+        !If 
+          - IsCanary
+          - !Sub "${pServiceName}-canary-deploy-config"
+          - !If
+              - IsLinear
+              - !Sub "${pServiceName}-linear-deploy-config"
+              - !Sub "${pServiceName}-allatonce-deploy-config"
+      ECSServices:
+        - ClusterName: !Ref pEcsClusterName
+          ServiceName: !Ref pServiceName
+      LoadBalancerInfo:
+        TargetGroupPairInfoList:
+          - ProdTrafficRoute:
+              ListenerArns: 
+                - !Ref pProdListenerArn
+            TargetGroups:
+              - Name: !Ref pHTTPSBlueTargetGroupName
+              - Name: !Ref pHTTPSGreenTargetGroupName
+      BlueGreenDeploymentConfiguration:
+        DeploymentReadyOption:
+          ActionOnTimeout: CONTINUE_DEPLOYMENT
+          WaitTimeInMinutes: 0
+        TerminateBlueInstancesOnDeploymentSuccess:
+          Action: TERMINATE
+          TerminationWaitTimeInMinutes: !Ref pTerminateWaitTime
+      AlarmConfiguration:
+        Enabled: !Ref DeployAlarmEnabled
+        Alarms:
+          - Name: !Ref UnhealthyHostsBlueAlarm
+          - Name: !Ref UnhealthyHostsGreenAlarm
+      AutoRollbackConfiguration:
+        Enabled: true
+        Events:
+          - DEPLOYMENT_FAILURE
+          - DEPLOYMENT_STOP_ON_ALARM
+      DeploymentStyle:
+        DeploymentOption: WITH_TRAFFIC_CONTROL
+        DeploymentType: BLUE_GREEN
+      
+  DicomDeployDeploymentGroup:
+    Type: AWS::CodeDeploy::DeploymentGroup
+    Properties:
+      ApplicationName: !Ref CodeDeployApp
+      DeploymentGroupName: !Sub ${pAppName}-dicom
+      ServiceRoleArn: !GetAtt CodeDeployServiceRole.Arn
+      # DeploymentConfigName: !Ref DicomDeploymentConfig
+      ECSServices:
+        - ClusterName: !Ref pEcsClusterName
+          ServiceName: !Ref pDicomServiceName
+      LoadBalancerInfo:
+        TargetGroupPairInfoList:
+          - ProdTrafficRoute:
+              ListenerArns: 
+                - !Ref pNLBListenerArn
+            TargetGroups:
+              - Name: !Ref pBlueTargetGroupName
+              - Name: !Ref pGreenTargetGroupName
+      BlueGreenDeploymentConfiguration:
+        DeploymentReadyOption:
+          ActionOnTimeout: CONTINUE_DEPLOYMENT
+          WaitTimeInMinutes: 0
+        TerminateBlueInstancesOnDeploymentSuccess:
+          Action: TERMINATE
+          TerminationWaitTimeInMinutes: !Ref pTerminateWaitTime
+      AutoRollbackConfiguration:
+        Enabled: true
+        Events:
+          - DEPLOYMENT_FAILURE
+      DeploymentStyle:
+        DeploymentOption: WITH_TRAFFIC_CONTROL
+        DeploymentType: BLUE_GREEN
+
+  UnhealthyHostsBlueAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${pServiceName}-unhealthy-hosts-blue"
+      AlarmDescription: "Monitors unhealthy blue target group targets"
+      Namespace: "AWS/ApplicationELB"
+      MetricName: "UnHealthyHostCount"
+      Statistic: "Average"
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: "GreaterThanOrEqualToThreshold"
+      Dimensions:
+        - Name: "TargetGroup"
+          Value: !Ref BlueTgArnSuffix
+        - Name: "LoadBalancer"
+          Value: !Ref AlbArnSuffix
+      ActionsEnabled: true
+
+  UnhealthyHostsGreenAlarm:
+    Type: AWS::CloudWatch::Alarm
+    Properties:
+      AlarmName: !Sub "${pServiceName}-unhealthy-hosts-green"
+      AlarmDescription: "Monitors unhealthy green target group targets"
+      Namespace: "AWS/ApplicationELB"
+      MetricName: "UnHealthyHostCount"
+      Statistic: "Average"
+      Period: 300
+      EvaluationPeriods: 1
+      Threshold: 1
+      ComparisonOperator: "GreaterThanOrEqualToThreshold"
+      Dimensions:
+        - Name: "TargetGroup"
+          Value: !Ref GreenTgArnSuffix
+        - Name: "LoadBalancer"
+          Value: !Ref AlbArnSuffix
+      ActionsEnabled: true
+
+  # DicomUnhealthyHostsBlueAlarm:
+  #   Type: AWS::CloudWatch::Alarm
+  #   Properties:
+  #     AlarmName: !Sub "${pDicomServiceName}-unhealthy-hosts-blue"
+  #     AlarmDescription: "Monitors unhealthy blue target group targets"
+  #     Namespace: "AWS/ApplicationELB"
+  #     MetricName: "UnHealthyHostCount"
+  #     Statistic: "Average"
+  #     Period: 300
+  #     EvaluationPeriods: 1
+  #     Threshold: 1
+  #     ComparisonOperator: "GreaterThanOrEqualToThreshold"
+  #     Dimensions:
+  #       - Name: "TargetGroup"
+  #         Value: !Ref BlueTgArnSuffix
+  #       - Name: "LoadBalancer"
+  #         Value: !Ref NlbArnSuffix
+  #     ActionsEnabled: true
+
+  # DicomUnhealthyHostsGreenAlarm:
+  #   Type: AWS::CloudWatch::Alarm
+  #   Properties:
+  #     AlarmName: !Sub "${pDicomServiceName}-unhealthy-hosts-green"
+  #     AlarmDescription: "Monitors unhealthy green target group targets"
+  #     Namespace: "AWS/ApplicationELB"
+  #     MetricName: "UnHealthyHostCount"
+  #     Statistic: "Average"
+  #     Period: 300
+  #     EvaluationPeriods: 1
+  #     Threshold: 1
+  #     ComparisonOperator: "GreaterThanOrEqualToThreshold"
+  #     Dimensions:
+  #       - Name: "TargetGroup"
+  #         Value: !Ref GreenTgArnSuffix
+  #       - Name: "LoadBalancer"
+  #         Value: !Ref NlbArnSuffix
+  #     ActionsEnabled: true

@@ -25,11 +25,6 @@ Parameters:
     Default: 1
     Description: Minimum number of tasks ECS can run
 
-  pBuildTag:
-    Type: String
-    Default: latest
-    Description: Commit ID to use from ECR Repo
-
   pServicePrefix:
     Type: String
     Description: Name of ECS Service
@@ -54,19 +49,6 @@ Parameters:
     Type: Number
     Description: The amount of CPU to present to the container
     Default: 256
-
-  pHostPort:
-    Type: Number
-    Default: 0
-    Description: The port exposed on the ECS instance - set to 0 for dynamic port selection
-
-  pPortProtocol:
-    Type: String
-    Default: tcp
-    AllowedValues:
-      - tcp
-      - udp
-    Description: Port Mappings Protocol
 
   pFargateClusterName:
     Type: String
@@ -130,9 +112,6 @@ Metadata:
           - pContainerPort
           - pContainerMemory
           - pContainerCpu
-          - pHostPort
-          - pPortProtocol
-          - pBuildTag
       - Label:
           default: Task Definition Settings
         Parameters:
@@ -154,10 +133,6 @@ Metadata:
         default: Container RAM needed
       pContainerCpu:
         default: Container CPU needed
-      pPortProtocol:
-        default: ECS Container Port Mappings Protocol
-      pBuildTag:
-        default: ECR Image Build Tag
       pEnvironmentTag:
         default: Environment Tag
 

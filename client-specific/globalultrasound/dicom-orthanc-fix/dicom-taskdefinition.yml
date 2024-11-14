@@ -382,17 +382,21 @@ Resources:
               Value: !Ref pMysqlDBname 
             - Name: GUSI_BE_DB_USER
               Value: !Ref pMysqlDBUsername
-            - Name: GUSI_PACS_AWS_S3_BUCKET
+            - Name: ORTHANC_AWS_S3_STORAGE_BUCKETNAME
               Value: !Ref pWPS3BucketName
-            - Name: GUSI_PACS_AWS_S3_KEY
+            - Name: ORTHANC_AWS_S3_STORAGE_REGION
+              Value: us-east-1
+            - Name: ORTHANC_AWS_S3_STORAGE_ACCESS_KEY
               Value: !Ref pWPS3Key
-            - Name: GUSI_PACS_AWS_S3_SECRET_KEY
+            - Name: ORTHANC_AWS_S3_STORAGE_SECRET_KEY
               Value: !Ref pWPS3SecretKey
             - Name: GUSI_PACS_AWS_S3_PARENT_FOLDER
               Value: !Ref pWPS3ParentFolder
             - Name: GUSI_PACS_AWS_S3_UNSIGNED
               Value: ""
-            - Name: GUSI_PACS_AWS_S3_ENDPOINT
+            - Name: ORTHANC_AWS_S3_STORAGE_IAM_ROLE_ARN
+              Value: !GetAtt ecsTaskRole.Arn
+            - Name: ORTHANC_AWS_S3_STORAGE_ENDPOINT
               Value: !Ref pWPS3Endpoint
             - Name: GUSI_PACS_AWS_S3_URL_PREFIX
               Value: !Ref pWPS3URLPrefix

@@ -1,0 +1,188 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Description: >
+  Deploys NLB for Orthanc
+
+Parameters:
+
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the Virtual Private Network (VPC)
+
+  pSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description: List of Public Subnet IDs for the Internet Facing Load Balancer
+    
+  pDomainName:
+    Type: String
+    Description: Domain Name
+    Default: pacs.dev.orthanc.globalultrasoundinstitute.com
+
+  pOrthancContainerPort:
+    Type: Number
+    Description: Orthanc Container Port Number
+    Default: 4242
+
+  pDicomPort:
+    Type: Number
+    Description: DICOM Port Number
+    Default: 104
+
+
+Resources:
+
+  # Security Group for the NLB
+  NLBSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow traffic to NLB
+      VpcId: !Ref pVpcId  # Replace with your VPC ID
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 104
+          ToPort: 104
+          CidrIp: 0.0.0.0/0  # Allows traffic from anywhere; adjust as necessary
+
+  # Network Load Balancer
+  DicomNlb:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      Name: ECS-DicomNlb
+      Type: network
+      Scheme: internet-facing
+      Subnets:  !Ref pSubnetIds
+      SecurityGroups:
+        - !Ref NLBSecurityGroup
+
+  HttpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    DependsOn: 
+      - DicomNlb
+    Properties: 
+      DefaultActions: 
+        - Type: forward
+          ForwardConfig:
+            TargetGroups:
+              - TargetGroupArn: !Ref OrthancBlueTg
+                # Weight: 100 
+              # - TargetGroupArn: !Ref OrthancGreenTg
+              #   Weight: 0
+      LoadBalancerArn: !Ref DicomNlb
+      Port: 104
+      Protocol: TCP
+  
+  # orthancBGRule:
+  #   Type: AWS::ElasticLoadBalancingV2::ListenerRule
+  #   DependsOn:
+  #   - HttpsListener
+  #   - DicomNlb
+  #   Properties:
+  #     ListenerArn: !Ref HttpsListener
+  #     Priority: 3
+  #     Actions:
+  #       - Type: forward
+  #         ForwardConfig:
+  #           TargetGroups: 
+  #             - TargetGroupArn: !Ref OrthancBlueTg
+              #   Weight: 100
+              # - TargetGroupArn: !Ref OrthancGreenTg
+              #   Weight: 0
+      # Conditions:
+      #   - Field: host-header
+      #     HostHeaderConfig:
+      #       Values: 
+      #         - !Sub ${pDomainName}
+  
+
+  # orthancTg:
+  #   Type: AWS::ElasticLoadBalancingV2::TargetGroup
+  #   Properties:
+  #     Name: orthanc-nlb-tg
+  #     Port: !Ref pDicomPort
+  #     Protocol: TCP
+  #     TargetType: ip
+  #     VpcId: !Ref pVpcId
+  #     HealthCheckProtocol: TCP
+  #     HealthCheckPort: traffic-port
+  #     Tags:
+  #       - Key: Name
+  #         Value: orthanc-TG-DICOM
+  #       - Key: controlled-by
+  #         Value: !Sub cloudformation-${AWS::StackName}
+  
+  OrthancBlueTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    UpdateReplacePolicy: Delete
+    Properties:
+      Name: Orthanc-blue-TG-TCP
+      Port: !Ref pOrthancContainerPort
+      TargetType: ip
+      VpcId: !Ref pVpcId
+      Protocol: TCP
+
+      # HealthCheckPath: /
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: TCP
+      HealthyThresholdCount: 4
+      UnhealthyThresholdCount: 4
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      Tags:
+        - Key: Name
+          Value: Orthanc-blue-TG-TCP
+        - Key: controlled-by
+          Value: !Sub cloudformation-${AWS::StackName}
+
+  OrthancGreenTg:
+    UpdateReplacePolicy: Delete
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties:
+      Name: Orthanc-green-TG-TCP
+      Port: !Ref pOrthancContainerPort
+      TargetType: ip
+      VpcId: !Ref pVpcId
+      Protocol: TCP
+
+      # HealthCheckPath: /
+      HealthCheckPort: traffic-port
+      HealthCheckProtocol: TCP
+      HealthyThresholdCount: 4
+      UnhealthyThresholdCount: 4
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      Tags:
+        - Key: Name
+          Value: Orthanc-green-TG-TCP
+        - Key: controlled-by
+          Value: !Sub cloudformation-${AWS::StackName}
+
+Outputs:
+  # nlbSecurityGroup:
+  #   Description: Security Group for ALB
+  #   Value: !Ref NLBSecurityGroup
+  #   Export:
+  #     Name: !Sub nlb-security-group-${AWS::StackName}
+  # orthancTg:
+  #   Description: Target Group for Orthanc
+  #   Value: !Ref orthancTg
+  #   Export:
+  #     Name: !Sub orthanc-tg-${AWS::StackName}
+  OrthancGreenTg:
+    Description: Green Target Group for Orthanc
+    Value: !Ref OrthancGreenTg
+    Export:
+      Name: !Sub orthanc-green-tg-${AWS::StackName}
+  OrthancBlueTg:
+    Description: Blue Target Group for Orthanc
+    Value: !Ref OrthancBlueTg
+    Export:
+      Name: !Sub orthanc-blue-tg-${AWS::StackName}
+  clusterDicomNlb:
+    Description: Cluster DicomNlb
+    Value: !Ref DicomNlb
+    Export:
+      Name: !Sub cluster-nlb-${AWS::StackName}
+  # NlbTargetGroupArn:
+  #   Description: ARN of the Target Group for the NLB
+  #   Value: !Ref orthancTg
+  #   Export:
+  #     Name: !Sub nlb-target-group-arn-${AWS::StackName}
