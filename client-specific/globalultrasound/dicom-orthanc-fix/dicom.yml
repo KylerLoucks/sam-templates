@@ -166,7 +166,6 @@ Resources:
 
   ecsService:
     Type: AWS::ECS::Service
-    DependsOn: ecsExecutionRole
     Properties:
       LoadBalancers:
         - ContainerName: !Sub ${pServicePrefix}-service
@@ -199,7 +198,6 @@ Resources:
   ## DICOM ECS Service
   dicomEcsService:
     Type: AWS::ECS::Service
-    DependsOn: ecsExecutionRole
     Properties:
       LoadBalancers:
         - ContainerName: !Sub ${pDicomServicePrefix}-service
