@@ -430,7 +430,7 @@ Outputs:
     Description: "The ARN of the Orthanc ECS Task Definition"
     Value: !Ref ecsTaskDefinition
     Export:
-      Name: !Sub '${AWS::StackName}-DicomTaskDefinitionArn'
+      Name: !Sub '${AWS::StackName}-OrthancTaskDefinitionArn'
 
   DicomTaskDefinitionArn:
     Description: "The ARN of the Dicom ECS Task Definition"
