@@ -1,5 +1,4 @@
 AWSTemplateFormatVersion: 2010-09-09
-
 Description: >
   Deploys Wordpress on ECS Fargate using an existing ECS Cluster and Service Discovery Namespace
 
@@ -10,10 +9,6 @@ Parameters:
   pSubnetIds:
     Type: List<AWS::EC2::Subnet::Id>
     Description: List of Subnet IDs for the ECS tasks
-  pMySQLDBStackName:
-    Type: String
-    Description: Name of the stack exporting the required values
-    Default: aurora-mysql
   pClusterStackName:
     Type: String
     Description: Name of the cluster stack exporting the required values
@@ -22,120 +17,15 @@ Parameters:
     Type: String
     Description: The name of the ALB stack.
     Default: cluster-alb-gusi
-  DBUsername:
-    Type: String
-    Description: Username for the MySQL database
-    Default: master
-  pCPU:
-    Type: Number
-    Description: The number of CPUs for the instance or service.
-    Default: 512
-  pMemory:
-    Type: Number
-    Description: The number of CPUs for the instance or service.
-    Default: 1024
   pDesiredCount:
     Type: Number
     Description: Desired amount of tasks to run on the ECS service.
     Default: 0
-  pImageVersion:
+  pTaskDefinitionArn:
     Type: String
-    Description: The version tag of the container image.
-    Default: latest
-  pEcrRepo:
-    Type: String
-    Description: The ECR repository name.
-    Default: gusi-wordpress
-  pRedisStackName:
-    Type: String
-    Description: The name of the Redis stack.
-    Default: gusi-redis
-  pSiteURL:
-    Type: String
-    Description: Wordpress Site URL.
-    Default: "https://dev.globalultrasoundinstitute.com/"
-  pWPAPIURL:
-    Type: String
-    Description: Wordpress API  URL.
-    Default: "https://dev.globalultrasoundinstitute.com/wp-json/wp/v2/"   
-  pWPAUTHKEY:
-    Type: String
-    Description: a secret key used to encrypt and validate user sessions and cookies.
-    Default: ""
-  pWPSecureAuthKey:
-    Type: String
-    Description: one of several secret keys used by WordPress to secure your website's data, particularly for user authentication. It is specifically used to secure the cookies for users who are logged in using SSL
-    Default: ""
-  pWPLoggedInKey:
-    Type: String
-    Description: is another one of the secret keys used by WordPress to secure your site's data, specifically related to user sessions. This key is used to secure cookies that are used to verify whether a user is logged in or not.
-    Default: ""
-  pWPNonceKey:
-    Type: String
-    Description: is another key used in WordPress to enhance security, specifically in the context of nonces. Nonces are one-time tokens used to protect URLs and forms from being misused, particularly against Cross-Site Request Forgery (CSRF) attacks
-    Default: ""
-  pWPAuthSalt:
-    Type: String
-    Description: is one of several "salt" values used in WordPress to enhance the security of your site, particularly in relation to user authentication and session management. Salts are random strings that are added to your password or other security keys before hashing, making it much harder for attackers to crack the resulting hashes.
-    Default: ""
-  pWPSecureAuthSalt:
-    Type: String
-    Description: is another security-related value in WordPress that is used to enhance the protection of your site, particularly for securing authentication cookies when users log in over HTTPS.
-    Default: ""
-  pWPLoggedInSalt:
-    Type: String
-    Description: is one of the security-related salts used by WordPress to enhance the protection of your website's user sessions. Specifically, it is used in conjunction with the LOGGED_IN_KEY to secure the cookies that manage whether a user is logged in.
-    Default: ""
-  pWPNanceSalt:
-    Type: String
-    Description:  is one of the security-related salts used by WordPress to enhance the security of nonces, which are unique tokens used to protect your site from certain types of attacks, particularly Cross-Site Request Forgery (CSRF) attacks.
-    Default: ""
-  pWPS3BucketName:
-    Description: 'Bucket name That used to save images.'
-    Type: String
-    Default: 'gusiclips-qav1'
-  pWPS3Key:
-    Description: 'AWS S3 Access Key.'
-    Type: String
-    Default: ''
-  pWPS3SecretKey:
-    Description: 'AWS S3 Secret Access Key.'
-    Type: String
-    Default: ''   
-  pWPTablePrefix:
-    Description: 'Wordpress Table Prefix'
-    Type: String
-    Default: 'wshd_'
-  pWPAutoUpdateCore:
-    Description: 'Wordpress Table Prefix'
-    Type: String
-    Default: 'false'
-  pCaptchaSecretKey:
-    Description: 'Wordpress Cpthca Secret Key'
-    Type: String
-    Default: ""
-  pWPS3Region: 
-    Description: 'AWS S3 default region.'
-    Type: String
-    Default: 'us-east-1'
-  pWPS3UsePathStyleEndpoint:
-    Description: 'AWS S3 UsePathStyleEndpoint'
-    Type: String
-    Default: 'false'
-  pWPDBName:
-    Type: String
-    Description: Username for the MySQL database
-    Default: "wordpress"
-  pWPDBUsername:
-    Type: String
-    Description: Username for the MySQL database
-    Default: "master"   
-
-  pFileSystemID:
-    Type: String
-    Description: The ID of the EFS System that stores wp-content/plugins and wp-content/uploads
-    Default: "fs-09ba1106f7317fee0"
-
+    Description: Arn of the TaskDefinition used for the service.
+    Default: arn:aws:ecs:us-east-1:637423663399:task-definition/wordpress
+    
 Resources:
 
   # Security Group
@@ -164,176 +54,6 @@ Resources:
       ToPort: -1      # Allows all ports
       CidrIp: 10.2.0.0/16
 
-  # IAM Role for ECS Task Execution
-  ecsExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ecs-tasks.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
-        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
-        - arn:aws:iam::aws:policy/SecretsManagerReadWrite
-
-  taskRole:
-    Type: AWS::IAM::Role
-    Properties:
-      Path: /
-      AssumeRolePolicyDocument:
-        Version: 2012-10-17
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service:
-                - ecs-tasks.amazonaws.com
-            Action: sts:AssumeRole
-      Policies:
-        - PolicyName: EcsExec
-          PolicyDocument: 
-            Version: 2012-10-17
-            Statement:
-              - Sid: AllowEcsExec
-                Effect: Allow
-                Action:
-                  - ssmmessages:CreateControlChannel
-                  - ssmmessages:CreateDataChannel
-                  - ssmmessages:OpenControlChannel
-                  - ssmmessages:OpenDataChannel
-                Resource: "*"
-        - PolicyName: CloudWatchLogs
-          PolicyDocument: 
-            Version: 2012-10-17
-            Statement:
-              - Sid: AllowCreateLogGroup
-                Effect: Allow
-                Action:
-                  - logs:CreateLogGroup
-                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
-              - Sid: AllowLogStreams
-                Effect: Allow
-                Action:
-                  - logs:CreateLogStream
-                  - logs:PutLogEvents
-                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/*:*"
-
-  # ECS Task Definition for wordpress
-  wordpressTaskDefinition:
-    Type: AWS::ECS::TaskDefinition
-    Properties:
-      Family: wordpress
-      RequiresCompatibilities:
-        - FARGATE
-      NetworkMode: awsvpc
-      RuntimePlatform: 
-        CpuArchitecture: X86_64
-        OperatingSystemFamily: LINUX
-      Cpu: !Ref pCPU
-      Memory: !Ref pMemory
-      ExecutionRoleArn: !GetAtt ecsExecutionRole.Arn
-      TaskRoleArn: !GetAtt  taskRole.Arn
-      Volumes:
-        - Name: wp-efs-uploads
-          EFSVolumeConfiguration:
-            FilesystemId: !Ref pFileSystemID
-            RootDirectory: /wp/uploads/
-            TransitEncryption: ENABLED
-        - Name: wp-efs-assets
-          EFSVolumeConfiguration:
-            FilesystemId: !Ref pFileSystemID
-            RootDirectory: /wp/plugins/portfolio-lms/assets/
-            TransitEncryption: ENABLED
-      ContainerDefinitions:
-        - Name: wordpress-container
-          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${pEcrRepo}:${pImageVersion}
-          Essential: true
-          MountPoints:
-            - SourceVolume: wp-efs-uploads
-              ContainerPath: /var/www/html/wp-content/uploads
-            - SourceVolume: wp-efs-assets
-              ContainerPath: /var/www/html/wp-content/plugins/portfolio-lms/assets
-          PortMappings:
-            - ContainerPort: 443
-              Protocol: tcp
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Ref LogGroup
-              awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: wordpress
-          Environment:
-            - Name: SITE_URL
-              Value: !Ref pSiteURL # "https://dev.globalultrasoundinstitute.com/"
-            - Name: WP_API_URL
-              Value: !Ref pWPAPIURL #"https://dev.globalultrasoundinstitute.com/wp-json/wp/v2/"
-            - Name: WORDPRESS_DB_HOST
-              Value: {'Fn::ImportValue': !Sub '${pMySQLDBStackName}:RdsProxyEndpoint'}
-            - Name: WORDPRESS_DB_NAME
-              Value: !Ref pWPDBName
-            - Name: WORDPRESS_DB_USER
-              Value: !Ref pWPDBUsername
-            - Name: WORDPRESS_AUTH_KEY
-              Value: !Ref pWPAUTHKEY
-            - Name: WORDPRESS_SECURE_AUTH_KEY
-              Value: !Ref pWPSecureAuthKey
-            - Name: WORDPRESS_LOGGED_IN_KEY
-              Value: !Ref pWPLoggedInKey
-            - Name: WORDPRESS_NONCE_KEY
-              Value: !Ref pWPNonceKey
-            - Name: WORDPRESS_AUTH_SALT
-              Value: !Ref pWPAuthSalt
-            - Name: WORDPRESS_SECURE_AUTH_SALT
-              Value: !Ref pWPSecureAuthSalt
-            - Name: WORDPRESS_LOGGED_IN_SALT
-              Value: !Ref pWPLoggedInSalt
-            - Name: WORDPRESS_NONCE_SALT
-              Value: !Ref pWPNanceSalt
-            # - Name: WORDPRESS_DB_PASSWORD
-            #   Value:  !Ref WPDBPassword
-            - Name: AWS_BUCKET
-              Value: !Ref pWPS3BucketName
-            - Name: AWS_ACCESS_KEY_ID
-              Value:  !Ref pWPS3Key 
-            - Name: AWS_SECRET_ACCESS_KEY
-              Value:  !Ref pWPS3SecretKey
-            - Name: AWS_DEFAULT_REGION
-              Value: !Ref pWPS3Region
-            - Name: AWS_USE_PATH_STYLE_ENDPOINT
-              Value: !Ref pWPS3UsePathStyleEndpoint
-            - Name: AWS_URL
-              Value: 
-                Fn::Sub: "https://${pWPS3BucketName}.s3.${pWPS3Region}.amazonaws.com/"  
-            - Name: WORDPRESS_TABLE_PREFIX
-              Value: !Ref pWPTablePrefix
-            - Name: WP_AUTO_UPDATE_CORE
-              Value: !Ref pWPAutoUpdateCore
-            - Name: CAPTCHA_SECRET_KEY
-              Value: !Ref pCaptchaSecretKey
-            - Name: REDIS_ENDPOINT
-              Value: !ImportValue 
-                Fn::Sub: ${pRedisStackName}-RedisEndpoint
-
-          Secrets:
-            - Name: WORDPRESS_DB_PASSWORD
-              ValueFrom: !Join 
-                - ''
-                - - !ImportValue 
-                    Fn::Sub: ${pMySQLDBStackName}:RdsSecretArn
-                  - ':password::'
-
-
-  # CloudWatch Log Group for the container logs
-  LogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: /ecs/wordpress
-      RetentionInDays: 7
-
   # ECS Service for Wordpress
   wordpressService:
     Type: AWS::ECS::Service
@@ -341,7 +61,7 @@ Resources:
       Cluster: !ImportValue 
         Fn::Sub: ${pClusterStackName}:FargateClusterArn
       ServiceName: wordpress-service
-      TaskDefinition: !Ref wordpressTaskDefinition
+      TaskDefinition: !Ref pTaskDefinitionArn
       LoadBalancers:
         - ContainerName: wordpress-container
           ContainerPort: 443
@@ -438,12 +158,6 @@ Resources:
         ScaleOutCooldown: 300
 
 Outputs:
-  EcsImageVersion:
-    Description: ECS Image Version
-    Value: !Ref pImageVersion
-    Export:
-      Name: !Sub ${AWS::StackName}:EcsImageVersion
-
   ECSServiceName:
     Description: Service Name
     Value: !Ref wordpressService

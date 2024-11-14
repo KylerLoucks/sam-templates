@@ -1,0 +1,198 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >
+  Deploys Wordpress Task Definition
+
+
+Parameters:
+
+  pMySQLDBStackName:
+    Type: String
+    Description: Name of the stack exporting the required values
+    Default: aurora-mysql
+  DBUsername:
+    Type: String
+    Description: Username for the MySQL database
+    Default: master
+  pCPU:
+    Type: Number
+    Description: The number of CPUs for the instance or service.
+    Default: 512
+  pMemory:
+    Type: Number
+    Description: The number of CPUs for the instance or service.
+    Default: 1024
+  pDesiredCount:
+    Type: Number
+    Description: Desired amount of tasks to run on the ECS service.
+    Default: 0
+  pImageVersion:
+    Type: String
+    Description: The version tag of the container image.
+    Default: latest
+  pEcrRepo:
+    Type: String
+    Description: The ECR repository name.
+    Default: gusi-wordpress
+  pRedisStackName:
+    Type: String
+    Description: The name of the Redis stack.
+    Default: gusi-redis
+  pWPDBName:
+    Type: String
+    Description: Username for the MySQL database
+    Default: "wordpress"
+  pWPDBUsername:
+    Type: String
+    Description: Username for the MySQL database
+    Default: "master"   
+
+  pFileSystemID:
+    Type: String
+    Description: The ID of the EFS System that stores wp-content/plugins and wp-content/uploads
+    Default: "fs-09ba1106f7317fee0"
+
+Resources:
+
+
+  # IAM Role for ECS Task Execution
+  ecsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/SecretsManagerReadWrite
+
+  taskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: EcsExec
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowEcsExec
+                Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: "*"
+        - PolicyName: CloudWatchLogs
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowCreateLogGroup
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Sid: AllowLogStreams
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/*:*"
+
+
+  # ECS Task Definition for wordpress
+  wordpressTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: wordpress
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform: 
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      Cpu: !Ref pCPU
+      Memory: !Ref pMemory
+      ExecutionRoleArn: !GetAtt ecsExecutionRole.Arn
+      TaskRoleArn: !GetAtt taskRole.Arn
+      Volumes:
+        - Name: wp-efs-uploads
+          EFSVolumeConfiguration:
+            FilesystemId: !Ref pFileSystemID
+            RootDirectory: /wp/uploads/
+            TransitEncryption: ENABLED
+        - Name: wp-efs-assets
+          EFSVolumeConfiguration:
+            FilesystemId: !Ref pFileSystemID
+            RootDirectory: /wp/plugins/portfolio-lms/assets/
+            TransitEncryption: ENABLED
+      ContainerDefinitions:
+        - Name: wordpress-container
+          Image: !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${pEcrRepo}:${pImageVersion}
+          Essential: true
+          MountPoints:
+            - SourceVolume: wp-efs-uploads
+              ContainerPath: /var/www/html/wp-content/uploads
+            - SourceVolume: wp-efs-assets
+              ContainerPath: /var/www/html/wp-content/plugins/portfolio-lms/assets
+          PortMappings:
+            - ContainerPort: 443
+              Protocol: tcp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: wordpress
+          Environment:
+            - Name: TEST
+              Value: TESTING
+            - Name: WORDPRESS_DB_HOST
+              Value: {'Fn::ImportValue': !Sub '${pMySQLDBStackName}:RdsProxyEndpoint'}
+            - Name: WORDPRESS_DB_NAME
+              Value: !Ref pWPDBName
+            - Name: WORDPRESS_DB_USER
+              Value: !Ref pWPDBUsername
+            - Name: REDIS_ENDPOINT
+              Value: !ImportValue 
+                Fn::Sub: ${pRedisStackName}-RedisEndpoint
+
+          Secrets:
+            - Name: WORDPRESS_DB_PASSWORD
+              ValueFrom: !Join 
+                - ''
+                - - !ImportValue 
+                    Fn::Sub: ${pMySQLDBStackName}:RdsSecretArn
+                  - ':password::'
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /ecs/wordpress
+      RetentionInDays: 7
+
+Outputs:
+  EcsImageVersion:
+    Description: ECS Image Version
+    Value: !Ref pImageVersion
+    Export:
+      Name: !Sub ${AWS::StackName}:EcsImageVersion
+
+  TaskDefinitionArn:
+    Description: ECS Task Definition ARN
+    Value: !Ref wordpressTaskDefinition
+    Export:
+      Name: !Sub ${AWS::StackName}:TaskDefinitionArn
