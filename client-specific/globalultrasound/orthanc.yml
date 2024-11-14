@@ -4,11 +4,6 @@ Description: Deploys an Orthanc service into an ECS cluster.
 Parameters:
 
 # ECS Settings
-  
-  pStackName:
-    Type: String
-    Description: Name of the stack exporting the required values
-    Default: gusi-cluster
 
   pAlbStackName:
     Type: String
@@ -30,11 +25,6 @@ Parameters:
     Default: 1
     Description: Minimum number of tasks ECS can run
 
-  pBuildTag:
-    Type: String
-    Default: latest
-    Description: Commit ID to use from ECR Repo
-
   pServicePrefix:
     Type: String
     Description: Name of ECS Service
@@ -50,48 +40,10 @@ Parameters:
     Description: The port exposed to the EC2 instance from the container
     Default: 4242
 
-  pContainerMemory:
-    Type: Number
-    Description: The amount (in MiB) of memory to present to the container
-    Default: 512
-
-  pContainerCpu:
-    Type: Number
-    Description: The amount of CPU to present to the container
-    Default: 256
-
-  pHostPort:
-    Type: Number
-    Default: 0
-    Description: The port exposed on the ECS instance - set to 0 for dynamic port selection
-
-  pPortProtocol:
-    Type: String
-    Default: tcp
-    AllowedValues:
-      - tcp
-      - udp
-    Description: Port Mappings Protocol
-
-  pImageVersion:
-    Type: String
-    Description: "The version tag of the container image."
-    Default: "latest"
-  
-  pEcrRepo:
-    Type: String
-    Description: "The ECR repository name."
-    Default: "gusi-orthanc"
-
   pFargateClusterName:
     Type: String
     Description: "The name of the Fargate Cluster from the exported value"
     Default: "gusi-cluster"
-
-  pHostname01:
-    Type: String
-    Description: Hostname to expose the service
-    Default: orthanc
 
   pVpcId:
     Type: AWS::EC2::VPC::Id
@@ -104,33 +56,6 @@ Parameters:
     Type: String
     Description: Name of the NLB stack exporting the required values
     Default: orthanc-nlb
-
-  pCpuArchitecture:
-    Type: String
-    Description: Architecture of the CPU (e.g., ARM64, x64)
-    AllowedValues:
-      - ARM64
-      - x64
-    Default: "ARM64"
-
-  pPostgresStackName:
-    Type: String
-    Description: Name of the PostgreSQL stack exporting the required values
-
-  DBUsername:
-    Type: String
-    Description: Username for the PostgreSQL database
-    Default: master
-  
-  pDBPort:
-    Type: Number
-    Default: 5432
-    Description: The port on which the PostgreSQL database accepts connections.
-  
-  pDBname:
-    Type: String
-    Description: Name of the PosgreSQL DB name.
-    Default: gusi_orthanc
 
 # Environment
   pEnvironmentTag:
@@ -145,15 +70,6 @@ Parameters:
       - qa
     Default: development
 
-  pEFSVolumeName:
-    Type: String
-    Description: The name of the EFS Volume.
-    Default: "gusi"
-  
-  pFileSystemID:
-    Type: String
-    Description: The ID of the EFS System.
-    Default: "fs-09ba1106f7317fee0"
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -167,12 +83,7 @@ Metadata:
           - pDesiredCount
           - pMaxTasks
           - pMinTasks
-          - pContainerPort
-          - pContainerMemory
-          - pContainerCpu
-          - pHostPort
-          - pPortProtocol
-          - pBuildTag
+          - pContainerPort  
       - Label:
           default: Task Definition Settings
         Parameters:
@@ -190,48 +101,11 @@ Metadata:
         default: ECS Service Min Tasks
       pContainerPort:
         default: ECS Container Port
-      pContainerMemory:
-        default: Container RAM needed
-      pContainerCpu:
-        default: Container CPU needed
-      pPortProtocol:
-        default: ECS Container Port Mappings Protocol
-      pBuildTag:
-        default: ECR Image Build Tag
       pEnvironmentTag:
         default: Environment Tag
 
 Resources:
-  # IAM Role for ECS Task Execution
-  ecsExecutionRole:
-    Type: AWS::IAM::Role
-    Properties:
-      RoleName: OrthancECSExecutionRole
-      AssumeRolePolicyDocument:
-        Version: '2012-10-17'
-        Statement:
-          - Effect: Allow
-            Principal:
-              Service: ecs-tasks.amazonaws.com
-            Action: sts:AssumeRole
-      ManagedPolicyArns:
-        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
-        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
-        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
-        - arn:aws:iam::aws:policy/SecretsManagerReadWrite
-        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole
-        - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
-      Policies:
-        - PolicyName: Auth-AccessPolicy
-          PolicyDocument:
-            Version: '2012-10-17'
-            Statement:
-              - Effect: Allow
-                Action:
-                  - ssm:GetParameters
-                  - secretsmanager:GetSecretValue
-                  - kms:Decrypt
-                Resource: "*"
+
   serviceSecurityGroup:
       Type: AWS::EC2::SecurityGroup
       Properties:
@@ -260,7 +134,6 @@ Resources:
 
   ecsService:
     Type: AWS::ECS::Service
-    DependsOn: ecsExecutionRole
     Properties:
       LoadBalancers:
         - ContainerName: !Sub ${pServicePrefix}-service
@@ -268,7 +141,7 @@ Resources:
           TargetGroupArn: !Join 
             - ''
             - - !ImportValue 
-                Fn::Sub: orthanc-tg-${pAlbStackName}
+                Fn::Sub: orthancBlueTg-${pAlbStackName}
         - ContainerName: !Sub ${pServicePrefix}-service
           ContainerPort: !Ref pDicomPort
           TargetGroupArn: !Join 
@@ -277,78 +150,17 @@ Resources:
                 Fn::Sub: orthanc-tg-${pNLBStackName}
       Cluster: !Ref pFargateClusterName
       DesiredCount: !Ref pDesiredCount
-      TaskDefinition: !Ref ecsTaskDefinition
+      TaskDefinition: !Ref pTaskDefinitionArn
       LaunchType: FARGATE
       ServiceName : !Sub ${pServicePrefix}-service
+      DeploymentController:
+        Type: CODE_DEPLOY
       NetworkConfiguration:
         AwsvpcConfiguration:
           Subnets: !Ref pSubnetIds
           AssignPublicIp: ENABLED
           SecurityGroups:
             - !GetAtt serviceSecurityGroup.GroupId
-
-  ecsTaskDefinitionLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub ${pServicePrefix}-service-log-group
-      RetentionInDays: 60
-
-
-## Task Definition
-  ecsTaskDefinition:
-    Type: AWS::ECS::TaskDefinition
-    Properties:
-      Family: !Sub ${pServicePrefix}-service
-      Cpu: !Ref pContainerCpu
-      Memory: !Ref pContainerMemory
-      ExecutionRoleArn: !GetAtt ecsExecutionRole.Arn
-      NetworkMode: awsvpc
-      RequiresCompatibilities:
-      - FARGATE
-      RuntimePlatform: 
-        CpuArchitecture: !Ref pCpuArchitecture
-        OperatingSystemFamily: LINUX
-      ContainerDefinitions:
-        - Name: !Sub ${pServicePrefix}-service
-          Cpu: !Ref pContainerCpu
-          Memory: !Ref pContainerMemory
-          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${pEcrRepo}:${pImageVersion}'
-          PortMappings:
-            - ContainerPort: !Ref pContainerPort
-            - ContainerPort: !Ref pDicomPort
-          LogConfiguration:
-            LogDriver: awslogs
-            Options:
-              awslogs-group: !Sub ${pServicePrefix}-service-log-group
-              awslogs-region: !Ref AWS::Region
-              awslogs-stream-prefix: !Sub ${pServicePrefix}-service
-          Environment:
-            - Name: DB_HOST
-              Value: !ImportValue 
-                Fn::Sub: ${pPostgresStackName}:RdsWriterAddress
-            - Name: DB_PORT
-              Value: !Ref pDBPort
-            - Name: DB_DATABASE
-              Value: !Ref pDBname
-            - Name: DB_USERNAME
-              Value: !Ref DBUsername
-          Secrets:
-            - Name: DB_PASSWORD
-              ValueFrom: !Join 
-                - ''
-                - - !ImportValue 
-                    Fn::Sub: ${pPostgresStackName}:RdsSecretArn
-                  - ':password::'
-          MountPoints:
-          - ContainerPath: /var/www/html/wp-content/uploads
-            SourceVolume: !Ref pEFSVolumeName       
-
-      Volumes:
-        - Name: !Ref pEFSVolumeName
-          EFSVolumeConfiguration:
-            fileSystemId: !Ref pFileSystemID
-            rootDirectory: /
-            transitEncryption: ENABLED
 
 # Outbound rule for ECS service to EFS
   serviceSecurityGroupEFSOutbound:
@@ -367,6 +179,15 @@ Resources:
       IpProtocol: tcp
       FromPort: 443
       ToPort: 443
+      CidrIp: 0.0.0.0/0
+  
+  serviceSecurityGroupPostgresOutbound:
+    Type: AWS::EC2::SecurityGroupEgress
+    Properties:
+      GroupId: !GetAtt serviceSecurityGroup.GroupId
+      IpProtocol: tcp
+      FromPort: 5432
+      ToPort: 5432
       CidrIp: 0.0.0.0/0
 
 
@@ -501,20 +322,12 @@ Resources:
 
 
 Outputs:
-  TaskDefinitionArn:
-    Description: "The ARN of the ECS Task Definition"
-    Value: !Ref ecsTaskDefinition
-    Export:
-      Name: !Sub '${AWS::StackName}-TaskDefinitionArn'
-
   ServiceArn:
     Description: "The ARN of the ECS Service"
     Value: !Ref ecsService
     Export:
       Name: !Sub '${AWS::StackName}-ServiceArn'
-      
-  LogGroupName:
-    Description: "The name of the CloudWatch Log Group"
-    Value: !Ref ecsTaskDefinitionLogGroup
-    Export:
-      Name: !Sub '${AWS::StackName}-LogGroupName'
+
+  ECSServiceName:
+    Description: Service Name
+    Value: !Ref ecsService

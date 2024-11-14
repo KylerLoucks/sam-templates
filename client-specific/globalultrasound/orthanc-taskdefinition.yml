@@ -1,0 +1,326 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: >
+  Deploys Orthanc Task Definition
+
+
+Parameters:
+
+# ECS Settings
+  pServicePrefix:
+    Type: String
+    Description: Name of ECS Service
+    Default: orthanc-server
+
+  pContainerPort:
+    Type: Number
+    Description: The port exposed to the EC2 instance from the container
+    Default: 8042
+
+  pDicomPort:
+    Type: Number
+    Description: The port exposed to the EC2 instance from the container
+    Default: 4242
+
+  pContainerMemory:
+    Type: Number
+    Description: The amount (in MiB) of memory to present to the container
+    Default: 512
+
+  pContainerCpu:
+    Type: Number
+    Description: The amount of CPU to present to the container
+    Default: 256
+
+  pImageVersion:
+    Type: String
+    Description: "The version tag of the container image."
+    Default: "latest"
+  
+  pEcrRepo:
+    Type: String
+    Description: "The ECR repository name."
+    Default: "gusi-orthanc"
+
+  pCpuArchitecture:
+    Type: String
+    Description: Architecture of the CPU (e.g., ARM64, x64)
+    AllowedValues:
+      - ARM64
+      - X86_64
+    Default: "X86_64"
+
+  pPostgresStackName:
+    Type: String
+    Description: Name of the PostgreSQL stack exporting the required values
+    Default: orthanc-aurora-postgres
+
+  pMysqlStackName:
+    Type: String
+    Description: Name of the MySQL stack exporting the required values
+    Default: aurora-mysql
+
+  pMysqlDBUsername:
+    Type: String
+    Description: Username for the PostgreSQL database
+    Default: master
+  
+  pMysqlDBPort:
+    Type: Number
+    Default: 3306
+    Description: The port on which the MySQL database accepts connections.
+  
+  pMysqlDBname:
+    Type: String
+    Description: Name of the PosgreSQL DB name.
+    Default: wordpress
+
+  pOrthancDBName:
+    Type: String
+    Description: Database name for the Postgres database
+    Default: 'gusi_orthanc'
+
+  pOrthancDBUserName:
+    Description: 'Postgre Database Username .'
+    Type: String
+    Default: 'master'
+
+  pOrthancDBPort:
+    Description: 'Postgre Database port .'
+    Type: String
+    Default: 5432
+
+  pWPS3BucketName:
+    Description: 'Bucket name That used to save images.'
+    Type: String
+    Default: 'gusiclips-qav1'
+
+  pOrthancPGPluginEnable:
+    Description: 'Orthanc Enable Postgres plugin.'
+    Type: String
+    Default: 'true'
+
+  pWPS3ParentFolder:
+    Description: 'AWS S3 Parent Folder that save images inside it.'
+    Type: String
+    Default: 'app_images/' 
+
+  pWPS3Endpoint:
+    Description: 'AWS S3 Parent Folder that save images inside it.'
+    Type: String
+    Default: "https://gusiclips-qav1.s3.us-east-1.amazonaws.com/app_images/"
+
+  pWPS3URLPrefix:
+    Description: 'AWS S3 URL Prefix.'
+    Type: String
+    Default: ""
+
+  pWPDBConnection:
+    Description: 'Type connection to wordpress db is mysql/postgres.'
+    Type: String
+    Default: "mysql"
+
+  pEFSVolumeName:
+    Type: String
+    Description: The name of the EFS Volume.
+    Default: "gusi"
+  
+  pFileSystemID:
+    Type: String
+    Description: The ID of the EFS System.
+    Default: "fs-09ba1106f7317fee0"
+
+Resources:
+
+  # IAM Role for ECS Task Execution
+  ecsExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+        - arn:aws:iam::aws:policy/CloudWatchLogsFullAccess
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+        - arn:aws:iam::aws:policy/SecretsManagerReadWrite
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole
+        - arn:aws:iam::aws:policy/service-role/AWSAppRunnerServicePolicyForECRAccess
+      Policies:
+        - PolicyName: Auth-AccessPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ssm:GetParameters
+                  - secretsmanager:GetSecretValue
+                  - kms:Decrypt
+                Resource: "*"
+
+  taskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: EcsExec
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowEcsExec
+                Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: "*"
+        - PolicyName: CloudWatchLogs
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowCreateLogGroup
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Sid: AllowLogStreams
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/*:*"
+
+
+  ecsTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${pServicePrefix}-service
+      Cpu: !Ref pContainerCpu
+      Memory: !Ref pContainerMemory
+      ExecutionRoleArn: !GetAtt ecsExecutionRole.Arn
+      TaskRoleArn: !GetAtt taskRole.Arn
+      NetworkMode: awsvpc
+      RequiresCompatibilities:
+      - FARGATE
+      RuntimePlatform: 
+        CpuArchitecture: !Ref pCpuArchitecture
+        OperatingSystemFamily: LINUX
+      ContainerDefinitions:
+        - Name: !Sub ${pServicePrefix}-service
+          Cpu: !Ref pContainerCpu
+          Memory: !Ref pContainerMemory
+          Image: !Sub '${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/${pEcrRepo}:${pImageVersion}'
+          PortMappings:
+            - ContainerPort: !Ref pContainerPort
+            - ContainerPort: !Ref pDicomPort
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref LogGroup
+              awslogs-region: !Ref AWS::Region
+              awslogs-stream-prefix: !Sub ${pServicePrefix}-service
+          Environment:
+            - Name: ORTHANC__POSTGRESQL__HOST
+              Value: !ImportValue 
+                Fn::Sub: ${pPostgresStackName}:RdsWriterAddress
+              # Value: {'Fn::ImportValue': !Sub '${ParentPostgresDBStack}-DNSName'}
+            - Name: ORTHANC__POSTGRESQL__PORT
+              Value: !Ref pOrthancDBPort
+            - Name: ORTHANC__POSTGRESQL__USERNAME
+              Value: !Ref pOrthancDBUserName
+            - Name: ORTHANC__POSTGRESQL__DATABASE
+              Value: !Ref pOrthancDBName
+            - Name: POSTGRESQL_PLUGIN_ENABLED
+              Value: !Ref pOrthancPGPluginEnable
+            - Name: ORTHANC__NAME
+              Value: "GUSI"
+            - Name: VERBOSE_ENABLED
+              Value:  "true"
+            - Name: VERBOSE_STARTUP 
+              Value: "true"
+            - Name: ORTHANC__PYTHON_SCRIPT
+              Value: "/opt/app/gusi/gusi_onstart.py"
+            - Name: ORTHANC__PYTHON_VERBOSE
+              Value: "true"
+            - Name: ORTHANC__AUTHENTICATION_ENABLED
+              Value: "true"
+            - Name: ORTHANC__DICOM_SERVER_ENABLED
+              Value: "true"
+            - Name: ORTHANC__REGISTERED_USERS
+              Value: |
+                  {"gusi": "gusi"}
+            - Name: GUSI_BE_DB_CONNECTION
+              Value: !Ref pWPDBConnection
+            - Name: GUSI_BE_DB_PORT
+              Value: !Ref pMysqlDBPort
+            - Name: GUSI_BE_DB_HOST
+              Value:   {'Fn::ImportValue': !Sub '${pMysqlStackName}:RdsProxyEndpoint'}
+            - Name: GUSI_BE_DB_NAME
+              Value: !Ref pMysqlDBname 
+            - Name: GUSI_BE_DB_USER
+              Value: !Ref pMysqlDBUsername
+            - Name: GUSI_PACS_AWS_S3_BUCKET
+              Value: !Ref pWPS3BucketName
+            - Name: GUSI_PACS_AWS_S3_PARENT_FOLDER
+              Value: !Ref pWPS3ParentFolder
+            - Name: GUSI_PACS_AWS_S3_UNSIGNED
+              Value: ""
+            - Name: GUSI_PACS_AWS_S3_ENDPOINT
+              Value: !Ref pWPS3Endpoint
+            - Name: GUSI_PACS_AWS_S3_URL_PREFIX
+              Value: !Ref pWPS3URLPrefix
+          Secrets:
+            - Name: ORTHANC__POSTGRESQL__PASSWORD
+              ValueFrom: !Join 
+                - ''
+                - - !ImportValue 
+                    Fn::Sub: ${pPostgresStackName}:RdsSecretArn
+                  - ':password::'
+            - Name: GUSI_BE_DB_PASSWD
+              ValueFrom: !Join 
+                - ''
+                - - !ImportValue 
+                    Fn::Sub: ${pMysqlStackName}:RdsSecretArn
+                  - ':password::'
+          MountPoints:
+          - ContainerPath: /var/lib/orthanc/db
+            SourceVolume: !Ref pEFSVolumeName      
+
+      Volumes:
+        - Name: !Ref pEFSVolumeName
+          EFSVolumeConfiguration:
+            FilesystemId: !Ref pFileSystemID
+            RootDirectory: /
+            TransitEncryption: ENABLED
+
+  LogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub ${pServicePrefix}-service-log-group
+      RetentionInDays: 60
+
+Outputs:
+      
+  LogGroupName:
+    Description: "The name of the CloudWatch Log Group"
+    Value: !Ref LogGroup
+    Export:
+      Name: !Sub '${AWS::StackName}-LogGroupName'
+
+  TaskDefinitionArn:
+    Description: ECS Task Definition ARN
+    Value: !Ref wordpressTaskDefinition
+    Export:
+      Name: !Sub ${AWS::StackName}:TaskDefinitionArn
