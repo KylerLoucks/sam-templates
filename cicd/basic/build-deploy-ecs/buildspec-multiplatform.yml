@@ -12,8 +12,8 @@ phases:
       - apt-get update
       - apt-get install -y qemu-user-static
       - export DOCKER_CLI_EXPERIMENTAL=enabled
-      - docker buildx create --use
-      - docker buildx inspect --bootstrap
+      - docker buildx create --use --driver-opt image=public.ecr.aws/vend/moby/buildkit:buildx-stable-1
+      - docker buildx inspect --bootstrap 
 
   pre_build:
     commands:

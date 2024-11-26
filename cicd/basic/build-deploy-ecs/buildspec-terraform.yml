@@ -1,0 +1,44 @@
+version: 0.2
+env:
+  git-credential-helper: yes
+  exported-variables:
+    - IMAGE_TAG
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 16
+    commands:
+      - apt-get update
+      # Install tfenv
+      - echo "Installing tfenv"
+      - git clone https://github.com/tfutils/tfenv.git ~/.tfenv
+      - echo 'export PATH="$HOME/.tfenv/bin:$PATH"' >> ~/.bashrc
+      - export PATH="$HOME/.tfenv/bin:$PATH"
+      - tfenv --version
+
+      - tfenv install 1.7.0
+      - tfenv use 1.7.0
+      - terraform version
+
+  pre_build:
+    commands:
+      - echo Logging in to Amazon ECR...
+      - TF_VAR_ARGS="-var='common_tags={\"environment\":\"dev\",\"managed-by\":\"terraform\"}' \
+          -var='aws_region=$AWS_DEFAULT_REGION'"
+  build:
+    commands:
+      - echo "TF VAR ARGS:"
+      - echo $TF_VAR_ARGS
+      - cd terraform/environments/${ENVIRONMENT_FOLDER}/$AWS_DEFAULT_REGION
+      - terraform init
+      - eval terraform plan $TF_VAR_ARGS
+      - echo "Script execution completed!"
+
+  post_build:
+    commands:
+      - echo Build completed on $(date)
+
+# artifacts:
+#   files:
+#     - imagedefinitions.json
