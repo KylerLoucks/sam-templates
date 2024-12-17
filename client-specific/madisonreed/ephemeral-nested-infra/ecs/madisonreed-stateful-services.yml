@@ -1,0 +1,623 @@
+
+
+
+Parameters:
+
+  pAppName:
+    Type: String
+    Default: pr1
+    Description: Application Name
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the Virtual Private Network (VPC)
+  pPrivateSubnetId1:
+    Type: String
+    Default: subnet-01086857935bfcf34
+  pPrivateSubnetId2:
+    Type: String
+    Default: subnet-056e57e04fea05dd5
+
+  pMySQLPort:
+    Type: Number
+    Default: 3306
+  pMongoPort:
+    Type: Number
+    Default: 27017
+  pRedisPort:
+    Type: Number
+    Default: 6379
+
+  pMysqlEcrImageUri:
+    Type: String
+    Description: > 
+      URI of the ECR image used for MySQL Task Definition. 
+      e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
+  
+  pMysqlEbsSnapshotId:
+    Type: String
+    Description: >
+      SnapshotId of the EBS Volume to use for MySQL ECS /var/lib/mysql Data (ex: snap-06934e13d7d90fae2)
+
+  pMongoEcrImageUri:
+    Type: String
+    Description: > 
+      URI of the ECR image used for Mongo Task Definition. 
+      e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
+
+  pMongoEbsSnapshotId:
+    Type: String
+    Description: >
+      SnapshotId of the EBS Volume to use for MongoDB ECS /data/db Data (ex: snap-06934e13d7d90fae2)
+
+Resources:
+
+  fargateCluster:
+    Type: AWS::ECS::Cluster
+    Properties:
+      ClusterName: !Sub ${pAppName}-cluster
+      ClusterSettings:
+        - Name: containerInsights
+          Value: enabled
+      CapacityProviders:
+        - FARGATE
+        - FARGATE_SPOT
+      DefaultCapacityProviderStrategy:
+        - CapacityProvider: FARGATE_SPOT
+          Base: 0 # how many tasks (minimum) can be ran on this strategy
+          Weight: 50
+        - CapacityProvider: FARGATE
+          Base: 20
+          Weight: 50
+      ServiceConnectDefaults: # AWS Service Connect
+        Namespace: !GetAtt serviceDiscoveryNameSpace.Arn
+
+  redisLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/redis/${pAppName}
+      RetentionInDays: 7
+
+  mongoLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/mongo/${pAppName}
+      RetentionInDays: 7
+
+  mysqlLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/mysql/${pAppName}
+      RetentionInDays: 7
+
+
+  # BACKEND SERVICES
+  serviceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow all traffic from self and ALB Security Group
+      VpcId: !Ref pVpcId
+
+  # Allow everything that has this security group attached
+  serviceSelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt serviceSecurityGroup.GroupId
+      IpProtocol: -1
+      SourceSecurityGroupId: !GetAtt serviceSecurityGroup.GroupId
+
+  serviceVpcIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt serviceSecurityGroup.GroupId
+      IpProtocol: -1  # Allows all protocols
+      CidrIp: 10.20.0.0/16  # Allow traffic from VPC
+
+  # ECS task role
+  statefulTaskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        # Ecs Exec into Fargate containers https://aws.amazon.com/blogs/containers/new-using-amazon-ecs-exec-access-your-containers-fargate-ec2/
+        # aws ecs execute-command --region us-east-1 --cluster <cluster-name> --task <task-id> --container mysql --command "/bin/bash"
+        # Also requires `ssmmessages` Interface VPC endpoint: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-exec.html#ecs-exec-troubleshooting
+        # Requires the SSM Session Manager plugin for the AWS CLI (https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
+        - PolicyName: EcsExec
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowEcsExec
+                Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: "*"
+        - PolicyName: CloudWatchLogs
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowCreateLogGroup
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Sid: AllowLogStreams
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/*:*"
+        
+  statefulTaskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: Secrets
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: GetSecrets
+                Action: secretsmanager:GetSecretValue
+                Effect: Allow
+                Resource: arn:aws:secretsmanager:*:*:secret:*
+              - Sid: GetSSMParams
+                Action: ssm:GetParameters
+                Effect: Allow
+                Resource: arn:aws:ssm:*:*:parameter/*
+      # Allows pulling ECR image and pushing logs to CW
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+ # REDIS
+  redisTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${pAppName}-redis
+      ExecutionRoleArn: !GetAtt statefulTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt statefulTaskRole.Arn
+      Cpu: 512
+      Memory: 1024
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      EphemeralStorage:
+        SizeInGiB: 30
+        
+      ContainerDefinitions:
+        - Name: redis
+          # changes to the Image will cause a new deployment to the ECS service, replacing the old deployment.
+          Image: redis:7.0.15
+          PortMappings:
+            - Name: redis
+              ContainerPort: !Ref pRedisPort
+              Protocol: tcp # tcp | udp
+              # appProtocol: DONT SET THIS. REDIS DOES NOT WORK THROUGH HTTP
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref redisLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+
+  # Role used for managing ECS EBS Volume creation for ECS Tasks
+  # You can view the EBS volumes used per task in the EBS Volumes Console
+  # https://docs.aws.amazon.com/AmazonECS/latest/developerguide/infrastructure_IAM_role.html
+  ecsInfrastructureRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs.amazonaws.com
+            Action: sts:AssumeRole
+      # Allows ec2:CreateVolume for the specified task
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSInfrastructureRolePolicyForVolumes
+
+  redisService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref fargateCluster
+      ServiceName: redis
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      # Allows the ability for updates to create a new task before draining the old task.
+      # https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_DeploymentConfiguration.html
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: false
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: 
+            - !Ref pPrivateSubnetId1
+            - !Ref pPrivateSubnetId2
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # Expose containers running on this Service to Cloud Map Service Connect.
+      # Allows using Cloud Map to connect ECS Services between/within clusters without ELBs
+      ServiceConnectConfiguration:
+        Enabled: true
+        Services:
+          - PortName: redis # Points to the "PortMappings.Name" defined at the Task Definition
+            ClientAliases:
+              - Port: !Ref pRedisPort
+        # Service Connect Agent logs location
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Ref redisLogGroup
+            awslogs-region: !Sub ${AWS::Region}
+            awslogs-stream-prefix: service-connect-agent
+      ServiceRegistries: 
+        - RegistryArn: !GetAtt redisServiceDiscoveryService.Arn
+          Port: !Ref pRedisPort
+      TaskDefinition: !Ref redisTaskDefinition
+      Tags: 
+        - Key: managed-by
+          Value: SAM
+        - Key: ephemeral:app
+          Value: !Ref pAppName
+
+  # MYSQL
+  mysqlTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${pAppName}-mysql
+      ExecutionRoleArn: !GetAtt statefulTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt statefulTaskRole.Arn
+      Cpu: 512
+      Memory: 1024
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      EphemeralStorage:
+        SizeInGiB: 30
+        
+      ContainerDefinitions:
+        - Name: mysql
+          # changes to the Image will cause a new deployment to the ECS service, replacing the old deployment.
+          Image: !Ref pMysqlEcrImageUri
+          PortMappings:
+            - Name: mysql
+              ContainerPort: !Ref pMySQLPort
+              Protocol: tcp # tcp | udp
+          Environment:
+            - Name: MYSQL_ROOT_PASSWORD
+              Value: root
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref mysqlLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+          MountPoints:
+            - SourceVolume: mysql
+              ContainerPath: /var/lib/mysql # Must use volume that is pre-populated with mysql data. Otherwise, this location will be empty.
+      Volumes:
+        - Name: mysql
+          ConfiguredAtLaunch: true # Configure additional EBS volumes at launch
+
+
+  mysqlService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref fargateCluster
+      ServiceName: mysql
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      # Allows the ability for updates to create a new task before draining the old task.
+      # https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_DeploymentConfiguration.html
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: false
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: 
+            - !Ref pPrivateSubnetId1
+            - !Ref pPrivateSubnetId2
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # Expose containers running on this Service to Cloud Map Service Connect.
+      # Allows using Cloud Map to connect ECS Services between/within clusters without ELBs
+      ServiceConnectConfiguration:
+        Enabled: true
+        Services:
+          - PortName: mysql # Points to the "PortMappings.Name" defined at the Task Definition
+            ClientAliases:
+              - Port: !Ref pMySQLPort
+        # Service Connect Agent logs location
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Ref mysqlLogGroup
+            awslogs-region: !Sub ${AWS::Region}
+            awslogs-stream-prefix: service-connect-agent
+      ServiceRegistries: 
+        - RegistryArn: !GetAtt mysqlServiceDiscoveryService.Arn
+          Port: !Ref pMySQLPort
+      TaskDefinition: !Ref mysqlTaskDefinition
+      VolumeConfigurations: 
+        - Name: mysql # Must match the name defined in the `Volume` object of the Task Definition
+          ManagedEBSVolume:
+            RoleArn: !GetAtt ecsInfrastructureRole.Arn
+            VolumeType: gp3
+            FilesystemType: ext4 # Specify the same filesystem type that the volume was using when the snapshot was created.
+            SnapshotId: !Ref pMysqlEbsSnapshotId # Here we can specify the Snapshot of an EBS volume to use.
+      Tags: 
+        - Key: managed-by
+          Value: SAM
+        - Key: ephemeral:app
+          Value: !Ref pAppName
+
+  # MONGO
+  mongoTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${pAppName}-mongo
+      ExecutionRoleArn: !GetAtt statefulTaskExecutionRole.Arn
+      TaskRoleArn: !GetAtt statefulTaskRole.Arn
+      Cpu: 512
+      Memory: 1024
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      EphemeralStorage:
+        SizeInGiB: 30
+        
+      ContainerDefinitions:
+        - Name: mongo
+          # changes to the Image will cause a new deployment to the ECS service, replacing the old deployment.
+          Image: !Ref pMongoEcrImageUri
+          PortMappings:
+            - Name: mongo
+              ContainerPort: !Ref pMongoPort
+              Protocol: tcp # tcp | udp
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref mongoLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+          MountPoints:
+            - SourceVolume: mongo
+              ContainerPath: /data/db # Must use volume that is pre-populated with mongo data. Otherwise, this location will be empty.
+      Volumes:
+        - Name: mongo
+          ConfiguredAtLaunch: true # Configure additional EBS volumes at launch
+
+
+  mongoService:
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Ref fargateCluster
+      ServiceName: mongo
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      # Allows the ability for updates to create a new task before draining the old task.
+      # https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_DeploymentConfiguration.html
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: false
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: 
+            - !Ref pPrivateSubnetId1
+            - !Ref pPrivateSubnetId2
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # Expose containers running on this Service to Cloud Map Service Connect.
+      # Allows using Cloud Map to connect services between/within clusters without ELBs
+      ServiceConnectConfiguration:
+        Enabled: true
+        Services:
+          - PortName: mongo # Points to the "PortMappings.Name" defined at the Task Definition
+            ClientAliases:
+              - Port: !Ref pMongoPort
+        # Service Connect Agent logs location
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Ref mongoLogGroup
+            awslogs-region: !Sub ${AWS::Region}
+            awslogs-stream-prefix: service-connect-agent
+      ServiceRegistries: 
+        - RegistryArn: !GetAtt mongoServiceDiscoveryService.Arn
+          Port: !Ref pMongoPort
+      TaskDefinition: !Ref mongoTaskDefinition
+      VolumeConfigurations: 
+        - Name: mongo # Must match the name defined in the `Volume` object of the Task Definition
+          ManagedEBSVolume:
+            RoleArn: !GetAtt ecsInfrastructureRole.Arn
+            VolumeType: gp3
+            FilesystemType: ext4 # Specify the same filesystem type that the volume was using when the snapshot was created.
+            SnapshotId: !Ref pMongoEbsSnapshotId # Here we can specify the Snapshot of an EBS volume to use.
+      Tags: 
+        - Key: managed-by
+          Value: SAM
+        - Key: ephemeral:app
+          Value: !Ref pAppName
+
+
+
+  # Service Discovery/Connect Namespace (AWS Cloud Map)
+  # Creates Private Route53 hosted zone matching the 'Name' property
+
+  # "If you name the namespace 'example.com' and an ECS service 'backend' the resulting DNS name for this service is: 'backend.example.com'"
+  # https://docs.aws.amazon.com/AWSCloudFormation/latest/UserGuide/aws-resource-servicediscovery-privatednsnamespace.html
+  serviceDiscoveryNameSpace:
+    Type: AWS::ServiceDiscovery::PrivateDnsNamespace
+    Properties:
+      Vpc: !Ref pVpcId
+      Name: !Sub ${pAppName}.cloudmap.internal
+
+  # mysql
+  mysqlServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: mysql-ecs # Name must be unique from what is given for ECS service 'ServiceConnectConfiguration.PortName'. 
+      Description: Service discovery for mongo service
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 60
+          - Type: SRV
+            TTL: 60
+        RoutingPolicy: MULTIVALUE
+      NamespaceId: !GetAtt serviceDiscoveryNameSpace.Id
+
+  # Mongo
+  mongoServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: mongo-ecs # Name must be unique from what is given for ECS service 'ServiceConnectConfiguration.PortName'. 
+      Description: Service discovery for mongo service
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 60
+          - Type: SRV
+            TTL: 60
+        RoutingPolicy: MULTIVALUE
+      NamespaceId: !GetAtt serviceDiscoveryNameSpace.Id
+
+  # Redis
+  redisServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: redis-ecs # Name must be unique from what is given for ECS service 'ServiceConnectConfiguration.PortName'. 
+      Description: Service discovery for redis service
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 60
+          - Type: SRV
+            TTL: 60
+        RoutingPolicy: MULTIVALUE
+      NamespaceId: !GetAtt serviceDiscoveryNameSpace.Id
+
+
+
+
+
+  autoScalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: application-autoscaling.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceAutoscaleRole
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole
+      Policies:
+        - PolicyName: AutoScalingPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - autoscaling:DescribeScalingActivities
+                  - autoscaling:DescribeScalingGroups
+                  - autoscaling:DescribeScalingPolicies
+                  - autoscaling:DescribeScheduledActions
+                  - autoscaling:PutScalingPolicy
+                  - autoscaling:PutScheduledAction
+                Resource: "*"
+        - PolicyName: ELBAccessPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:RegisterTargets
+                  - elasticloadbalancing:DeregisterTargets
+                  - elasticloadbalancing:DescribeTargetHealth
+                Resource: "*"
+
+
+
+Outputs:
+  serviceDiscoveryId:
+    Description: Service Discovery NameSpace Id
+    Value: !GetAtt serviceDiscoveryNameSpace.Id
+    Export:
+      Name: !Sub ${AWS::StackName}:ServiceDiscoveryId
+
+  serviceDiscoveryArn:
+    Description: Service Discovery NameSpace Arn
+    Value: !GetAtt serviceDiscoveryNameSpace.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:ServiceDiscoveryArn
+
+  mysqlEbsSnapshotId:
+    Description: SnapshotId of the EBS volume that houses MySQL database data
+    Value: !Ref pMysqlEbsSnapshotId
+
+  mongoEbsSnapshotId:
+    Description: SnapshotId of the EBS volume that houses MongoDB database data
+    Value: !Ref pMongoEbsSnapshotId

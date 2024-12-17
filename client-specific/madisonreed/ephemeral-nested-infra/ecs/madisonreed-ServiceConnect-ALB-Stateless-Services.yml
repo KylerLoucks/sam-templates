@@ -1,0 +1,2695 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Deploys Tophat, Website, API Server, Redis, Mongo and SQL ECS Fargate services, linked together through ECS Service Connect
+
+Parameters:
+  pAppName:
+    Type: String
+    Default: pr1
+    Description: Application Name
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the Virtual Private Network (VPC)
+  pPrivateSubnetId1:
+    Type: String
+    Default: subnet-01086857935bfcf34
+  pPrivateSubnetId2:
+    Type: String
+    Default: subnet-056e57e04fea05dd5
+  pR53HostedZoneId:
+    Type: String
+    Description: Route 53 hosted zone ID
+    Default: Z0323068C9DQS081P13G
+  pHostedZoneName:
+    Type: String
+    Description: Route53 Hosted Zone Domain Name (E.g. dev.mdsnrdfd.com)
+    Default: dev.mdsnrdfd.com
+  pPublicSubnetId1:
+    Type: String
+    Default: subnet-0598f465e77230bd5
+  pPublicSubnetId2:
+    Type: String
+    Default: subnet-0d650820a97fa5ba3
+
+  # Container Ports
+  pWebsitePort:
+    Type: Number
+    Default: 80
+  pApiServerPort:
+    Type: Number
+    Default: 8000
+  pMadiPort:
+    Type: Number
+    Default: 8000
+  pMobileAppPort:
+    Type: Number
+    Default: 8000
+  pTopHatPort:
+    Type: Number
+    Default: 80
+  pRavenPort:
+    Type: Number
+    Default: 80
+  pSocketioPort:
+    Type: Number
+    Default: 80
+  pBlogPort:
+    Type: Number
+    Default: 80
+  pOnqPort:
+    Type: Number
+    Default: 80
+
+
+  pMySQLPort:
+    Type: Number
+    Default: 3306
+  pMongoPort:
+    Type: Number
+    Default: 27017
+  pRedisPort:
+    Type: Number
+    Default: 6379
+
+
+  # # Secrets
+  # pMySQLSecretArn:
+  #   Type: String
+  #   Description: >
+  #     Arn of the AWS Secrets Manager secret to use for MySQL container username and password
+  #     NOTE: the secret name cannot contain characters other than: a-zA-Z0-9_.-
+  #     NOTE2: the secret key/value must be 'username' and 'password'
+
+  # ECR repos
+  pWebsiteEcrImageUri:
+    Type: String
+    Description: > 
+      URI of the ECR image used for Website Task Definition. 
+      e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
+    Default: 174743933558.dkr.ecr.us-east-1.amazonaws.com/website
+
+  pApiServerEcrImageUri:
+    Type: String
+    Description: > 
+      URI of the ECR image used for API Server Task Definition. 
+      e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
+    Default: 174743933558.dkr.ecr.us-east-1.amazonaws.com/apiserver
+
+  pMadiEcrImageUri:
+    Type: String
+    Description: > 
+      URI of the ECR image used for Madi Task Definition. 
+      e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
+    Default: 174743933558.dkr.ecr.us-east-1.amazonaws.com/apiserver
+
+  pMobileAppEcrImageUri:
+    Type: String
+    Description: > 
+      URI of the ECR image used for Mobile API Task Definition. 
+      e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
+    Default: 174743933558.dkr.ecr.us-east-1.amazonaws.com/apiserver
+
+  pSocketioEcrImageUri:
+    Type: String
+    Description: > 
+      URI of the ECR image used for socketio Task Definition. 
+      e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
+    Default: 174743933558.dkr.ecr.us-east-1.amazonaws.com/tophat
+
+  pTopHatEcrImageUri:
+    Type: String
+    Description: > 
+      URI of the ECR image used for Tophat Task Definition. 
+      e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
+    Default: 174743933558.dkr.ecr.us-east-1.amazonaws.com/tophat
+
+  pRavenEcrImageUri:
+    Type: String
+    Description: > 
+      URI of the ECR image used for Raven Task Definition. 
+      e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
+    Default: 174743933558.dkr.ecr.us-east-1.amazonaws.com/tophat
+
+  pBlogEcrImageUri:
+    Type: String
+    Description: > 
+      URI of the ECR image used for Blog Task Definition. 
+      e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
+    Default: 174743933558.dkr.ecr.us-east-1.amazonaws.com/website
+
+  pOnqEcrImageUri:
+    Type: String
+    Description: > 
+      URI of the ECR image used for Onq Task Definition. 
+      e.g. <account-id>.dkr.ecr.us-east-1.amazonaws.com/repository:tag
+    Default: 174743933558.dkr.ecr.us-east-1.amazonaws.com/website
+
+  pServiceDiscoveryId:
+    Type: String
+    Description: Id of Service Discovery Namespace
+
+  pServiceDiscoveryArn:
+    Type: String
+    Description: Arn of Service Discovery Namespace
+
+
+Resources:
+
+
+  # ==============================================
+  # ================= LOG GROUPS =================
+  # ==============================================
+
+  websiteLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/website/${pAppName}
+      RetentionInDays: 7
+
+  apiServerLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/apiserver/${pAppName}
+      RetentionInDays: 7
+
+  madiLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/madi/${pAppName}
+      RetentionInDays: 7
+
+  mobileAppLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/mobileapp/${pAppName}
+      RetentionInDays: 7
+
+  topHatLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/tophat/${pAppName}
+      RetentionInDays: 7
+
+  ravenLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/raven/${pAppName}
+      RetentionInDays: 7
+
+  socketioLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/socketio/${pAppName}
+      RetentionInDays: 7
+
+  blogLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/blog/${pAppName}
+      RetentionInDays: 7
+
+  onqLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /ecs/onq/${pAppName}
+      RetentionInDays: 7
+
+
+
+  # ===================================================
+  # ================= SECURITY GROUPS =================
+  # ===================================================
+  
+  # BACKEND SERVICES
+  serviceSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow all traffic from self and ALB Security Group
+      VpcId: !Ref pVpcId
+
+  # Allow everything that has this security group attached
+  serviceSelfIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt serviceSecurityGroup.GroupId
+      IpProtocol: -1
+      SourceSecurityGroupId: !GetAtt serviceSecurityGroup.GroupId
+
+  serviceVpcIngress:
+    Type: AWS::EC2::SecurityGroupIngress
+    Properties:
+      GroupId: !GetAtt serviceSecurityGroup.GroupId
+      IpProtocol: -1  # Allows all protocols
+      CidrIp: 10.20.0.0/16  # Allow traffic from VPC
+
+  # FRONTEND SG
+  albSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Security Group for ALB allowing HTTP
+      VpcId: !Ref pVpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 80
+          ToPort: 80
+          CidrIp: 0.0.0.0/0
+        - IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+
+  # ECS task role
+  taskRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: "/"
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        # Ecs Exec into Fargate containers https://aws.amazon.com/blogs/containers/new-using-amazon-ecs-exec-access-your-containers-fargate-ec2/
+        # aws ecs execute-command --region us-east-1 --cluster <cluster-name> --task <task-id> --container mysql --command "/bin/bash"
+        # Also requires `ssmmessages` Interface VPC endpoint: https://docs.aws.amazon.com/AmazonECS/latest/developerguide/ecs-exec.html#ecs-exec-troubleshooting
+        # Requires the SSM Session Manager plugin for the AWS CLI (https://docs.aws.amazon.com/systems-manager/latest/userguide/session-manager-working-with-install-plugin.html)
+        - PolicyName: EcsExec
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowEcsExec
+                Effect: Allow
+                Action:
+                  - ssmmessages:CreateControlChannel
+                  - ssmmessages:CreateDataChannel
+                  - ssmmessages:OpenControlChannel
+                  - ssmmessages:OpenDataChannel
+                Resource: "*"
+        - PolicyName: CloudWatchLogs
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: AllowCreateLogGroup
+                Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:*"
+              - Sid: AllowLogStreams
+                Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: !Sub "arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/ecs/*:*"
+        
+  taskExecutionRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - ecs-tasks.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: Secrets
+          PolicyDocument: 
+            Version: 2012-10-17
+            Statement:
+              - Sid: GetSecrets
+                Action: secretsmanager:GetSecretValue
+                Effect: Allow
+                Resource: arn:aws:secretsmanager:*:*:secret:*
+              - Sid: GetSSMParams
+                Action: ssm:GetParameters
+                Effect: Allow
+                Resource: arn:aws:ssm:*:*:parameter/*
+      # Allows pulling ECR image and pushing logs to CW
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonECSTaskExecutionRolePolicy
+
+
+  # ====================================================
+  # ================= TASK DEFINITIONS =================
+  # ====================================================
+
+  # WEBSITE
+  websiteTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${pAppName}-website
+      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
+      TaskRoleArn: !GetAtt taskRole.Arn
+      Cpu: 512
+      Memory: 1024
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      # EphemeralStorage:
+      #   SizeInGiB: 20
+        
+      ContainerDefinitions:
+        - Name: website
+          Image: !Ref pWebsiteEcrImageUri # !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/website-${pAppName}
+          PortMappings:
+            - Name: website
+              ContainerPort: !Ref pWebsitePort
+              Protocol: tcp # tcp | udp
+              AppProtocol: http
+          Environment:
+            - Name: NODE_ENV
+              Value: ecs
+
+            - Name: APP_IDENTIFIER
+              Value: website
+
+            # REDIS
+            - Name: REDIS_HOST
+              Value: !Sub redis.${pAppName}.cloudmap.internal # Reference Cloud Map Namespace
+            - Name: REDIS_PORT
+              Value: !Ref pRedisPort
+
+            # MYSQL
+            - Name: MYSQL_HOST
+              Value: !Sub mysql.${pAppName}.cloudmap.internal
+            - Name: MYSQL_PORT
+              Value: !Ref pMySQLPort
+            - Name: MYSQL_USER
+              Value: root
+            - Name: MYSQL_PASSWORD
+              Value: root
+
+            # MONGO
+            - Name: MONGO_HOST
+              Value: !Sub mongo.${pAppName}.cloudmap.internal
+            - Name: MONGO_PORT
+              Value: !Ref pMongoPort
+            
+            - Name: DOMAIN_NAME
+              Value: !Sub ${pAppName}.${pHostedZoneName}
+            
+            # Hardcoded for development
+            - Name: COLOR_ADVISOR_API_URL
+              Value: !Sub ${pAppName}.coloradvisor.${pHostedZoneName}/coloradvisor/
+
+          # Secrets:
+          #   - Name: MYSQL_PASSWORD
+          #     ValueFrom: !Sub "${pMySQLSecretArn}:password::"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref websiteLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+
+ 
+
+  # API SERVER
+  apiServerTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${pAppName}-apiserver
+      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
+      TaskRoleArn: !GetAtt taskRole.Arn
+      Cpu: 512
+      Memory: 1024
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      # EphemeralStorage:
+      #   SizeInGiB: 20
+        
+      ContainerDefinitions:
+        - Name: apiserver
+          Image: !Ref pApiServerEcrImageUri # !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/apiserver-${pAppName}
+          PortMappings:
+            - Name: apiserver
+              ContainerPort: !Ref pApiServerPort
+              Protocol: tcp # tcp | udp
+              AppProtocol: http
+          Environment:
+            - Name: NODE_ENV
+              Value: ecs
+
+            - Name: APP_IDENTIFIER
+              Value: apiserver
+
+            # REDIS
+            - Name: REDIS_HOST
+              Value: !Sub redis.${pAppName}.cloudmap.internal # Reference Cloud Map Namespace
+            - Name: REDIS_PORT
+              Value: !Ref pRedisPort
+
+            # MONGO
+            - Name: MONGO_HOST
+              Value: !Sub mongo.${pAppName}.cloudmap.internal 
+
+            # MYSQL
+            - Name: MYSQL_HOST
+              Value: !Sub mysql.${pAppName}.cloudmap.internal
+            - Name: MYSQL_USER
+              Value: root
+            - Name: MYSQL_PASSWORD
+              Value: root
+
+            - Name: DOMAIN_NAME
+              Value: !Sub ${pAppName}.${pHostedZoneName}
+
+            # Hardcoded for development
+            - Name: COLOR_ADVISOR_API_URL
+              Value: !Sub ${pAppName}.coloradvisor.${pHostedZoneName}/coloradvisor/
+
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref apiServerLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+
+  # MADI
+  madiTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${pAppName}-madi
+      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
+      TaskRoleArn: !GetAtt taskRole.Arn
+      Cpu: 512
+      Memory: 1024
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      # EphemeralStorage:
+      #   SizeInGiB: 20
+        
+      ContainerDefinitions:
+        - Name: madi
+          Image: !Ref pMadiEcrImageUri # !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/apiserver-${pAppName}
+          PortMappings:
+            - Name: madi
+              ContainerPort: !Ref pMadiPort
+              Protocol: tcp # tcp | udp
+              AppProtocol: http
+          Environment:
+            - Name: NODE_ENV
+              Value: ecs
+
+            - Name: APP_IDENTIFIER
+              Value: madi
+
+            # REDIS
+            - Name: REDIS_HOST
+              Value: !Sub redis.${pAppName}.cloudmap.internal # Reference Cloud Map Namespace
+            - Name: REDIS_PORT
+              Value: !Ref pRedisPort
+
+            # MONGO
+            - Name: MONGO_HOST
+              Value: !Sub mongo.${pAppName}.cloudmap.internal 
+
+            # MYSQL
+            - Name: MYSQL_HOST
+              Value: !Sub mysql.${pAppName}.cloudmap.internal
+            - Name: MYSQL_USER
+              Value: root
+            - Name: MYSQL_PASSWORD
+              Value: root
+
+            - Name: DOMAIN_NAME
+              Value: !Sub ${pAppName}.${pHostedZoneName}
+
+            # Hardcoded for development
+            - Name: COLOR_ADVISOR_API_URL
+              Value: !Sub ${pAppName}.coloradvisor.${pHostedZoneName}/coloradvisor/
+
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref madiLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+
+  # MOBILE APP
+  mobileAppTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${pAppName}-mobileapp
+      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
+      TaskRoleArn: !GetAtt taskRole.Arn
+      Cpu: 512
+      Memory: 1024
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      # EphemeralStorage:
+      #   SizeInGiB: 20
+        
+      ContainerDefinitions:
+        - Name: mobileapp
+          Image: !Ref pMobileAppEcrImageUri # !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/apiserver-${pAppName}
+          PortMappings:
+            - Name: mobileapp
+              ContainerPort: !Ref pMobileAppPort
+              Protocol: tcp # tcp | udp
+              AppProtocol: http
+          Environment:
+            - Name: NODE_ENV
+              Value: ecs
+
+            - Name: APP_IDENTIFIER
+              Value: mobileapp
+
+            # REDIS
+            - Name: REDIS_HOST
+              Value: !Sub redis.${pAppName}.cloudmap.internal # Reference Cloud Map Namespace
+            - Name: REDIS_PORT
+              Value: !Ref pRedisPort
+
+            # MONGO
+            - Name: MONGO_HOST
+              Value: !Sub mongo.${pAppName}.cloudmap.internal 
+
+            # MYSQL
+            - Name: MYSQL_HOST
+              Value: !Sub mysql.${pAppName}.cloudmap.internal
+            - Name: MYSQL_USER
+              Value: root
+            - Name: MYSQL_PASSWORD
+              Value: root
+
+            - Name: DOMAIN_NAME
+              Value: !Sub ${pAppName}.${pHostedZoneName}
+
+            # Hardcoded for development
+            - Name: COLOR_ADVISOR_API_URL
+              Value: !Sub ${pAppName}.coloradvisor.${pHostedZoneName}/coloradvisor/
+
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref mobileAppLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+
+  # TOPHAT
+  topHatTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${pAppName}-tophat
+      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
+      TaskRoleArn: !GetAtt taskRole.Arn
+      Cpu: 2048
+      Memory: 4096
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      # EphemeralStorage:
+      #   SizeInGiB: 20
+        
+      ContainerDefinitions:
+        - Name: tophat
+          Image: !Ref pTopHatEcrImageUri # !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/tophat-${pAppName}
+          PortMappings:
+            - Name: tophat
+              ContainerPort: !Ref pTopHatPort
+              Protocol: tcp # tcp | udp
+              AppProtocol: http
+          Environment:
+            - Name: NODE_ENV
+              Value: ecs
+
+            - Name: APP_IDENTIFIER
+              Value: tophat
+
+            # REDIS
+            - Name: REDIS_HOST
+              Value: !Sub redis.${pAppName}.cloudmap.internal # Reference Cloud Map Namespace
+            - Name: REDIS_PORT
+              Value: !Ref pRedisPort
+
+            # MONGO
+            - Name: MONGO_HOST
+              Value: !Sub mongo.${pAppName}.cloudmap.internal
+
+            # MYSQL
+            - Name: MYSQL_HOST
+              Value: !Sub mysql.${pAppName}.cloudmap.internal
+            - Name: MYSQL_USER
+              Value: root
+            - Name: MYSQL_PASSWORD
+              Value: root
+
+            - Name: DOMAIN_NAME
+              Value: !Sub ${pAppName}.${pHostedZoneName}
+
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref topHatLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+
+  # RAVEN
+  ravenTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${pAppName}-raven
+      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
+      TaskRoleArn: !GetAtt taskRole.Arn
+      Cpu: 2048
+      Memory: 4096
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      # EphemeralStorage:
+      #   SizeInGiB: 20
+        
+      ContainerDefinitions:
+        - Name: raven
+          Image: !Ref pRavenEcrImageUri # !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/tophat-${pAppName}
+          PortMappings:
+            - Name: raven
+              ContainerPort: !Ref pRavenPort
+              Protocol: tcp # tcp | udp
+              AppProtocol: http
+          Environment:
+            - Name: NODE_ENV
+              Value: ecs
+
+            - Name: APP_IDENTIFIER
+              Value: raven
+
+            # REDIS
+            - Name: REDIS_HOST
+              Value: !Sub redis.${pAppName}.cloudmap.internal # Reference Cloud Map Namespace
+            - Name: REDIS_PORT
+              Value: !Ref pRedisPort
+
+            # MONGO
+            - Name: MONGO_HOST
+              Value: !Sub mongo.${pAppName}.cloudmap.internal
+
+            # MYSQL
+            - Name: MYSQL_HOST
+              Value: !Sub mysql.${pAppName}.cloudmap.internal
+            - Name: MYSQL_USER
+              Value: root
+            - Name: MYSQL_PASSWORD
+              Value: root
+
+            - Name: DOMAIN_NAME
+              Value: !Sub ${pAppName}.${pHostedZoneName}
+
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref ravenLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+
+  # SOCKET IO
+  socketioTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${pAppName}-socketio
+      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
+      TaskRoleArn: !GetAtt taskRole.Arn
+      Cpu: 512
+      Memory: 1024
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      # EphemeralStorage:
+      #   SizeInGiB: 20
+        
+      ContainerDefinitions:
+        - Name: socketio
+          Image: !Ref pSocketioEcrImageUri # !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/tophat-${pAppName}
+          PortMappings:
+            - Name: socketio
+              ContainerPort: !Ref pSocketioPort
+              Protocol: tcp # tcp | udp
+          Environment:
+            - Name: NODE_ENV
+              Value: ecs
+
+            - Name: APP_IDENTIFIER
+              Value: socketio
+              
+            # REDIS
+            - Name: REDIS_HOST
+              Value: !Sub redis.${pAppName}.cloudmap.internal # Reference Cloud Map Namespace
+            - Name: REDIS_PORT
+              Value: !Ref pRedisPort
+
+            # MONGO
+            - Name: MONGO_HOST
+              Value: !Sub mongo.${pAppName}.cloudmap.internal
+
+            # MYSQL
+            - Name: MYSQL_HOST
+              Value: !Sub mysql.${pAppName}.cloudmap.internal
+            - Name: MYSQL_USER
+              Value: root
+            - Name: MYSQL_PASSWORD
+              Value: root
+
+            - Name: DOMAIN_NAME
+              Value: !Sub ${pAppName}.${pHostedZoneName}
+
+            # Hardcoded for development
+            - Name: COLOR_ADVISOR_API_URL
+              Value: !Sub ${pAppName}.coloradvisor.${pHostedZoneName}/coloradvisor/
+
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref socketioLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+
+  # BLOG
+  blogTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${pAppName}-blog
+      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
+      TaskRoleArn: !GetAtt taskRole.Arn
+      Cpu: 512
+      Memory: 1024
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      # EphemeralStorage:
+      #   SizeInGiB: 20
+        
+      ContainerDefinitions:
+        - Name: blog
+          Image: !Ref pBlogEcrImageUri # !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/website-${pAppName}
+          PortMappings:
+            - Name: blog
+              ContainerPort: !Ref pBlogPort
+              Protocol: tcp # tcp | udp
+              AppProtocol: http
+          Environment:
+            - Name: NODE_ENV
+              Value: ecs
+
+            - Name: APP_IDENTIFIER
+              Value: blog
+
+            # REDIS
+            - Name: REDIS_HOST
+              Value: !Sub redis.${pAppName}.cloudmap.internal # Reference Cloud Map Namespace
+            - Name: REDIS_PORT
+              Value: !Ref pRedisPort
+
+            # MYSQL
+            - Name: MYSQL_HOST
+              Value: !Sub mysql.${pAppName}.cloudmap.internal
+            - Name: MYSQL_PORT
+              Value: !Ref pMySQLPort
+            - Name: MYSQL_USER
+              Value: root
+            - Name: MYSQL_PASSWORD
+              Value: root
+
+            # MONGO
+            - Name: MONGO_HOST
+              Value: !Sub mongo.${pAppName}.cloudmap.internal
+            - Name: MONGO_PORT
+              Value: !Ref pMongoPort
+            
+            - Name: DOMAIN_NAME
+              Value: !Sub ${pAppName}.${pHostedZoneName}
+            
+            # Hardcoded for development
+            - Name: COLOR_ADVISOR_API_URL
+              Value: !Sub ${pAppName}.coloradvisor.${pHostedZoneName}/coloradvisor/
+
+          # Secrets:
+          #   - Name: MYSQL_PASSWORD
+          #     ValueFrom: !Sub "${pMySQLSecretArn}:password::"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref blogLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+
+  # ONQ
+  onqTaskDefinition:
+    Type: AWS::ECS::TaskDefinition
+    Properties:
+      Family: !Sub ${pAppName}-onq
+      ExecutionRoleArn: !GetAtt taskExecutionRole.Arn
+      TaskRoleArn: !GetAtt taskRole.Arn
+      Cpu: 512
+      Memory: 1024
+      RequiresCompatibilities:
+        - FARGATE
+      NetworkMode: awsvpc
+      RuntimePlatform:
+        CpuArchitecture: X86_64
+        OperatingSystemFamily: LINUX
+      # EphemeralStorage:
+      #   SizeInGiB: 20
+        
+      ContainerDefinitions:
+        - Name: onq
+          Image: !Ref pOnqEcrImageUri # !Sub ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/website-${pAppName}
+          PortMappings:
+            - Name: onq
+              ContainerPort: !Ref pOnqPort
+              Protocol: tcp # tcp | udp
+              AppProtocol: http
+          Environment:
+            - Name: NODE_ENV
+              Value: ecs
+
+            - Name: APP_IDENTIFIER
+              Value: onq
+
+            # REDIS
+            - Name: REDIS_HOST
+              Value: !Sub redis.${pAppName}.cloudmap.internal # Reference Cloud Map Namespace
+            - Name: REDIS_PORT
+              Value: !Ref pRedisPort
+
+            # MYSQL
+            - Name: MYSQL_HOST
+              Value: !Sub mysql.${pAppName}.cloudmap.internal
+            - Name: MYSQL_PORT
+              Value: !Ref pMySQLPort
+            - Name: MYSQL_USER
+              Value: root
+            - Name: MYSQL_PASSWORD
+              Value: root
+
+            # MONGO
+            - Name: MONGO_HOST
+              Value: !Sub mongo.${pAppName}.cloudmap.internal
+            - Name: MONGO_PORT
+              Value: !Ref pMongoPort
+            
+            - Name: DOMAIN_NAME
+              Value: !Sub ${pAppName}.${pHostedZoneName}
+            
+            # Hardcoded for development
+            - Name: COLOR_ADVISOR_API_URL
+              Value: !Sub ${pAppName}.coloradvisor.${pHostedZoneName}/coloradvisor/
+
+          # Secrets:
+          #   - Name: MYSQL_PASSWORD
+          #     ValueFrom: !Sub "${pMySQLSecretArn}:password::"
+          LogConfiguration:
+            LogDriver: awslogs
+            Options:
+              awslogs-group: !Ref onqLogGroup
+              awslogs-region: !Sub ${AWS::Region}
+              awslogs-stream-prefix: ecs
+
+
+  # ===================================================
+  # ================= FARGATE CLUSTER =================
+  # ===================================================
+
+
+  # Website
+  # Used to be able to connect via VPN and DNS route to the Web UI (DNS record could be stale)
+  websiteServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: madisonreed # Name must be unique from what is given for ECS service 'ServiceConnectConfiguration.PortName'. 
+      Description: Service discovery for website service
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 60
+          - Type: SRV
+            TTL: 60
+        RoutingPolicy: MULTIVALUE
+      NamespaceId: !Ref pServiceDiscoveryId
+
+  # API Server
+  # Used to be able to connect via VPN and DNS route to the Web UI (DNS record could be stale)
+  apiServerServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: api # Name must be unique from what is given for ECS service 'ServiceConnectConfiguration.PortName'. 
+      Description: Service discovery for API Server service
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 60
+          - Type: SRV
+            TTL: 60
+        RoutingPolicy: MULTIVALUE
+      NamespaceId: !Ref pServiceDiscoveryId
+
+  # Madi
+  # Used to be able to connect via VPN and DNS route to the Web UI (DNS record could be stale)
+  madiServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: api-madi # Name must be unique from what is given for ECS service 'ServiceConnectConfiguration.PortName'. 
+      Description: Service discovery for madi service
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 60
+          - Type: SRV
+            TTL: 60
+        RoutingPolicy: MULTIVALUE
+      NamespaceId: !Ref pServiceDiscoveryId
+
+  # Mobile App
+  # Used to be able to connect via VPN and DNS route to the Web UI (DNS record could be stale)
+  mobileAppServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: api-mobile # Name must be unique from what is given for ECS service 'ServiceConnectConfiguration.PortName'. 
+      Description: Service discovery for mobileapp service
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 60
+          - Type: SRV
+            TTL: 60
+        RoutingPolicy: MULTIVALUE
+      NamespaceId: !Ref pServiceDiscoveryId
+
+  # Tophat
+  # Used to be able to connect via VPN and DNS route to the Web UI (DNS record could be stale)
+  tophatServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: top-hat # Name must be unique from what is given for ECS service 'ServiceConnectConfiguration.PortName'. 
+      Description: Service discovery for tophat service
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 60
+          - Type: SRV
+            TTL: 60
+        RoutingPolicy: MULTIVALUE
+      NamespaceId: !Ref pServiceDiscoveryId
+
+  # raven
+  # Used to be able to connect via VPN and DNS route to the Web UI (DNS record could be stale)
+  ravenServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: tophat-raven # Name must be unique from what is given for ECS service 'ServiceConnectConfiguration.PortName'. 
+      Description: Service discovery for raven service
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 60
+          - Type: SRV
+            TTL: 60
+        RoutingPolicy: MULTIVALUE
+      NamespaceId: !Ref pServiceDiscoveryId
+
+  # socketio
+  # Used to be able to connect via VPN and DNS route to the Web UI (DNS record could be stale)
+  socketioServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: socket-io # Name must be unique from what is given for ECS service 'ServiceConnectConfiguration.PortName'. 
+      Description: Service discovery for socketio service
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 60
+          - Type: SRV
+            TTL: 60
+        RoutingPolicy: MULTIVALUE
+      NamespaceId: !Ref pServiceDiscoveryId
+
+  # blog
+  # Used to be able to connect via VPN and DNS route to the Web UI (DNS record could be stale)
+  blogServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: website-blog # Name must be unique from what is given for ECS service 'ServiceConnectConfiguration.PortName'. 
+      Description: Service discovery for blog service
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 60
+          - Type: SRV
+            TTL: 60
+        RoutingPolicy: MULTIVALUE
+      NamespaceId: !Ref pServiceDiscoveryId
+
+  # onq
+  # Used to be able to connect via VPN and DNS route to the Web UI (DNS record could be stale)
+  onqServiceDiscoveryService:
+    Type: AWS::ServiceDiscovery::Service
+    Properties:
+      Name: website-onq # Name must be unique from what is given for ECS service 'ServiceConnectConfiguration.PortName'. 
+      Description: Service discovery for onq service
+      DnsConfig:
+        DnsRecords:
+          - Type: A
+            TTL: 60
+          - Type: SRV
+            TTL: 60
+        RoutingPolicy: MULTIVALUE
+      NamespaceId: !Ref pServiceDiscoveryId
+
+
+  # ================================================
+  # ================= ECS SERVICES =================
+  # ================================================
+
+  websiteService:
+    # Dependency is required due to the fact that we must deploy backwards 
+    # from a traditional deployment (database > API > Web UI)
+    DependsOn:
+      - apiServerService
+      - socketioService
+      - ecsLoadBalancer
+      - httpsListener
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Sub ${pAppName}-cluster
+      ServiceName: website
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      # Allows the ability for updates to create a new task before draining the old task.
+      # https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_DeploymentConfiguration.html
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: false
+      HealthCheckGracePeriodSeconds: 0 # Set to zero to ensure deployment never fails
+      LoadBalancers: 
+        - ContainerName: website
+          ContainerPort: !Ref pWebsitePort
+          TargetGroupArn: !Ref websiteTg
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: 
+            - !Ref pPrivateSubnetId1
+            - !Ref pPrivateSubnetId2
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # Expose containers running on this Service to Cloud Map Service Connect.
+      # Allows using Cloud Map to connect ECS Services between/within clusters without ELBs
+      ServiceConnectConfiguration:
+        Enabled: true
+        Services:
+          - PortName: website
+            ClientAliases:
+              - Port: !Ref pWebsitePort
+        # Service Connect Agent logs location
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Ref websiteLogGroup
+            awslogs-region: !Sub ${AWS::Region}
+            awslogs-stream-prefix: service-connect-agent
+      # Used to connect via Route53 record for Private DNS (VPN only)
+      ServiceRegistries: 
+        - RegistryArn: !GetAtt websiteServiceDiscoveryService.Arn
+          Port: !Ref pWebsitePort
+      TaskDefinition: !Ref websiteTaskDefinition
+      Tags: 
+        - Key: managed-by
+          Value: SAM
+        - Key: ephemeral:app
+          Value: !Ref pAppName
+
+  # API Server
+  apiServerService:
+    DependsOn:
+      - ecsLoadBalancer
+      - httpsListener
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Sub ${pAppName}-cluster
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 66
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: false
+      HealthCheckGracePeriodSeconds: 0
+      LoadBalancers: 
+        - ContainerName: apiserver
+          ContainerPort: !Ref pApiServerPort
+          TargetGroupArn: !Ref apiServerTg
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: 
+            - !Ref pPrivateSubnetId1
+            - !Ref pPrivateSubnetId2
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # Expose containers running on this Service to Cloud Map Service Connect.
+      # Allows using Cloud Map to connect services between/within clusters without ELBs
+      ServiceConnectConfiguration:
+        Enabled: true
+        Services:
+          - PortName: apiserver # Points to the "PortMappings.Name" defined at the Task Definition
+            ClientAliases:
+              - Port: !Ref pApiServerPort
+        # Service Connect Agent logs location
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Ref apiServerLogGroup
+            awslogs-region: !Sub ${AWS::Region}
+            awslogs-stream-prefix: service-connect-agent
+      ServiceName: !Sub apiserver
+      ServiceRegistries: 
+        - RegistryArn: !GetAtt apiServerServiceDiscoveryService.Arn
+          Port: !Ref pApiServerPort
+      TaskDefinition: !Ref apiServerTaskDefinition
+      Tags: 
+        - Key: managed-by
+          Value: SAM
+        - Key: ephemeral:app
+          Value: !Ref pAppName
+
+  # Madi
+  madiService:
+    DependsOn:
+      - ecsLoadBalancer
+      - httpsListener
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Sub ${pAppName}-cluster
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 66
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: false
+          Rollback: true
+      HealthCheckGracePeriodSeconds: 0
+      LoadBalancers: 
+        - ContainerName: madi
+          ContainerPort: !Ref pMadiPort
+          TargetGroupArn: !Ref madiTg
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: 
+            - !Ref pPrivateSubnetId1
+            - !Ref pPrivateSubnetId2
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # Expose containers running on this Service to Cloud Map Service Connect.
+      # Allows using Cloud Map to connect services between/within clusters without ELBs
+      ServiceConnectConfiguration:
+        Enabled: true
+        Services:
+          - PortName: madi # Points to the "PortMappings.Name" defined at the Task Definition
+            ClientAliases:
+              - Port: !Ref pMadiPort
+        # Service Connect Agent logs location
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Ref madiLogGroup
+            awslogs-region: !Sub ${AWS::Region}
+            awslogs-stream-prefix: service-connect-agent
+      ServiceName: !Sub madi
+      ServiceRegistries: 
+        - RegistryArn: !GetAtt madiServiceDiscoveryService.Arn
+          Port: !Ref pMadiPort
+      TaskDefinition: !Ref madiTaskDefinition
+      Tags: 
+        - Key: managed-by
+          Value: SAM
+        - Key: ephemeral:app
+          Value: !Ref pAppName
+
+  # Mobile App
+  mobileAppService:
+    DependsOn:
+      - ecsLoadBalancer
+      - httpsListener
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Sub ${pAppName}-cluster
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 66
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: false
+          Rollback: true
+      HealthCheckGracePeriodSeconds: 0
+      LoadBalancers: 
+        - ContainerName: mobileapp
+          ContainerPort: !Ref pMobileAppPort
+          TargetGroupArn: !Ref mobileAppTg
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: 
+            - !Ref pPrivateSubnetId1
+            - !Ref pPrivateSubnetId2
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # Expose containers running on this Service to Cloud Map Service Connect.
+      # Allows using Cloud Map to connect services between/within clusters without ELBs
+      ServiceConnectConfiguration:
+        Enabled: true
+        Services:
+          - PortName: mobileapp # Points to the "PortMappings.Name" defined at the Task Definition
+            ClientAliases:
+              - Port: !Ref pMobileAppPort
+        # Service Connect Agent logs location
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Ref mobileAppLogGroup
+            awslogs-region: !Sub ${AWS::Region}
+            awslogs-stream-prefix: service-connect-agent
+      ServiceName: !Sub mobileapp
+      ServiceRegistries: 
+        - RegistryArn: !GetAtt mobileAppServiceDiscoveryService.Arn
+          Port: !Ref pMobileAppPort
+      TaskDefinition: !Ref mobileAppTaskDefinition
+      Tags: 
+        - Key: managed-by
+          Value: SAM
+        - Key: ephemeral:app
+          Value: !Ref pAppName
+
+  # TOP HAT
+  topHatService:
+    DependsOn:
+      - apiServerService
+      - ecsLoadBalancer
+      - httpsListener
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Sub ${pAppName}-cluster
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 66
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: false
+      HealthCheckGracePeriodSeconds: 0
+      LoadBalancers: 
+        - ContainerName: tophat
+          ContainerPort: !Ref pTopHatPort
+          TargetGroupArn: !Ref topHatTg
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: 
+            - !Ref pPrivateSubnetId1
+            - !Ref pPrivateSubnetId2
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # Expose containers running on this Service to Cloud Map Service Connect.
+      # Allows using Cloud Map to connect services between/within clusters without ELBs
+      ServiceConnectConfiguration:
+        Enabled: true
+        Services:
+          - PortName: tophat # Points to the "PortMappings.Name" defined at the Task Definition
+            ClientAliases:
+              - Port: !Ref pTopHatPort
+        # Service Connect Agent logs location
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Ref topHatLogGroup
+            awslogs-region: !Sub ${AWS::Region}
+            awslogs-stream-prefix: service-connect-agent
+      ServiceName: !Sub tophat
+      ServiceRegistries: 
+        - RegistryArn: !GetAtt tophatServiceDiscoveryService.Arn
+          Port: !Ref pTopHatPort
+      TaskDefinition: !Ref topHatTaskDefinition
+      Tags: 
+        - Key: managed-by
+          Value: SAM
+        - Key: ephemeral:app
+          Value: !Ref pAppName
+
+  # RAVEN
+  ravenService:
+    DependsOn:
+      - apiServerService
+      - ecsLoadBalancer
+      - httpsListener
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Sub ${pAppName}-cluster
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 66
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: false
+          Rollback: true
+      HealthCheckGracePeriodSeconds: 0
+      LoadBalancers: 
+        - ContainerName: raven
+          ContainerPort: !Ref pRavenPort
+          TargetGroupArn: !Ref ravenTg
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: 
+            - !Ref pPrivateSubnetId1
+            - !Ref pPrivateSubnetId2
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # Expose containers running on this Service to Cloud Map Service Connect.
+      # Allows using Cloud Map to connect services between/within clusters without ELBs
+      ServiceConnectConfiguration:
+        Enabled: true
+        Services:
+          - PortName: raven # Points to the "PortMappings.Name" defined at the Task Definition
+            ClientAliases:
+              - Port: !Ref pRavenPort
+        # Service Connect Agent logs location
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Ref ravenLogGroup
+            awslogs-region: !Sub ${AWS::Region}
+            awslogs-stream-prefix: service-connect-agent
+      ServiceName: !Sub raven
+      ServiceRegistries: 
+        - RegistryArn: !GetAtt ravenServiceDiscoveryService.Arn
+          Port: !Ref pRavenPort
+      TaskDefinition: !Ref ravenTaskDefinition
+      Tags: 
+        - Key: managed-by
+          Value: SAM
+        - Key: ephemeral:app
+          Value: !Ref pAppName
+
+  # SOCKET IO
+  socketioService:
+    DependsOn:
+      - ecsLoadBalancer
+      - httpsListener
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Sub ${pAppName}-cluster
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 66
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: true
+          Rollback: false
+      HealthCheckGracePeriodSeconds: 0
+      LoadBalancers: 
+        - ContainerName: socketio
+          ContainerPort: !Ref pSocketioPort
+          TargetGroupArn: !Ref socketioTg
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: 
+            - !Ref pPrivateSubnetId1
+            - !Ref pPrivateSubnetId2
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # Expose containers running on this Service to Cloud Map Service Connect.
+      # Allows using Cloud Map to connect services between/within clusters without ELBs
+      ServiceConnectConfiguration:
+        Enabled: true
+        Services:
+          - PortName: socketio # Points to the "PortMappings.Name" defined at the Task Definition
+            ClientAliases:
+              - Port: !Ref pSocketioPort
+        # Service Connect Agent logs location
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Ref socketioLogGroup
+            awslogs-region: !Sub ${AWS::Region}
+            awslogs-stream-prefix: service-connect-agent
+      ServiceName: !Sub socketio
+      ServiceRegistries: 
+        - RegistryArn: !GetAtt socketioServiceDiscoveryService.Arn
+          Port: !Ref pSocketioPort
+      TaskDefinition: !Ref socketioTaskDefinition
+      Tags: 
+        - Key: managed-by
+          Value: SAM
+        - Key: ephemeral:app
+          Value: !Ref pAppName
+
+  # BLOG
+  blogService:
+    # Dependency is required due to the fact that we must deploy backwards 
+    # from a traditional deployment (database > API > Web UI)
+    DependsOn:
+      - httpsListener
+      - apiServerService
+      - socketioService
+      - ecsLoadBalancer
+      - httpsListener
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Sub ${pAppName}-cluster
+      ServiceName: blog
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      # Allows the ability for updates to create a new task before draining the old task.
+      # https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_DeploymentConfiguration.html
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: false
+          Rollback: true
+      HealthCheckGracePeriodSeconds: 0 # Set to zero to ensure deployment never fails
+      LoadBalancers: 
+        - ContainerName: blog
+          ContainerPort: !Ref pBlogPort
+          TargetGroupArn: !Ref blogTg
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: 
+            - !Ref pPrivateSubnetId1
+            - !Ref pPrivateSubnetId2
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # Expose containers running on this Service to Cloud Map Service Connect.
+      # Allows using Cloud Map to connect ECS Services between/within clusters without ELBs
+      ServiceConnectConfiguration:
+        Enabled: true
+        Services:
+          - PortName: blog
+            ClientAliases:
+              - Port: !Ref pBlogPort
+        # Service Connect Agent logs location
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Ref blogLogGroup
+            awslogs-region: !Sub ${AWS::Region}
+            awslogs-stream-prefix: service-connect-agent
+      # Used to connect via Route53 record for Private DNS (VPN only)
+      ServiceRegistries: 
+        - RegistryArn: !GetAtt blogServiceDiscoveryService.Arn
+          Port: !Ref pBlogPort
+      TaskDefinition: !Ref blogTaskDefinition
+      Tags: 
+        - Key: managed-by
+          Value: SAM
+        - Key: ephemeral:app
+          Value: !Ref pAppName
+
+  # ONQ
+  onqService:
+    # Dependency is required due to the fact that we must deploy backwards 
+    # from a traditional deployment (database > API > Web UI)
+    DependsOn:
+      - apiServerService
+      - socketioService
+      - ecsLoadBalancer
+      - httpsListener
+    Type: AWS::ECS::Service
+    Properties:
+      Cluster: !Sub ${pAppName}-cluster
+      ServiceName: onq
+      DeploymentController: 
+        Type: ECS
+      DesiredCount: 1
+      EnableECSManagedTags: true
+      EnableExecuteCommand: true
+      LaunchType: FARGATE
+      # Allows the ability for updates to create a new task before draining the old task.
+      # https://docs.aws.amazon.com/AmazonECS/latest/APIReference/API_DeploymentConfiguration.html
+      DeploymentConfiguration:
+        MinimumHealthyPercent: 100
+        MaximumPercent: 200
+        DeploymentCircuitBreaker:
+          Enable: false
+          Rollback: true
+      HealthCheckGracePeriodSeconds: 0 # Set to zero to ensure deployment never fails
+      LoadBalancers: 
+        - ContainerName: onq
+          ContainerPort: !Ref pOnqPort
+          TargetGroupArn: !Ref onqTg
+      NetworkConfiguration: 
+        AwsvpcConfiguration:
+          AssignPublicIp: DISABLED
+          SecurityGroups:
+            - !GetAtt serviceSecurityGroup.GroupId
+          Subnets: 
+            - !Ref pPrivateSubnetId1
+            - !Ref pPrivateSubnetId2
+      PlatformVersion: LATEST
+      PropagateTags: SERVICE
+      # Expose containers running on this Service to Cloud Map Service Connect.
+      # Allows using Cloud Map to connect ECS Services between/within clusters without ELBs
+      ServiceConnectConfiguration:
+        Enabled: true
+        Services:
+          - PortName: onq
+            ClientAliases:
+              - Port: !Ref pOnqPort
+        # Service Connect Agent logs location
+        LogConfiguration:
+          LogDriver: awslogs
+          Options:
+            awslogs-group: !Ref onqLogGroup
+            awslogs-region: !Sub ${AWS::Region}
+            awslogs-stream-prefix: service-connect-agent
+      # Used to connect via Route53 record for Private DNS (VPN only)
+      ServiceRegistries: 
+        - RegistryArn: !GetAtt onqServiceDiscoveryService.Arn
+          Port: !Ref pOnqPort
+      TaskDefinition: !Ref onqTaskDefinition
+      Tags: 
+        - Key: managed-by
+          Value: SAM
+        - Key: ephemeral:app
+          Value: !Ref pAppName
+
+
+
+  # =================================================
+  # ================= TARGET GROUPS =================
+  # =================================================
+
+  # API SERVER
+  apiServerTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      Name: !Sub apiserver-${pAppName}
+
+      HealthCheckPath: /api/1.0/system/ping
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Port: !Ref pApiServerPort
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      Matcher:
+        HttpCode: 200-499
+      TargetType: ip
+      VpcId: !Ref pVpcId
+
+  # MADI
+  madiTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      Name: !Sub madi-${pAppName}
+
+      HealthCheckPath: /api/1.0/system/ping
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Port: !Ref pMadiPort
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      Matcher:
+        HttpCode: 200-499
+      TargetType: ip
+      VpcId: !Ref pVpcId
+
+  # MOBILE APP
+  mobileAppTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      Name: !Sub mobileapp-${pAppName}
+
+      HealthCheckPath: /api/1.0/system/ping
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Port: !Ref pMobileAppPort
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      Matcher:
+        HttpCode: 200-499
+      TargetType: ip
+      VpcId: !Ref pVpcId
+
+  # TOPHAT
+  topHatTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      Name: !Sub tophat-${pAppName}
+
+      HealthCheckPath: /awsHealthCheck.json
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Port: !Ref pTopHatPort
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      Matcher:
+        HttpCode: 200-499
+      TargetType: ip
+      VpcId: !Ref pVpcId
+
+  # RAVEN
+  ravenTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      Name: !Sub raven-${pAppName}
+
+      HealthCheckPath: /awsHealthCheck.json
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Port: !Ref pRavenPort
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      Matcher:
+        HttpCode: 200-499
+      TargetType: ip
+      VpcId: !Ref pVpcId
+
+  # WEBSITE
+  websiteTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      Name: !Sub website-${pAppName}
+
+      HealthCheckPath: /awsHealthCheck.json
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Port: !Ref pWebsitePort
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      Matcher:
+        HttpCode: 200-499
+      TargetType: ip
+      VpcId: !Ref pVpcId
+
+  # SOCKET IO
+  socketioTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      Name: !Sub socketio-${pAppName}
+
+      HealthCheckPath: /awsHealthCheck.json
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Port: !Ref pSocketioPort
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      Matcher:
+        HttpCode: 200-499
+      TargetType: ip
+      VpcId: !Ref pVpcId
+
+  # BLOG
+  blogTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      Name: !Sub blog-${pAppName}
+
+      HealthCheckPath: /awsHealthCheck.json
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Port: !Ref pBlogPort
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      Matcher:
+        HttpCode: 200-499
+      TargetType: ip
+      VpcId: !Ref pVpcId
+
+  # ONQ
+  onqTg:
+    Type: AWS::ElasticLoadBalancingV2::TargetGroup
+    Properties: 
+      Name: !Sub onq-${pAppName}
+
+      HealthCheckPath: /awsHealthCheck.json
+      HealthCheckProtocol: HTTP
+      HealthCheckTimeoutSeconds: 120
+      HealthCheckIntervalSeconds: 150
+      HealthyThresholdCount: 2
+      UnhealthyThresholdCount: 2
+      Port: !Ref pOnqPort
+      Protocol: HTTP
+      ProtocolVersion: HTTP1
+      Matcher:
+        HttpCode: 200-499
+      TargetType: ip
+      VpcId: !Ref pVpcId
+
+  # ===================================================
+  # ================= LISTENERS/RULES =================
+  # ===================================================
+  
+  # Listener to redirect HTTP traffic to HTTPS
+  redirectListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties: 
+      DefaultActions: 
+        - Type: "redirect"
+          RedirectConfig: 
+            Port: "443"
+            Protocol: "HTTPS"
+            StatusCode: "HTTP_301"
+      LoadBalancerArn: !Ref ecsLoadBalancer
+      Port: 80
+      Protocol: "HTTP"
+
+  httpsListener:
+    Type: AWS::ElasticLoadBalancingV2::Listener
+    Properties: 
+      Certificates: 
+        - CertificateArn: !Ref ACMCertificate
+      DefaultActions: 
+        # - Type: "fixed-response"
+        #   FixedResponseConfig:
+        #     StatusCode: "503"
+        #     ContentType: "text/plain"
+        #     MessageBody: "You have reached an invalid domain."
+        - Type: forward
+          TargetGroupArn: !Ref websiteTg
+      LoadBalancerArn: !Ref ecsLoadBalancer
+      Port: 443
+      Protocol: HTTPS
+      SslPolicy: "ELBSecurityPolicy-2016-08"
+
+  # API SERVER
+  apiServerRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref apiServerTg
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub api.${pAppName}.${pHostedZoneName}
+      ListenerArn: !Ref httpsListener
+      Priority: 7
+
+  # SOCKET IO
+  socketIOTophatRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref socketioTg
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub tophat.${pAppName}.${pHostedZoneName}
+        - Field: path-pattern
+          PathPatternConfig:
+            Values: ["/socket.io/*"]
+      ListenerArn: !Ref httpsListener
+      Priority: 8
+
+  socketIORule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref socketioTg
+      Conditions:
+        - Field: path-pattern
+          PathPatternConfig:
+            Values: ["/socket.io/*"]
+      ListenerArn: !Ref httpsListener
+      Priority: 9
+
+  colorbarSocketIORule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref socketioTg
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub colorbar.${pAppName}.${pHostedZoneName}
+        - Field: path-pattern
+          PathPatternConfig:
+            Values: ["/socket.io/*"]
+      ListenerArn: !Ref httpsListener
+      Priority: 10
+
+  # TOP HAT
+  topHatRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref topHatTg
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub tophat.${pAppName}.${pHostedZoneName}
+      ListenerArn: !Ref httpsListener
+      Priority: 12
+
+  # WEBSITE
+  websiteRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref websiteTg
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub www.${pAppName}.${pHostedZoneName}
+      ListenerArn: !Ref httpsListener
+      Priority: 18
+
+  # BLOG
+  blogRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref blogTg
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub www.${pAppName}.${pHostedZoneName}
+        - Field: path-pattern
+          PathPatternConfig:
+            Values: ["/blog/*", "/about/careers/*"]
+      ListenerArn: !Ref httpsListener
+      Priority: 19
+
+  # ONQ
+  onqRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref onqTg
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub onq.${pAppName}.${pHostedZoneName}
+      ListenerArn: !Ref httpsListener
+      Priority: 20
+
+  # Raven
+  ravenRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref ravenTg
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub raven.${pAppName}.${pHostedZoneName}
+      ListenerArn: !Ref httpsListener
+      Priority: 21
+
+  tophatRavenRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref ravenTg
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub tophat.${pAppName}.${pHostedZoneName}
+        - Field: path-pattern
+          PathPatternConfig:
+            Values: ["/raven/*"]
+      ListenerArn: !Ref httpsListener
+      Priority: 22
+
+  socketIORavenRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref socketioTg
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub raven.${pAppName}.${pHostedZoneName}
+        - Field: path-pattern
+          PathPatternConfig:
+            Values: ["/socket.io/*"]
+      ListenerArn: !Ref httpsListener
+      Priority: 23
+
+  # MADI
+  madiRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref madiTg
+      Conditions:
+        - Field: host-header
+          HostHeaderConfig:
+            Values: 
+              - !Sub api.${pAppName}.${pHostedZoneName}
+        - Field: path-pattern
+          PathPatternConfig:
+            Values: ["/smsBot/*", "/messengerBot/*"]
+      ListenerArn: !Ref httpsListener
+      Priority: 24
+
+  # MOBILE APP
+  mobileAppRule:
+    Type: AWS::ElasticLoadBalancingV2::ListenerRule
+    Properties:
+      Actions:
+        - Type: forward
+          TargetGroupArn: !Ref mobileAppTg
+      Conditions:
+        # - Field: host-header
+        #   HostHeaderConfig:
+        #     Values: 
+        #       - !Sub api.${pAppName}.${pHostedZoneName} # CHECK WITH PHILLIP
+        - Field: path-pattern
+          PathPatternConfig:
+            Values: ["/api/*/mobileapp/*"]
+      ListenerArn: !Ref httpsListener
+      Priority: 25
+
+  ACMCertificate:
+    Type: AWS::CertificateManager::Certificate
+    Properties:
+      DomainName: !Sub ${pAppName}.${pHostedZoneName}
+      SubjectAlternativeNames:
+        - !Sub ${pAppName}.${pHostedZoneName}
+        - !Sub "*.${pAppName}.${pHostedZoneName}"
+      DomainValidationOptions:
+        - DomainName: !Sub ${pAppName}.${pHostedZoneName}
+          HostedZoneId: !Ref pR53HostedZoneId
+      ValidationMethod: DNS
+
+  ecsLoadBalancer:
+    Type: AWS::ElasticLoadBalancingV2::LoadBalancer
+    Properties:
+      IpAddressType: ipv4
+      Scheme: internet-facing
+      SecurityGroups:
+        - !GetAtt albSecurityGroup.GroupId
+      Subnets:
+        - !Ref pPublicSubnetId1
+        - !Ref pPublicSubnetId2
+      Type: application
+
+
+  # ROUTE53 Records
+  route53Records:
+    Type: AWS::Route53::RecordSetGroup
+    Properties:
+      HostedZoneId: !Ref pR53HostedZoneId # Id of the Hosted Zone created during domain registration
+      RecordSets:
+        # Website
+        - Name: !Sub www.${pAppName}.${pHostedZoneName}
+          Type: A
+          AliasTarget:
+            HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID # Loadbalancer Id
+            DNSName: !GetAtt ecsLoadBalancer.DNSName
+
+        # Website
+        - Name: !Sub ${pAppName}.${pHostedZoneName}
+          Type: A
+          AliasTarget:
+            HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID # Loadbalancer Id
+            DNSName: !GetAtt ecsLoadBalancer.DNSName
+
+        # Tophat
+        - Name: !Sub tophat.${pAppName}.${pHostedZoneName}
+          Type: A
+          AliasTarget:
+            HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID
+            DNSName: !GetAtt ecsLoadBalancer.DNSName
+
+        # Raven
+        - Name: !Sub raven.${pAppName}.${pHostedZoneName}
+          Type: A
+          AliasTarget:
+            HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID
+            DNSName: !GetAtt ecsLoadBalancer.DNSName
+        
+        # Api Server
+        - Name: !Sub api.${pAppName}.${pHostedZoneName}
+          Type: A
+          AliasTarget:
+            HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID
+            DNSName: !GetAtt ecsLoadBalancer.DNSName
+
+        # Colorbar
+        - Name: !Sub colorbar.${pAppName}.${pHostedZoneName}
+          Type: A
+          AliasTarget:
+            HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID
+            DNSName: !GetAtt ecsLoadBalancer.DNSName
+
+        # Urm
+        - Name: !Sub urm.${pAppName}.${pHostedZoneName}
+          Type: A
+          AliasTarget:
+            HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID
+            DNSName: !GetAtt ecsLoadBalancer.DNSName
+
+        # Onq
+        - Name: !Sub onq.${pAppName}.${pHostedZoneName}
+          Type: A
+          AliasTarget:
+            HostedZoneId: !GetAtt ecsLoadBalancer.CanonicalHostedZoneID
+            DNSName: !GetAtt ecsLoadBalancer.DNSName
+
+  autoScalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: application-autoscaling.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceAutoscaleRole
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole
+      Policies:
+        - PolicyName: AutoScalingPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - autoscaling:DescribeScalingActivities
+                  - autoscaling:DescribeScalingGroups
+                  - autoscaling:DescribeScalingPolicies
+                  - autoscaling:DescribeScheduledActions
+                  - autoscaling:PutScalingPolicy
+                  - autoscaling:PutScheduledAction
+                Resource: "*"
+        - PolicyName: ELBAccessPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:RegisterTargets
+                  - elasticloadbalancing:DeregisterTargets
+                  - elasticloadbalancing:DescribeTargetHealth
+                Resource: "*"
+
+  AutoScalingTargetWebsite:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 1
+      MinCapacity: 1
+      ScheduledActions:
+        - ScheduledActionName: schedule-scale-to-zero
+          Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 0
+            MinCapacity: 0
+        - ScheduledActionName: schedule-scale-up
+          Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 1
+            MinCapacity: 1
+      ResourceId: !Join
+        - "/"
+        - 
+          - "service"
+          - !Sub "${pAppName}-cluster"
+          - !GetAtt websiteService.Name
+      RoleARN: !GetAtt autoScalingRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  AutoScalingTargetBlog:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 1
+      MinCapacity: 1
+      ScheduledActions:
+        - ScheduledActionName: schedule-scale-to-zero
+          Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 0
+            MinCapacity: 0
+        - ScheduledActionName: schedule-scale-up
+          Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 1
+            MinCapacity: 1
+      ResourceId: !Join
+        - "/"
+        - 
+          - "service"
+          - !Sub "${pAppName}-cluster"
+          - !GetAtt blogService.Name
+      RoleARN: !GetAtt autoScalingRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  AutoScalingTargetOnq:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 1
+      MinCapacity: 1
+      ScheduledActions:
+        - ScheduledActionName: schedule-scale-to-zero
+          Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 0
+            MinCapacity: 0
+        - ScheduledActionName: schedule-scale-up
+          Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 1
+            MinCapacity: 1
+      ResourceId: !Join
+        - "/"
+        - 
+          - "service"
+          - !Sub "${pAppName}-cluster"
+          - !GetAtt onqService.Name
+      RoleARN: !GetAtt autoScalingRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  AutoScalingTargetApiServer:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 1
+      MinCapacity: 1
+      ScheduledActions:
+        - ScheduledActionName: schedule-scale-to-zero
+          Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 0
+            MinCapacity: 0
+        - ScheduledActionName: schedule-scale-up
+          Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 1
+            MinCapacity: 1
+      ResourceId: !Join
+        - "/"
+        - 
+          - "service"
+          - !Sub "${pAppName}-cluster"
+          - !GetAtt apiServerService.Name
+      RoleARN: !GetAtt autoScalingRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  AutoScalingTargetMadi:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 1
+      MinCapacity: 1
+      ScheduledActions:
+        - ScheduledActionName: schedule-scale-to-zero
+          Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 0
+            MinCapacity: 0
+        - ScheduledActionName: schedule-scale-up
+          Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 1
+            MinCapacity: 1
+      ResourceId: !Join
+        - "/"
+        - 
+          - "service"
+          - !Sub "${pAppName}-cluster"
+          - !GetAtt madiService.Name
+      RoleARN: !GetAtt autoScalingRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+  
+  AutoScalingTargetMobileApp:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 1
+      MinCapacity: 1
+      ScheduledActions:
+        - ScheduledActionName: schedule-scale-to-zero
+          Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 0
+            MinCapacity: 0
+        - ScheduledActionName: schedule-scale-up
+          Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 1
+            MinCapacity: 1
+      ResourceId: !Join
+        - "/"
+        - 
+          - "service"
+          - !Sub "${pAppName}-cluster"
+          - !GetAtt mobileAppService.Name
+      RoleARN: !GetAtt autoScalingRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  AutoScalingTargetSocketio:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 1
+      MinCapacity: 1
+      ScheduledActions:
+        - ScheduledActionName: schedule-scale-to-zero
+          Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 0
+            MinCapacity: 0
+        - ScheduledActionName: schedule-scale-up
+          Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 1
+            MinCapacity: 1
+      ResourceId: !Join
+        - "/"
+        - 
+          - "service"
+          - !Sub "${pAppName}-cluster"
+          - !GetAtt socketioService.Name
+      RoleARN: !GetAtt autoScalingRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  AutoScalingTargetTophat:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 1
+      MinCapacity: 1
+      ScheduledActions:
+        - ScheduledActionName: schedule-scale-to-zero
+          Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 0
+            MinCapacity: 0
+        - ScheduledActionName: schedule-scale-up
+          Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 1
+            MinCapacity: 1
+      ResourceId: !Join
+        - "/"
+        - 
+          - "service"
+          - !Sub "${pAppName}-cluster"
+          - !GetAtt topHatService.Name
+      RoleARN: !GetAtt autoScalingRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  AutoScalingTargetRaven:
+    Type: AWS::ApplicationAutoScaling::ScalableTarget
+    Properties:
+      MaxCapacity: 1
+      MinCapacity: 1
+      ScheduledActions:
+        - ScheduledActionName: schedule-scale-to-zero
+          Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 0
+            MinCapacity: 0
+        - ScheduledActionName: schedule-scale-up
+          Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
+          ScalableTargetAction:
+            MaxCapacity: 1
+            MinCapacity: 1
+      ResourceId: !Join
+        - "/"
+        - 
+          - "service"
+          - !Sub "${pAppName}-cluster"
+          - !GetAtt ravenService.Name
+      RoleARN: !GetAtt autoScalingRole.Arn
+      ScalableDimension: ecs:service:DesiredCount
+      ServiceNamespace: ecs
+
+  # AutoScalingTargetRedis:
+  #   Type: AWS::ApplicationAutoScaling::ScalableTarget
+  #   Properties:
+  #     MaxCapacity: 1
+  #     MinCapacity: 1
+  #     ScheduledActions:
+  #       - ScheduledActionName: schedule-scale-to-zero
+  #         Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
+  #         ScalableTargetAction:
+  #           MaxCapacity: 0
+  #           MinCapacity: 0
+  #       - ScheduledActionName: schedule-scale-up
+  #         Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
+  #         ScalableTargetAction:
+  #           MaxCapacity: 1
+  #           MinCapacity: 1
+  #     ResourceId: !Join
+  #       - "/"
+  #       - 
+  #         - "service"
+  #         - !Sub "${pAppName}-cluster"
+  #         - !GetAtt redisService.Name
+  #     RoleARN: !GetAtt autoScalingRole.Arn
+  #     ScalableDimension: ecs:service:DesiredCount
+  #     ServiceNamespace: ecs
+
+  # AutoScalingTargetMongo:
+  #   Type: AWS::ApplicationAutoScaling::ScalableTarget
+  #   Properties:
+  #     MaxCapacity: 1
+  #     MinCapacity: 1
+  #     ScheduledActions:
+  #       - ScheduledActionName: schedule-scale-to-zero
+  #         Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
+  #         ScalableTargetAction:
+  #           MaxCapacity: 0
+  #           MinCapacity: 0
+  #       - ScheduledActionName: schedule-scale-up
+  #         Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
+  #         ScalableTargetAction:
+  #           MaxCapacity: 1
+  #           MinCapacity: 1
+  #     ResourceId: !Join ["/", [service, !Sub ${pAppName}-cluster, !GetAtt mongoService.Name]]
+  #     RoleARN: !GetAtt autoScalingRole.Arn
+  #     ScalableDimension: ecs:service:DesiredCount
+  #     ServiceNamespace: ecs
+
+  # AutoScalingTargetMysql:
+  #   Type: AWS::ApplicationAutoScaling::ScalableTarget
+  #   Properties:
+  #     MaxCapacity: 1
+  #     MinCapacity: 1
+  #     ScheduledActions:
+  #       - ScheduledActionName: schedule-scale-to-zero
+  #         Schedule: cron(0 2 * * ? *) # This cron expression schedules the scaling to 0 at 2 AM UTC every day
+  #         ScalableTargetAction:
+  #           MaxCapacity: 0
+  #           MinCapacity: 0
+  #       - ScheduledActionName: schedule-scale-up
+  #         Schedule: cron(0 13 * * ? *) # Schedules the scaling back up to one task at 1 PM UTC every day
+  #         ScalableTargetAction:
+  #           MaxCapacity: 1
+  #           MinCapacity: 1
+  #     ResourceId: !Join ["/", [service, !Sub ${pAppName}-cluster, !GetAtt mysqlService.Name]]
+  #     RoleARN: !GetAtt autoScalingRole.Arn
+  #     ScalableDimension: ecs:service:DesiredCount
+  #     ServiceNamespace: ecs
+
+  # CLEANUP CUSTOM RESOURCE
+
+  # Artifact bucket cleanup
+  Cleanup:
+    Type: Custom::S3DeleteObjectsLambda
+    Properties:
+      ServiceToken: !GetAtt CleanupFunction.Arn
+
+  CleanupLambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          -
+            Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        -
+          PolicyName: CleanupPermissions
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              -
+                Sid: DeleteBucketObjects
+                Effect: Allow
+                Action:
+                  - "lambda:*"
+                  - "events:*"
+                  - "logs:*"
+                  - "s3:DeleteObject"
+                  - "s3:DeleteObjectVersion"
+                  - "cloudformation:ListStacks"
+                  - "cloudformation:ListStackResources"
+                Resource: "*"
+
+  CleanupFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Deletes objects from buckets provisioned by CloudFormation
+      Handler: index.handler
+      Runtime: python3.10
+      Role: !GetAtt CleanupLambdaRole.Arn
+      Environment:
+        Variables:
+          PREFIX: !Ref pAppName
+      Timeout: 120
+      Code:
+        ZipFile: |
+          import os 
+          import json
+          import cfnresponse
+          import boto3
+          import logging
+
+          from botocore.exceptions import ClientError
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          prefix = os.environ.get('PREFIX')
+          lambda_client = boto3.client('lambda')
+          cloudformation_client = boto3.client('cloudformation')
+          eventbridge_client = boto3.client('events')
+
+          def handler(event, context):
+            logger.info("Received event: %s" % json.dumps(event))
+            request_type = event.get('RequestType')
+           
+
+            result = cfnresponse.SUCCESS
+
+            try:
+              if request_type == 'Create' or request_type == 'Update':
+                result = cfnresponse.SUCCESS
+              elif request_type == 'Delete':
+                result = cleanup(prefix)
+            except ClientError as e:
+              logger.error('Error: %s', e)
+              result = cfnresponse.FAILED
+
+            cfnresponse.send(event, context, result, {})
+
+
+          def get_cloudformation_managed_rules(prefix):
+              managed_rules = set()
+              paginator = cloudformation_client.get_paginator('list_stacks')
+              
+              # List only active stacks with the specified prefix
+              for page in paginator.paginate(StackStatusFilter=['CREATE_COMPLETE', 'UPDATE_COMPLETE']):
+                  for stack_summary in page['StackSummaries']:
+                      stack_name = stack_summary['StackName']
+                      
+                      # Check if stack name starts with the specified prefix
+                      if stack_name.startswith(prefix):
+                          # Get resources in each matching stack
+                          resources = cloudformation_client.list_stack_resources(StackName=stack_name)
+                          for resource in resources['StackResourceSummaries']:
+                              if resource['ResourceType'] == 'AWS::Events::Rule':
+                                  managed_rules.add(resource['PhysicalResourceId'])  # Store the rule name or ARN
+                              
+              return managed_rules
+
+          def cleanup_unmanaged_eventbridge_rules(prefix):
+              # Get CloudFormation-managed rules for stacks with the specified prefix
+              managed_rules = get_cloudformation_managed_rules(prefix)
+              
+              paginator = eventbridge_client.get_paginator('list_rules')
+              for page in paginator.paginate(NamePrefix=prefix):
+                  for rule in page['Rules']:
+                      rule_name = rule['Name']
+                      
+                      # Skip deletion if the rule is managed by CloudFormation
+                      if rule_name in managed_rules:
+                          logger.info(f"Skipping CloudFormation-managed rule: {rule_name}")
+                          continue
+                      
+                      logger.info(f"Deleting EventBridge rule: {rule_name}")
+                      
+                      # List and remove targets
+                      targets = eventbridge_client.list_targets_by_rule(Rule=rule_name)
+                      if targets['Targets']:
+                          target_ids = [target['Id'] for target in targets['Targets']]
+                          eventbridge_client.remove_targets(Rule=rule_name, Ids=target_ids)
+                      
+                      # Delete the rule
+                      eventbridge_client.delete_rule(Name=rule_name)            
+
+          def cleanup(prefix):        
+            paginator = lambda_client.get_paginator('list_functions')
+            for page in paginator.paginate():
+                for function in page['Functions']:
+                    function_name = function['FunctionName']
+
+                    if function_name.startswith(prefix):
+                        # Retrieve the tags for the Lambda function
+                        tags = lambda_client.list_tags(Resource=function['FunctionArn']).get('Tags', {})
+                        
+                        # Check if this Lambda is managed by Cloudformation, if it is, dont delete it since cfn will handle deletion.
+                        if tags.get('resource:createdBy') == "Cloudformation":
+                            logger.info(f"Skipping function deployed by Cloudformation: {function_name}")
+                            continue
+                        else:
+                          logger.info(f"Deleting Lambda function: {function_name}")
+                          lambda_client.delete_function(FunctionName=function_name)
+
+            cleanup_unmanaged_eventbridge_rules(prefix)
+
+            return cfnresponse.SUCCESS
+      Tags:
+        - Key: resource:createdBy
+          Value: Cloudformation
+            
+  cleanupLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${CleanupFunction}
+      RetentionInDays: 7
+
+Outputs:
+  websiteUrl:
+    Description: Application URL endpoint
+    Value: !Sub www.${pAppName}.${pHostedZoneName} # http://madisonreed.${pAppName}.cloudmap.internal
+
+  
