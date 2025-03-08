@@ -1,0 +1,373 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: |
+  Deploys Websocket Python backend using Cloudflare cert for HTTPS
+
+Parameters:
+  pGameStateTable:
+    Description: Name of DynamoDB Table used for storing Opulence Game and User state
+    Type: String
+    Default: opulence-data
+
+  pOpulenceS3Storage:
+    Description: S3 Bucket Name containing the backend main.py code and SSL cert for Opulence
+    Type: String
+    Default: opulence-storage-v2-west-2
+
+  pAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: Mapping to retrieve the latest Ubuntu AMI. Do not change this value.
+    Default: /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+    AllowedValues:
+      - /aws/service/canonical/ubuntu/server/24.04/stable/current/arm64/hvm/ebs-gp3/ami-id # arm64
+      - /aws/service/canonical/ubuntu/server/24.04/stable/current/amd64/hvm/ebs-gp3/ami-id
+    
+  pEc2InstanceSubnet:
+    Type: AWS::EC2::Subnet::Id
+    Description: VPC public subnet ID for instance deployment
+    Default: subnet-07128561e48da190e
+
+
+Resources:
+
+  SGInstance:
+    Type: 'AWS::EC2::SecurityGroup'
+    Properties:
+      # VpcId: !Ref VPC
+      GroupDescription: Control access to EC2 Instance
+      SecurityGroupIngress: 
+        - Description: Allow HTTPS IPv4 IN
+          IpProtocol: tcp
+          FromPort: 443
+          ToPort: 443
+          CidrIp: 0.0.0.0/0
+        - Description: Allow Gunicorn
+          IpProtocol: tcp
+          FromPort: 8000
+          ToPort: 8000
+          CidrIp: 0.0.0.0/0
+        # - Description: Allow SSH IN
+        #   IpProtocol: tcp
+        #   FromPort: 22
+        #   ToPort: 22
+        #   CidrIp: 0.0.0.0/0
+      Tags:
+        - Key: "Name"
+          Value: !Sub ${AWS::StackName}
+
+  EC2Role:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: 
+              - ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        -
+          PolicyName: S3Access
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+                Effect: Allow
+                Action:
+                  - s3:ListBucket
+                  - s3:PutObject
+                  - s3:GetObject
+                  - s3:DeleteObject
+                Resource:
+                  - !Sub arn:aws:s3:::${pOpulenceS3Storage}
+                  - !Sub arn:aws:s3:::${pOpulenceS3Storage}/*
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AdministratorAccess
+
+
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties: 
+      Path: /
+      Roles: 
+        - !Ref EC2Role
+
+
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    CreationPolicy: # Used with Cfn-Signal
+      ResourceSignal:
+        Timeout: PT15M
+    Properties:
+      InstanceType: t2.micro
+      ImageId: !Ref pAmiId
+      SubnetId: !Ref pEc2InstanceSubnet
+      # KeyName: !Ref SSHKey
+      SecurityGroupIds:
+        - !GetAtt  SGInstance.GroupId
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeSize: 8  # Size in GB
+            VolumeType: gp3
+            DeleteOnTermination: true
+      Tags:
+        - Key: "Name"
+          Value: !Sub ${AWS::StackName}
+        # This Tag used for CodeDeploy to identify instances to update
+        - Key: CodeDeployEC2
+          Value: PROD
+      UserData:
+        Fn::Base64: !Sub |
+          #!/bin/bash -xe
+          apt update -y && apt upgrade -y
+          LOG_FILE=/home/ubuntu/automation.log
+          apt install -y unzip jq >> $LOG_FILE 2>&1
+          curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
+          unzip awscliv2.zip && ./aws/install
+
+          # Install Docker and run Redis container
+          curl -fsSL https://download.docker.com/linux/ubuntu/gpg -o /etc/apt/keyrings/docker.asc
+          chmod a+r /etc/apt/keyrings/docker.asc
+          echo \
+            "deb [arch=$(dpkg --print-architecture) signed-by=/etc/apt/keyrings/docker.asc] https://download.docker.com/linux/ubuntu \
+            $(. /etc/os-release && echo "$VERSION_CODENAME") stable" | \
+            sudo tee /etc/apt/sources.list.d/docker.list > /dev/null
+          apt update -y
+          apt install -y docker-ce docker-ce-cli containerd.io docker-buildx-plugin docker-compose-plugin
+          systemctl start docker
+          docker run -d -p6379:6379 redis
+
+          # Copy opulence backend files we copied to S3, install dependencies, and run the flask server with gunicorn
+          aws s3 cp s3://${pOpulenceS3Storage} /home/ubuntu --recursive
+          cd /home/ubuntu
+          apt install -y python3-pip
+          apt install -y python3.12-venv
+          # apt install -y gunicorn
+
+          # Install CodeDeploy Agent
+          apt install -y wget ruby-full
+          wget https://aws-codedeploy-${AWS::Region}.s3.${AWS::Region}.amazonaws.com/latest/install
+          chmod +x ./install
+          sudo ./install auto
+          systemctl status codedeploy-agent
+          systemctl start codedeploy-agent
+
+          # Create and copy SSL cert for CloudFlare
+          mkdir -p /etc/ssl/private
+          chmod 700 /etc/ssl/private
+          cp private_playopulence.pem /etc/ssl/private/
+          cp origin_cert_playopulence.pem /etc/ssl/certs/
+
+          python3 -m venv .venv
+          source .venv/bin/activate
+          pip3 install -r requirements.txt
+          pip3 install gunicorn
+          export PYTHON_ENV=prod
+
+          apt install -y nginx
+          mv nginx-gunicorn.conf /etc/nginx/conf.d/nginx.conf
+          systemctl start nginx
+
+          gunicorn --worker-class geventwebsocket.gunicorn.workers.GeventWebSocketWorker -w 1 wsgi:app -b 0.0.0.0:8000 --access-logfile gunicorn-access.log --error-logfile gunicorn-error.log --daemon
+          
+          # Cfn Signal:
+          pip3 install https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-py3-latest.tar.gz
+          cfn-signal -e $? --stack ${AWS::StackId} --resource EC2Instance --region ${AWS::Region}
+          
+  # IPAddress:
+  #   Type: AWS::EC2::EIP
+  # IPAssociation:
+  #   Type: AWS::EC2::EIPAssociation
+  #   Properties:
+  #     InstanceId: !Ref EC2Instance
+  #     EIP: !Ref IPAddress
+
+  # Route53Records:
+  #   Type: "AWS::Route53::RecordSetGroup"
+  #   Properties:
+  #     HostedZoneId: Z0949341G2O2M9659QXN # Id of the Hosted Zone created during domain registration
+  #     RecordSets:
+  #       - Name: www.playopulence.com
+  #         Type: A
+  #         TTL: 300
+  #         ResourceRecords:
+  #         - !Ref IPAddress
+  #       - Name: playopulence.com
+  #         Type: A
+  #         TTL: 300
+  #         ResourceRecords:
+  #         - !Ref IPAddress
+          
+
+  dynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    # UpdateReplacePolicy: Retain
+    # DeletionPolicy: Retain
+    Properties:
+      TableName: opulence-data
+      BillingMode: PROVISIONED
+      ProvisionedThroughput: 
+        ReadCapacityUnits: 25
+        WriteCapacityUnits: 25
+      AttributeDefinitions:
+        - AttributeName: PK
+          AttributeType: "S"
+        - AttributeName: SK
+          AttributeType: "S"
+        - AttributeName: started
+          AttributeType: "S"
+        - AttributeName: players
+          AttributeType: "N"
+      KeySchema:
+        - AttributeName: PK # Partition Key
+          KeyType: HASH
+        - AttributeName: SK # Sort Key
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: OpenGamesIndex
+          KeySchema:
+            - AttributeName: started # Partition Key
+              KeyType: HASH
+            - AttributeName: players # Sort Key
+              KeyType: RANGE
+          Projection: 
+            ProjectionType: ALL
+          ProvisionedThroughput:
+            ReadCapacityUnits: 10
+            WriteCapacityUnits: 10
+      TimeToLiveSpecification:
+        AttributeName: TTL
+        Enabled: True
+      Tags:
+        - Key: Managed-By
+          Value: cloudformation
+          
+  userPool:
+   Type : AWS::Cognito::UserPool
+   Properties:
+    UserPoolName: OpulenceUserPool2
+    AccountRecoverySetting: 
+      RecoveryMechanisms: 
+        - Name: verified_email  # Recovery only by email
+          Priority: 1
+    
+    # Allow sign-in with either username or email
+    AliasAttributes: 
+      - email
+      - preferred_username
+    
+    # Password Policy for user sign-in
+    Policies:
+      PasswordPolicy: 
+        MinimumLength: 6
+        RequireLowercase: false
+        RequireNumbers: false
+        RequireSymbols: false
+        RequireUppercase: false
+        TemporaryPasswordValidityDays: 7
+    UsernameConfiguration: 
+      CaseSensitive: false # Username sign-in is not case sensitive
+    MfaConfiguration: "OFF"
+
+    # Lambda functions for e.g. post auth
+    LambdaConfig: 
+      PostConfirmation : !GetAtt postConfirmLambda.Arn
+
+  # # Required for email confirmation links to work.
+  # userPoolDomain:
+  #   Type: AWS::Cognito::UserPoolDomain
+  #   Properties:
+  #     # CustomDomainConfig: 
+  #     #   CertificateArn: !Ref pACMCertArn
+  #     # Domain: auth.playopulence.com # replace with valid domain and subdomain
+  #     UserPoolId: !Ref userPool
+
+  UserPoolClient:
+    Type: AWS::Cognito::UserPoolClient
+    Properties:
+      ClientName: !Sub website
+      GenerateSecret: false
+      UserPoolId: !Ref userPool
+      CallbackURLs:
+        - http://localhost:8080
+      LogoutURLs:
+        - http://localhost:8080
+      PreventUserExistenceErrors: ENABLED  # Prevent saying user not found if password was incorrect. Instead, always say password was invalid.
+
+
+
+  lambdaRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Action:
+              - sts:AssumeRole
+            Effect: Allow
+            Principal:
+              Service:
+                - lambda.amazonaws.com
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: DynamoDBGameState
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:PutItem
+                  - dynamodb:GetItem
+                  - dynamodb:UpdateItem
+                  - dynamodb:DeleteItem
+                  - dynamodb:Query
+                  - dynamodb:Scan
+                Resource:
+                  - !Sub arn:aws:dynamodb:${AWS::Region}:${AWS::AccountId}:table/${pGameStateTable}
+
+
+  postConfirmLambda:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Populates DynamoDB with default attributes when the user confirms their account.
+      Runtime: python3.11
+      Role: !GetAtt lambdaRole.Arn
+      Environment:
+        Variables:
+          ACCOUNT_ID: !Sub ${AWS::AccountId}
+          DDB_TABLE: opulence-data
+      Handler: index.handler
+      Timeout: 240
+      Code:
+        ZipFile: !Sub |
+          import boto3
+
+          def handler(event, context):
+            print(event)
+
+  # Allows Cognito to invoke the lambda
+  lambdaCognitoResourcePolicy: 
+    Type: AWS::Lambda::Permission
+    Properties: 
+      FunctionName: !Ref postConfirmLambda
+      Action: lambda:InvokeFunction
+      Principal: cognito-idp.amazonaws.com
+      SourceArn: 
+        !GetAtt userPool.Arn
+
+  postLambdaLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/lambda/${postConfirmLambda}
+      RetentionInDays: 30
+
+# Outputs:
+#   # EC2PublicIP:
+#   #   Description: "EC2 Instance Public IP Address"
+#   #   Value: !GetAtt EC2Instance.PublicIp
+#   EC2PublicIP:
+#     Description: "EC2 Instance Public IP Address"
+#     Value: !Ref IPAddress
