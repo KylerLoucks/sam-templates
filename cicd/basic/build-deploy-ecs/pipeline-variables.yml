@@ -402,6 +402,7 @@ Resources:
                   - s3:GetObject
                   - s3:DeleteObject
                   - s3:DeleteObjectVersion
+                  - s3:PutBucketPolicy
                 Resource:
                   - !Sub arn:aws:s3:::${artifactBucket}
                   - !Sub arn:aws:s3:::${artifactBucket}/*
@@ -416,7 +417,6 @@ Resources:
       Timeout: 120
       Code:
         ZipFile: |
-          import os
           import json
           import cfnresponse
           import boto3
@@ -432,23 +432,38 @@ Resources:
             logger.info("Received event: %s" % json.dumps(event))
             bucket = s3.Bucket(event['ResourceProperties']['Bucket'])
 
-            result = cfnresponse.SUCCESS
-
             try:
-              if event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
-                result = cfnresponse.SUCCESS
-              elif event['RequestType'] == 'Delete':
-                result = delete_objects(bucket)
-            except ClientError as e:
-              logger.error('Error: %s', e)
-              result = cfnresponse.FAILED
+                # No work on Create/Update
+                if event['RequestType'] == 'Delete':
+                    delete_objects(bucket)
+                # If we get here, everything succeeded
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+            except Exception as e:
+                # Log full stack and notify CloudFormation of failure
+                logger.exception("Cleanup failed")
+                cfnresponse.send(event, context, cfnresponse.FAILED, {})
 
-            cfnresponse.send(event, context, result, {})
+          def delete_objects(bucket):   
+            name = bucket.name
+            # 1) Attach Deny policy to block new uploads
+            deny_policy = {
+              "Version": "2012-10-17",
+              "Statement": [{
+                "Effect": "Deny",
+                "Principal": "*",
+                "Action": "s3:PutObject",
+                "Resource": f"arn:aws:s3:::{name}/*"
+              }]
+            }
+            bucket.Policy().put(Policy=json.dumps(deny_policy))
 
-          def delete_objects(bucket):
+            # 2) Delete all objects in the bucket
             bucket.object_versions.delete()
             bucket.objects.all().delete()
             return cfnresponse.SUCCESS
+      Tags:
+        - Key: resource:createdBy
+          Value: Cloudformation
 
   cleanupLambdaLogGroup:
     Type: AWS::Logs::LogGroup
