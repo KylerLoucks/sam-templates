@@ -297,6 +297,9 @@ Resources:
                 executionTimeout: "{{executionTimeout}}"
               InstanceIds: "{{InstanceIds}}"
               DocumentName: "AWS-RunShellScript"
+              CloudWatchOutputConfig:
+                CloudWatchLogGroupName: !Ref sfnRunCommandLogGroup
+                CloudWatchOutputEnabled: true
               TimeoutSeconds: "{{deliveryTimeout}}"
           - name: "RunCommand_Powershell"
             action: "aws:runCommand"
@@ -346,6 +349,12 @@ Resources:
       DocumentType: "Automation"
       TargetType: "/AWS::EC2::Host"
 
+  sfnRunCommandLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: /aws/ssm/SfnRunCommandByInstanceIds
+      RetentionInDays: 14
+
   # Role used for the RunCommand to assume. The Run command will handle the states:SendTaskSuccess API call
   SSMSyncRole:
     Type: "AWS::IAM::Role"
@@ -384,6 +393,15 @@ Resources:
                   - "states:SendTaskSuccess"
                 Resource:
                   Fn::Sub: "arn:aws:states:${AWS::Region}:${AWS::AccountId}:stateMachine:*"
+              # Allow writing RunCommand output to CW Logs
+              - Effect: "Allow"
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource:
+                  - Fn::Sub: arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/ssm/SfnRunCommandByInstanceIds
+                  - Fn::Sub: arn:aws:logs:${AWS::Region}:${AWS::AccountId}:log-group:/aws/ssm/SfnRunCommandByInstanceIds:*
 
 
   lambdaRoleCleanSnapshots:
@@ -649,7 +667,7 @@ Resources:
                 workingDirectory:
                   - /home/ubuntu/ # Use directory that is created at instance launch, otherwise you'll get a `no such file or directory` error
 
-                # Need to use States.Array so we can pass state input with Commands.$
+                # Need to use States.Array so we can pass state input with Commands.$ (Optional)
                 # TLDR of this script: 
                 # 1. create temp mounting dir for the new Ebs volume
                 # 2. copy the contents of the base mysql data as to not break mysql when we move the new mount back to var/lib/mysql
@@ -657,12 +675,13 @@ Resources:
                 # NOTE: if script fails, it could be due to instance root volume running out of storage. Verify /dev/root with `df -h` cmd
                 Commands:
                   - LOG_FILE=/home/ubuntu/automation.log
-                  - apt install -y unzip >> $LOG_FILE 2>&1
-                  - apt install -y jq >> $LOG_FILE 2>&1
+                  - DB_DUMP_BUCKET="db-sanitized-snapshots"
+                  - apt install -y unzip
+                  - apt install -y jq
                   - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
                   - unzip awscliv2.zip
                   - ./aws/install
-                  - apt install -y mysql-server >> $LOG_FILE 2>&1
+                  - apt install -y mysql-server
                   - mysqladmin -u root password "root"
                   - systemctl stop mysql
                   # mysql conf needs bind address open from anywhere to accept connections
@@ -675,36 +694,42 @@ Resources:
                   - rsync -a /var/lib/mysql/ /mnt/tmpdata/
                   - umount /mnt/tmpdata
                   - mount /dev/nvme1n1 /var/lib/mysql
-                  - echo "Mounted to /var/lib/mysql" >> $LOG_FILE
+                  - echo "Mounted to /var/lib/mysql"
                   - systemctl start mysql
                   # Have to create root user with allowing connections from any IP (root@%)
                   - mysql -u root -proot -e "CREATE USER 'root'@'%' IDENTIFIED BY 'root';"
                   - mysql -u root -proot -e "GRANT ALL PRIVILEGES ON *.* TO 'root'@'%' WITH GRANT OPTION;"
                   - mysql -u root -proot -e "FLUSH PRIVILEGES;"
                   - DATABASES="inventory magento tophat"
-                  - for DB_NAME in $DATABASES; do
-                  -   echo "Creating database $DB_NAME" >> $LOG_FILE
-                  -   if mysql -u root -proot -e "CREATE DATABASE IF NOT EXISTS $DB_NAME;"; then
-                  -     echo "Database $DB_NAME created successfully." >> $LOG_FILE
-                  -   else
-                  -     echo "Error creating database $DB_NAME. Exiting..." >> $LOG_FILE
-                  -     exit 1
-                  -   fi
-                  - done
-                  - echo "All Databases created successfully, proceeding with import" >> $LOG_FILE
-                  - S3_FILE=$(aws s3api list-objects-v2 --bucket db-prod-sanitized-backup --query "reverse(sort_by(Contents, &LastModified))[0].Key" --output text)
-                  - echo "Copying $S3_FILE from dump bucket..." >> $LOG_FILE
-                  - aws s3 cp s3://db-prod-sanitized-backup/$S3_FILE dbs_mysql.tar
-                  - tar -xf dbs_mysql.tar
-                  - mv *.dmp dump.sql
-                  - echo "Importing MySQL dump!" >> $LOG_FILE
-                  - if mysql -u root -proot < dump.sql; then
-                  -   echo "Database import completed successfully." >> $LOG_FILE
+                  - | 
+                    for DB_NAME in $DATABASES; do
+                      echo "Creating database $DB_NAME"
+                      if mysql -u root -proot -e "CREATE DATABASE IF NOT EXISTS $DB_NAME;"; then
+                        echo "Database $DB_NAME created successfully."
+                      else
+                        echo "Error creating database $DB_NAME. Exiting..."
+                        exit 1
+                      fi
+                    done
+                  - echo "All Databases created successfully, proceeding with import"
+                  # Find only files that contain -mini suffix & Filter by latest file by sorting by file name ("&Key")
+                  - S3_FILE=$(aws s3api list-objects-v2 --bucket $DB_DUMP_BUCKET --query "reverse(sort_by(Contents[?contains(Key, '-mini')], &Key))[0].Key" --output text)
+                  - echo "Copying $S3_FILE from dump bucket..."
+                  - aws s3 cp s3://${DB_DUMP_BUCKET}/$S3_FILE dbs_mysql.gz
+                  - gzip -dc dbs_mysql.gz > dump.sql
+                  - echo "Importing MySQL dump!"
+                  - mysql -uroot -p -e "SET GLOBAL log_bin_trust_function_creators=1;"
+                  - if mysql -uroot -proot < dump.sql; then
+                  -   echo "Database import completed successfully."
                   - else
-                  -   echo "Error during database import. Exiting..." >> $LOG_FILE
+                  -   echo "Error during database import. Exiting..."
                   -   exit 1
                   - fi
-                  - echo "Script completed." >> $LOG_FILE
+                  - echo "Database mounted EBS Volume disk space:"
+                  - df -h /dev/nvme1n1
+                  - echo "Root Volume disk space:"
+                  - df -h /dev/root
+                  - echo "Script completed."
 
                 executionTimeout:
                   - "72000"
