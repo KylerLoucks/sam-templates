@@ -719,7 +719,7 @@ Resources:
                   -     exit 1
                   -   fi
                   - done
-                  - chown -R 1001:1001 /data/db && systemctl stop mongod # required for bitnami mongo docker container to be able to read the data
+                  - systemctl stop mongod && chown -R 1001:1001 /data/db # required for bitnami mongo docker container to be able to read the data
                   - echo "Database mounted EBS Volume disk space:" && df -h /dev/nvme1n1
                   - echo "Root Volume disk space:" && df -h /dev/root
                   - echo "Script completed." | tee -a $LOG_FILE
