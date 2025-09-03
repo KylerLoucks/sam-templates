@@ -408,6 +408,12 @@ Resources:
                   - xray:PutTraceSegments
                   - xxray:PutTelemetryRecords
                 Resource: "*"
+              # Allow getting and describing stacks to find in-use snapshots
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                  - cloudformation:ListStacks
+                Resource: "*"
               - Effect: Allow
                 Action:
                   - ec2:DescribeSnapshots
@@ -574,7 +580,7 @@ Resources:
             Resource: arn:aws:states:::aws-sdk:ec2:runInstances
             Parameters:
               ImageId: !Ref pUbuntuImageId
-              InstanceType: t3.medium
+              InstanceType: t3.large
               IamInstanceProfile: 
                 Arn: !GetAtt runInstanceProfile.Arn
               SecurityGroupIds:
@@ -606,7 +612,7 @@ Resources:
                 # /data/db volume
                 - DeviceName: /dev/xvdf
                   Ebs:
-                    VolumeSize: 20
+                    VolumeSize: 50
                     DeleteOnTermination: false
                     VolumeType: gp3
                     Iops: 3000
@@ -664,51 +670,59 @@ Resources:
                   - BACKUP_NAME_DATE="${BACKUP_NAME}_${RESTORE_DATE}"
                   - DB_DUMP_BUCKET="mr-mongo-atlas-sanitized-backup"
                   # Install mongodb-org
-                  - apt install -y gnupg
+                  - DEBIAN_FRONTEND=noninteractive apt-get -yq -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install gnupg
                   - curl -fsSL https://www.mongodb.org/static/pgp/server-7.0.asc | sudo gpg -o /usr/share/keyrings/mongodb-server-7.0.gpg --dearmor
                   - echo "deb [ arch=amd64,arm64 signed-by=/usr/share/keyrings/mongodb-server-7.0.gpg ] https://repo.mongodb.org/apt/ubuntu focal/mongodb-org/7.0 multiverse" | sudo tee /etc/apt/sources.list.d/mongodb-org-7.0.list
-                  - apt update -y
-                  - apt install -y mongodb-org >> $LOG_FILE 2>&1
-                  # Fix errors when starting mongod?
-                  # - sudo rm -rf /tmp/mongodb-27017.sock
+                  - apt-get -yq update
+                  - DEBIAN_FRONTEND=noninteractive apt-get -yq -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install mongodb-org
                   # Update mongo.conf to use proper dbPath and bindIP so we can connect & verify db import worked
-                  - mkdir -p /data/db
-                  - chown -R mongodb:mongodb /data/db
+                  - mkdir -p /data/db && chown -R mongodb:mongodb /data/db
                   - "sed -i 's|^  dbPath:.*|  dbPath: /data/db |' /etc/mongod.conf"
                   - "sed -i 's/^  bindIp:.*/  bindIp: 0.0.0.0/' /etc/mongod.conf"
+                  - printf '\nreplication:\n  replSetName: rs0\n' | tee -a /etc/mongod.conf # Add replication config Note: ECS tasks must have env var MONGODB_REPLICA_SET_NAME set to 'rs0'
                   # Install AWS CLI
-                  - apt install -y unzip >> $LOG_FILE 2>&1
-                  - apt install -y jq >> $LOG_FILE 2>&1
-                  - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
-                  - unzip awscliv2.zip
-                  - ./aws/install
-                  # Stop mongo and mount nvme1n1 volume to /data/db
+                  - DEBIAN_FRONTEND=noninteractive apt-get -yq -o Dpkg::Options::=--force-confdef -o Dpkg::Options::=--force-confold install unzip jq
+                  - curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip" && unzip -q awscliv2.zip && ./aws/install
+                  # mount nvme1n1 volume to /data/db and start mongo
+                  # installing mongodb-org will add required files to /data/db, so we need to rsync the contents of /data/db to the new mount
                   - mkdir -p /mnt/tmpdata
                   - mkfs -t ext4 /dev/nvme1n1
                   - mount /dev/nvme1n1 /mnt/tmpdata
-                  - chown -R mongodb:mongodb /mnt/tmpdata
                   - rsync -a /data/db/ /mnt/tmpdata/
                   - umount /mnt/tmpdata
                   - mount /dev/nvme1n1 /data/db
-                  - echo "Mounted to /data/db" >> $LOG_FILE
-                  - systemctl start mongod
+                  - chown -R mongodb:mongodb /data/db && chmod 700 /data/db
+                  - echo "Mounted to /data/db" | tee -a $LOG_FILE
+                  # Start mongod and wait until it's responsive, then initialize single-node replSet
+                  # Need to run rs.initiate(), otherwise this data wont include 'local.oplog.rs' and other mandatory files required to run a replica set w/ ECS containers
+                  # NOTE: The replica set name here ("rs0") must match the ECS task env var MONGODB_REPLICA_SET_NAME,
+                  # otherwise Bitnami's entrypoint will not recognize or join the set correctly.
+                  - systemctl start mongod && for i in {1..60}; do mongosh --quiet --eval 'db.runCommand({ping:1})' >/dev/null 2>&1 && break; sleep 1; done && mongosh --quiet --eval 'rs.initiate({_id:"rs0",members:[{_id:0,host:"127.0.0.1:27017"}]})' && mongosh --quiet --eval 'while(rs.status().myState!=1){sleep(200)}'
                   # Download Mongo dump S3 files
+                  - mkdir -p dumpfiles
                   - S3_FILES=$(aws s3api list-objects-v2 --bucket $DB_DUMP_BUCKET --prefix "${BACKUP_NAME_DATE}" --query "reverse(sort_by(Contents, &LastModified))[].Key" --output text)
                   - for FILE in $S3_FILES; do
-                  -   echo "Downloading $FILE" >> $LOG_FILE
+                  -   echo "Downloading $FILE" | tee -a $LOG_FILE
                   -   aws s3 cp "s3://${DB_DUMP_BUCKET}/${FILE}" dumpfiles/
                   - done
-                  - echo "Restoring MongoDB dumps..." >> $LOG_FILE
+                  # Restore Mongo dumps
+                  - echo "Restoring MongoDB dumps..." | tee -a $LOG_FILE
                   - for file in ./dumpfiles/*; do
-                  -   echo "Restoring dump ${file} into MongoDB..." >> $LOG_FILE
-                  -   if mongorestore --archive=$file --gzip --writeConcern '{w:0}' --numInsertionWorkersPerCollection 5; then
-                  -     echo "Restored ${file} successfully." >> $LOG_FILE
+                  -   echo "Restoring dump ${file} into MongoDB..." | tee -a $LOG_FILE
+                  -   if mongorestore --archive=$file --gzip --writeConcern '{w:1}' --numInsertionWorkersPerCollection 5; then
+                  -     echo "Restored ${file} successfully." | tee -a $LOG_FILE
                   -   else
-                  -     echo "Error restoring ${file}. Exiting..." >> $LOG_FILE
+                  -     echo "Error restoring ${file}. Exiting..." | tee -a $LOG_FILE
+                  # emit disk space to stderr so Step Functions captures it as a potential error cause
+                  -     echo "Disk usage for /dev/nvme1n1:" >&2
+                  -     df -h /dev/nvme1n1 >&2
                   -     exit 1
                   -   fi
                   - done
-                  - echo "Script completed." >> $LOG_FILE
+                  - chown -R 1001:1001 /data/db && systemctl stop mongod # required for bitnami mongo docker container to be able to read the data
+                  - echo "Database mounted EBS Volume disk space:" && df -h /dev/nvme1n1
+                  - echo "Root Volume disk space:" && df -h /dev/root
+                  - echo "Script completed." | tee -a $LOG_FILE
 
                 executionTimeout:
                   - "72000"
@@ -804,12 +818,25 @@ Resources:
             Type: Succeed
 
       Role: !GetAtt stateMachineExecutionRole.Arn
+      Logging:
+        Destinations:
+          - CloudWatchLogsLogGroup: 
+              LogGroupArn: !GetAtt stateMachineLogGroup.Arn          
+        IncludeExecutionData: true
+        Level: ALL
+        
       Events:
         CronSchedule:
           Type: Schedule
           Properties:
             Schedule: cron(59 23 * * ? *)
             Enabled: True
+
+  stateMachineLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub /aws/states/${AWS::StackName}-MongoImportSM
+      RetentionInDays: 14
 
 
   stateMachineExecutionRole:
@@ -866,6 +893,15 @@ Resources:
                 Action:
                   - iam:PassRole
                 Resource: !GetAtt runInstanceRole.Arn
+        - PolicyName: StepFunctionsLogsPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:*
+                Resource: '*'
+
 
 
               # - Effect: Allow
