@@ -19,7 +19,7 @@ Parameters:
   
   pEngineVersion:
     Type: String
-    Default: 15.00.4440.1.v1 # 15.00.4440.1.v1 = SQL Server 2019, 16.00.4210.1.v1 = SQL Server 2022 (sql server 2022 does not support RDS proxy)
+    Default: 16.00.4210.1.v1 # 15.00.4440.1.v1 = SQL Server 2019, 16.00.4210.1.v1 = SQL Server 2022 (sql server 2022 does not support RDS proxy)
     Description: (Optional) SQL Server engine version (e.g., 16.00.***)
 
   pDBInstanceClass:
@@ -68,7 +68,7 @@ Parameters:
   pVpcCidr:
     Type: String
     Default: 10.0.0.0/16
-    Description: VPC CIDR block to for allowing access to the SQL Server instance
+    Description: VPC CIDR block for allowing access to the SQL Server instance
 
   pEnableRdsProxy:
     Type: String
@@ -76,7 +76,7 @@ Parameters:
     AllowedValues:
       - true
       - false
-    Description: Enable RDS Proxy (not supported for SQL Server; keep false)
+    Description: Enable RDS Proxy (not supported for SQL Server 2022; keep false unless using SQL Server 2019)
 
 Conditions:
   CondUseKmsKey: !Not [ !Equals [ !Ref pKmsKeyId, '' ] ]
