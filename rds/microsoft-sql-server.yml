@@ -1,0 +1,243 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Creates an Amazon RDS for Microsoft SQL Server Standard Edition instance. Password is managed by Secrets Manager
+
+Parameters:
+
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the Virtual Private Network (VPC)
+  
+  pPrivateSubnetIds:
+    Type: List<AWS::EC2::Subnet::Id>
+    Description:
+      List of Private SubnetIds in the Virtual Private Cloud (VPC) to use for the Database
+
+  pDBUsername:
+    Type: String
+    Default: sqladmin
+    Description: Database Admin Username
+  
+  pEngineVersion:
+    Type: String
+    Default: 15.00.4440.1.v1 # 15.00.4440.1.v1 = SQL Server 2019, 16.00.4210.1.v1 = SQL Server 2022 (sql server 2022 does not support RDS proxy)
+    Description: (Optional) SQL Server engine version (e.g., 16.00.***)
+
+  pDBInstanceClass:
+    Type: String
+    Default: db.m6i.2xlarge # Microsoft SQL Server Standard Edition doesn't support db.m7i instances
+    Description: Instance class for the RDS instance
+
+  pAllocatedStorage:
+    Type: Number
+    Default: 20
+    Description: Allocated storage in GiB
+
+  pMultiAZ:
+    Type: String
+    Default: false
+    AllowedValues:
+      - true
+      - false
+    Description: Deploy as Multi-AZ
+
+  pBackupRetentionPeriodDays:
+    Type: Number
+    Default: 7
+    Description: Number of days backups are retained. Valid value from 1 to 35
+
+  pDeletionProtection:
+    Type: String
+    Description: Enable deletion protection for the database
+    Default: true
+    AllowedValues:
+      - true
+      - false
+
+  pKmsKeyId:
+    Type: String
+    Default: ''
+    Description: (Optional) Customer Managed KMS Key ID for storage encryption
+
+  pLicenseModel:
+    Type: String
+    Default: license-included
+    AllowedValues:
+      - license-included
+    Description: License model for RDS SQL Server
+
+  pVpcCidr:
+    Type: String
+    Default: 10.0.0.0/16
+    Description: VPC CIDR block to for allowing access to the SQL Server instance
+
+  pEnableRdsProxy:
+    Type: String
+    Default: false
+    AllowedValues:
+      - true
+      - false
+    Description: Enable RDS Proxy (not supported for SQL Server; keep false)
+
+Conditions:
+  CondUseKmsKey: !Not [ !Equals [ !Ref pKmsKeyId, '' ] ]
+  CondHasEngineVersion: !Not [ !Equals [ !Ref pEngineVersion, '' ] ]
+  CondEnableProxy: !Equals [ !Ref pEnableRdsProxy, true ]
+
+Resources:
+
+  # Security group for Microsoft SQL Server
+  SqlServerSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow Microsoft SQL Server access
+      VpcId: !Ref pVpcId
+      SecurityGroupIngress:
+        - IpProtocol: tcp
+          FromPort: 1433
+          ToPort: 1433
+          CidrIp: !Ref pVpcCidr
+      Tags:
+        - Key: Name
+          Value: SQLServer
+
+  # DB Subnet Group
+  DBSubnetGroup:
+    Type: AWS::RDS::DBSubnetGroup
+    Properties:
+      DBSubnetGroupDescription: Subnet group for RDS instance
+      SubnetIds: !Ref pPrivateSubnetIds
+
+  SqlServerInstance:
+    Type: AWS::RDS::DBInstance
+    Properties:
+      Engine: sqlserver-se
+      EngineVersion: !If [ CondHasEngineVersion, !Ref pEngineVersion, !Ref AWS::NoValue ]
+      DBInstanceClass: !Ref pDBInstanceClass
+      AllocatedStorage: !Ref pAllocatedStorage
+      StorageType: gp3
+      Port: 1433
+      MasterUsername: !Ref pDBUsername
+      ManageMasterUserPassword: true
+      BackupRetentionPeriod: !Ref pBackupRetentionPeriodDays
+      MultiAZ: !Ref pMultiAZ
+      DeletionProtection: !Ref pDeletionProtection
+      VPCSecurityGroups:
+        - !GetAtt SqlServerSecurityGroup.GroupId
+      DBSubnetGroupName: !Ref DBSubnetGroup
+      PubliclyAccessible: false
+      AutoMinorVersionUpgrade: true
+      StorageEncrypted: !If
+        - CondUseKmsKey
+        - true
+        - false
+      KmsKeyId: !If 
+        - CondUseKmsKey
+        - !Ref pKmsKeyId
+        - !Ref AWS::NoValue
+      LicenseModel: !Ref pLicenseModel
+
+  # RDS Proxy IAM role allowing access to Secrets Manager and KMS decrypt via Secrets Manager
+  DBProxyRole:
+    Condition: CondEnableProxy
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: rds.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: RDSProxyAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Sid: DecryptSecrets
+                Effect: Allow
+                Action: kms:Decrypt
+                Resource: arn:aws:kms:*:*:key/*
+                Condition:
+                  StringEquals:
+                    kms:ViaService: !Sub secretsmanager.${AWS::Region}.amazonaws.com
+              - Sid: ListSecrets
+                Effect: Allow
+                Action:
+                  - secretsmanager:ListSecrets
+                  - secretsmanager:GetRandomPassword
+                Resource: "*"
+              - Sid: GetSecrets
+                Effect: Allow
+                Action:
+                  - secretsmanager:ListSecretVersionIds
+                  - secretsmanager:GetSecretValue
+                  - secretsmanager:GetResourcePolicy
+                  - secretsmanager:DescribeSecret
+                Resource: !GetAtt SqlServerInstance.MasterUserSecret.SecretArn
+
+  # RDS Proxy
+  DBProxy:
+    Condition: CondEnableProxy
+    Type: AWS::RDS::DBProxy
+    Properties:
+      DBProxyName: !Sub ${AWS::StackName}-db-proxy
+      EngineFamily: SQLSERVER
+      RequireTLS: true
+      DebugLogging: false
+      RoleArn: !GetAtt DBProxyRole.Arn
+      VpcSubnetIds: !Ref pPrivateSubnetIds
+      VpcSecurityGroupIds:
+        - !GetAtt SqlServerSecurityGroup.GroupId
+      Auth:
+        - AuthScheme: SECRETS
+          SecretArn: !GetAtt SqlServerInstance.MasterUserSecret.SecretArn
+          IAMAuth: DISABLED
+      Tags:
+        - Key: Name
+          Value: SQLServerProxy
+
+  DBProxyTargetGroup:
+    Condition: CondEnableProxy
+    Type: AWS::RDS::DBProxyTargetGroup
+    Properties:
+      DBProxyName: !Ref DBProxy
+      TargetGroupName: default
+      DBInstanceIdentifiers:
+        - !Ref SqlServerInstance
+      ConnectionPoolConfigurationInfo:
+        MaxConnectionsPercent: 100
+        MaxIdleConnectionsPercent: 50
+        ConnectionBorrowTimeout: 120
+
+Outputs:
+  InstanceEndpointAddress:
+    Description: The endpoint address of the SQL Server instance
+    Value: !GetAtt SqlServerInstance.Endpoint.Address
+    Export:
+      Name: !Sub ${AWS::StackName}:RdsAddress
+
+  InstanceEndpointPort:
+    Description: The port of the SQL Server instance
+    Value: !GetAtt SqlServerInstance.Endpoint.Port
+    Export:
+      Name: !Sub ${AWS::StackName}:RdsPort
+  
+  InstanceMasterUserSecretArn:
+    Description: The ARN of the RDS instance user and password secret
+    Value: !GetAtt SqlServerInstance.MasterUserSecret.SecretArn
+    Export:
+      Name: !Sub ${AWS::StackName}:RdsSecretArn
+
+  DBProxyEndpoint:
+    Condition: CondEnableProxy
+    Description: The endpoint address of the RDS Proxy
+    Value: !GetAtt DBProxy.Endpoint
+    Export:
+      Name: !Sub ${AWS::StackName}:RdsProxyEndpoint
+
+  DBProxyArn:
+    Condition: CondEnableProxy
+    Description: The ARN of the RDS Proxy
+    Value: !GetAtt DBProxy.DBProxyArn
+    Export:
+      Name: !Sub ${AWS::StackName}:RdsProxyArn
