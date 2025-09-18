@@ -70,6 +70,8 @@ Parameters:
     Default: 10.0.0.0/16
     Description: VPC CIDR block for allowing access to the SQL Server instance
 
+  # RDS Proxy is not supported for SQL Server 2022; keep false unless using SQL Server 2019
+  # https://docs.aws.amazon.com/AmazonRDS/latest/UserGuide/Concepts.RDS_Fea_Regions_DB-eng.Feature.RDSProxy.html
   pEnableRdsProxy:
     Type: String
     Default: false

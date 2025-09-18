@@ -1,0 +1,460 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  Deploys autoscaling role for scheduled task hibernations and DLM for stateful ECS service backups (Mysql, Mongo)
+
+Parameters:
+
+  # pBackupAlertsEndpoint:
+  #   Type: String
+  #   Description: Any backups related errors will be sent to this endpoint. Must be an email!
+  #   Default: ""
+
+  pBackupInterval:
+    Type: String
+    Description: Interval to create snapshots at (In Hours)
+    Default: 1
+
+  pRetainAmount:
+    Type: String
+    Description: Number of snapshots to retain per EBS volume
+    Default: 1
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterLabels:
+        # pBackupAlertsEndpoint:
+        #   default: Backup Failures Email Endpoint
+        pBackupInterval:
+          default: Interval to create snapshots at [in hours].
+        pRetainAmount:
+          default: Amount of snapshots to maintain at a time for each EBS volume.
+
+    ParameterGroups:
+      - Label:
+          default: DLM Settings
+        Parameters:
+            - pBackupAlertsEndpoint
+            - pSnapshotRetentionDays
+
+Resources:
+
+# DLM
+  dlmRole:
+    Type: AWS::IAM::Role
+    Properties:
+      RoleName: !Sub dlm-${AWS::Region}-ephemeral-env-backup-role
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service:
+                - dlm.amazonaws.com
+            Action:
+              - sts:AssumeRole
+
+  dlmRolePolicy:
+    Type: AWS::IAM::Policy
+    Properties:
+      Roles:
+        - !Ref dlmRole
+      PolicyName: !Sub dlm-${AWS::Region}-ephemeral-env-backup-policy
+      PolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Action:
+              - iam:GetRole
+              - iam:GetUser
+              - iam:ListRoles
+              - iam:PassRole
+            Resource: "*"
+          - Effect: Allow
+            Action: dlm:*
+            Resource: "*"
+          - Effect: Allow
+            Action:
+              - ec2:CreateSnapshot
+              - ec2:CreateSnapshots
+              - ec2:CreateTags
+              - ec2:DeleteSnapshot
+              - ec2:DescribeInstances
+              - ec2:DescribeSnapshots
+              - ec2:DescribeVolumes
+              - ec2:ModifySnapshotAttribute
+              - ec2:ResetSnapshotAttribute
+            Resource: "*"
+          - Effect: Allow
+            Action: logs:*
+            Resource: "arn:aws:logs:*:*:*"
+
+  dlmPolicy:
+    Type: AWS::DLM::LifecyclePolicy
+    Properties:
+      Description: DLM Lifecycle Policy deployed by CloudFormation
+      State: ENABLED
+      ExecutionRoleArn: !GetAtt dlmRole.Arn
+      PolicyDetails:
+        ResourceTypes:
+          - VOLUME
+        TargetTags:
+          # Snapshot both MySQL and Mongo Services
+          - Key: aws:ecs:serviceName
+            Value: mysql
+          - Key: aws:ecs:serviceName
+            Value: mongo
+        Schedules:
+          - Name: !Sub EBS Backup
+            TagsToAdd:
+              - Key: type
+                Value: dlm-ebs-snapshot-backup
+              - Key: Created_by
+                Value: DLM
+            CreateRule:
+              Interval: !Ref pBackupInterval
+              IntervalUnit: HOURS
+              # Time to start the backup interval at
+              Times:
+                - 01:00
+            RetainRule:
+              Count: !Ref pRetainAmount
+            CopyTags: true
+      Tags:
+        - Key: Name
+          Value: Ephemeral environment MySQL and Mongo Snapshots
+
+  # dlmSnsTopic:
+  #   Type: AWS::SNS::Topic
+  #   Properties:
+  #     TopicName: !Sub dlm-${AWS::Region}-backup-alerts
+  #     Subscription:
+  #       - Endpoint: !Ref pBackupAlertsEndpoint
+  #         Protocol: email
+
+  # dlmCloudwatchEvents:
+  #   Type: AWS::Events::Rule
+  #   Properties:
+  #     Description: !Sub DLM-EBS-Backup-Error-${AWS::AccountId}-${AWS::Region}
+  #     Name: !Sub dlm-${AWS::Region}-error-${AWS::AccountId}
+  #     EventPattern:
+  #       source:
+  #         - aws.dlm
+  #       detail-type:
+  #         - DLM Policy State Change
+  #       detail:
+  #         state:
+  #           - ERROR
+  #     State: ENABLED
+  #     Targets:
+  #       - Arn: !Ref dlmSnsTopic
+  #         Id: 1
+
+  # Autoscaling role for ECS tasks. Allows for provisioning and tearing down tasks.
+  autoScalingRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: application-autoscaling.amazonaws.com
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceAutoscaleRole
+        - arn:aws:iam::aws:policy/service-role/AmazonEC2ContainerServiceRole
+      Policies:
+        - PolicyName: AutoScalingPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - autoscaling:DescribeScalingActivities
+                  - autoscaling:DescribeScalingGroups
+                  - autoscaling:DescribeScalingPolicies
+                  - autoscaling:DescribeScheduledActions
+                  - autoscaling:PutScalingPolicy
+                  - autoscaling:PutScheduledAction
+                Resource: "*"
+        - PolicyName: ELBAccessPolicy
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:RegisterTargets
+                  - elasticloadbalancing:DeregisterTargets
+                  - elasticloadbalancing:DescribeTargetHealth
+                Resource: "*"
+
+# --- scheduled lambda to update all stateful stacks with latest DLM snapshots when spinning up from hibernation ---
+  StatefulStackSnapshotUpdater:
+    Type: AWS::Lambda::Function
+    Properties:
+      Runtime: python3.11
+      Handler: index.lambda_handler
+      Role: !GetAtt StatefulStackUpdaterRole.Arn
+      Timeout: 900
+      ReservedConcurrentExecutions: 1
+      Environment:
+        Variables:
+          MYSQL_PARAM: "pMysqlEbsSnapshotId"
+          MONGO_PARAM: "pMongoEbsSnapshotId"
+          CFN_ROLE_ARN: ""                  # optional: CFN service role to assume for stack updates
+      Code:
+        ZipFile: |
+          import os, time, uuid, boto3, re
+          from botocore.exceptions import ClientError
+
+          ec2 = boto3.client("ec2")
+          cfn = boto3.client("cloudformation")
+
+          MYSQL_PARAM  = os.environ.get("MYSQL_PARAM","pMysqlEbsSnapshotId")
+          MONGO_PARAM  = os.environ.get("MONGO_PARAM","pMongoEbsSnapshotId")
+          CFN_ROLE_ARN = os.environ.get("CFN_ROLE_ARN","")
+          CF_STACK_NAME_REGEX = re.compile(os.getenv('CF_STACK_NAME_REGEX', r'^pr\d+-stateful$'))
+
+          def find_all_latest_snapshots():
+            """Find latest snapshots for all apps using pagination"""
+            latest_snapshots = {}
+            
+            # Use pagination to handle large numbers of snapshots
+            paginator = ec2.get_paginator('describe_snapshots')
+            for page in paginator.paginate(
+                OwnerIds=["self"],
+                Filters=[
+                  {"Name":"tag:type","Values":["dlm-ebs-snapshot-backup"]},
+                  {"Name":"tag:Created_by","Values":["DLM"]},
+                  {"Name":"status","Values":["completed"]},
+                ]
+            ):
+                for snap in page['Snapshots']:
+                    # Extract name from tags
+                    name = None
+                    for tag in snap.get('Tags', []):
+                        if tag['Key'] == 'Name':
+                            name = tag['Value']
+                            break
+                    
+                    # Parse app and db from name (e.g., "pr12345-mysql" -> app="pr12345", db="mysql")
+                    if name and '-' in name:
+                        parts = name.split('-')
+                        if len(parts) >= 2:
+                            db = parts[-1]  # mysql or mongo
+                            app = '-'.join(parts[:-1])  # everything before the last dash
+                            key = f"{app}-{db}"
+                            
+                            # Keep the latest snapshot for each app-db combination
+                            if key not in latest_snapshots or snap['StartTime'] > latest_snapshots[key]['StartTime']:
+                                latest_snapshots[key] = snap
+            
+            # Return dict of {app-db: snapshot_id}
+            return {k: v['SnapshotId'] for k, v in latest_snapshots.items()}
+
+          def get_stack_current_params(stack_name):
+            """Get current parameters for a stack"""
+            try:
+              st = cfn.describe_stacks(StackName=stack_name)["Stacks"][0]
+              params = { p["ParameterKey"]: p.get("ParameterValue") for p in st.get("Parameters", []) }
+              return params
+            except ClientError as e:
+              if "does not exist" in str(e):
+                return {}
+              raise
+
+          def update_stack_with_snapshots(stack_name, mysql_snap_id, mongo_snap_id):
+            """Update stack with latest snapshot IDs - fire and forget approach"""
+            try:
+              # Get current parameters to check if update is needed
+              current_params = get_stack_current_params(stack_name)
+              
+              # Check if update is needed
+              if (current_params.get(MYSQL_PARAM) == mysql_snap_id and 
+                  current_params.get(MONGO_PARAM) == mongo_snap_id):
+                return {"updated": False, "reason": "already up to date", "stack": stack_name}
+              
+              # Prepare parameters for update
+              params = []
+              for key, value in current_params.items():
+                if key in [MYSQL_PARAM, MONGO_PARAM]:
+                  continue
+                params.append({"ParameterKey": key, "UsePreviousValue": True})
+              
+              params.extend([
+                {"ParameterKey": MYSQL_PARAM, "ParameterValue": mysql_snap_id},
+                {"ParameterKey": MONGO_PARAM, "ParameterValue": mongo_snap_id}
+              ])
+              
+              # Fire off stack update without waiting
+              kwargs = {
+                "StackName": stack_name,
+                "UsePreviousTemplate": True,
+                "Capabilities": ["CAPABILITY_IAM","CAPABILITY_NAMED_IAM"],
+                "Parameters": params,
+                "ClientRequestToken": f"snapshot-update-{uuid.uuid4()}"
+              }
+              if CFN_ROLE_ARN:
+                kwargs["RoleARN"] = CFN_ROLE_ARN
+              
+              cfn.update_stack(**kwargs)
+              return {"updated": True, "stack": stack_name, "mysql": mysql_snap_id, "mongo": mongo_snap_id}
+            except ClientError as e:
+              msg = str(e)
+              if "No updates are to be performed" in msg:
+                return {"updated": False, "reason": "no changes needed", "stack": stack_name}
+              elif "UPDATE_IN_PROGRESS" in msg:
+                return {"updated": False, "reason": "update already in progress", "stack": stack_name}
+              return {"updated": False, "error": msg, "stack": stack_name}
+
+
+
+          def update_all_stateful_stacks():
+            """Update all stateful stacks with latest DLM snapshots using pagination"""
+            results = []
+            
+            # Get all latest snapshots in one API call
+            print("Finding latest snapshots for all environments...")
+            latest_snapshots = find_all_latest_snapshots()
+            print(f"Found snapshots for {len(latest_snapshots)} app-db combinations")
+            
+            # Use pagination to get all stateful stacks efficiently
+            paginator = cfn.get_paginator('list_stacks')
+            for page in paginator.paginate(StackStatusFilter=['CREATE_COMPLETE', 'UPDATE_COMPLETE']):
+              for stack in page.get('StackSummaries', []):
+                # Filter by name pattern locally to avoid extra API calls
+                name = stack.get('StackName', '')
+                if not CF_STACK_NAME_REGEX.match(name):
+                  continue
+                
+                app = name.replace('-stateful', '')
+                stack_name = name
+                
+                # Get snapshots from our pre-loaded dict
+                mysql_snap = latest_snapshots.get(f"{app}-mysql")
+                mongo_snap = latest_snapshots.get(f"{app}-mongo")
+                
+                if mysql_snap and mongo_snap:
+                  result = update_stack_with_snapshots(stack_name, mysql_snap, mongo_snap)
+                  results.append(result)
+                else:
+                  results.append({
+                    "skipped": True, 
+                    "reason": f"missing snapshots for {app} (mysql: {mysql_snap}, mongo: {mongo_snap})",
+                    "stack": stack_name
+                  })
+                
+                # Log progress every 50 environments
+                if len(results) % 50 == 0:
+                  print(f"Processed {len(results)} environments...")
+            
+            return {"results": results}
+
+          def lambda_handler(event, context):
+            """Main handler - update all stateful stacks with latest DLM snapshots"""
+            print("Starting stateful stack snapshot update")
+            result = update_all_stateful_stacks()
+            print(f"Update results: {result}")
+            return result
+
+  # --- scheduled rule to trigger snapshot updates ---
+  SnapshotUpdateRule:
+    Type: AWS::Events::Rule
+    Properties:
+      State: ENABLED
+      Name: ephemeral-snapshot-update-trigger
+      Description: Update all stateful stacks with latest DLM snapshots
+      ScheduleExpression: cron(50 12 * * ? *)  # 10 minutes before 1 PM UTC wake-up. (12:50 PM UTC). The reason for this is because when updating the stack, it sets desired count to 1; causing the service to spin up.
+      Targets:
+        - Arn: !GetAtt StatefulStackSnapshotUpdater.Arn
+          Id: StatefulStackSnapshotUpdaterTarget
+
+  StatefulStackSnapshotUpdaterInvokePermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !Ref StatefulStackSnapshotUpdater
+      Action: lambda:InvokeFunction
+      Principal: events.amazonaws.com
+      SourceArn: !GetAtt SnapshotUpdateRule.Arn
+
+  statefulStackUpdaterLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/lambda/${StatefulStackSnapshotUpdater}"
+      RetentionInDays: 7
+
+  # --- IAM role for the stateful stack updater ---
+  StatefulStackUpdaterRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: "2012-10-17"
+        Statement:
+          - Effect: Allow
+            Principal: { Service: lambda.amazonaws.com }
+            Action: sts:AssumeRole
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/service-role/AWSLambdaBasicExecutionRole
+      Policies:
+        - PolicyName: StatefulStackUpdatePermissions
+          PolicyDocument:
+            Version: "2012-10-17"
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeSnapshots
+                  - ec2:DescribeVpcs
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - ecs:DescribeClusters
+                  - ecs:DescribeServices
+                  - ecs:UpdateService
+                  - ecs:ListTasks
+                  - ecs:DescribeTaskDefinition
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - elasticloadbalancing:Describe*
+                  - servicediscovery:List*
+                  - servicediscovery:Get*
+                  - logs:Describe*
+                  - ec2:Describe*
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - iam:GetRole
+                  - iam:ListRoles
+                  - iam:PassRole
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - cloudformation:DescribeStacks
+                  - cloudformation:ListStacks
+                  - cloudformation:DescribeStackResources
+                  - cloudformation:DescribeStackEvents
+                  - cloudformation:GetTemplate
+                  - cloudformation:GetTemplateSummary
+                  - cloudformation:UpdateStack
+                Resource: "*"
+              - Effect: Allow
+                Action:
+                  - kms:DescribeKey
+                  - kms:CreateGrant
+                  - kms:Encrypt
+                  - kms:Decrypt
+                  - kms:ReEncrypt*
+                  - kms:GenerateDataKey*
+                Resource: "*"
+
+
+Outputs:
+  autoScalingRoleArn:
+    Description: Autoscaling Role ARN
+    Value: !GetAtt autoScalingRole.Arn
+    Export:
+      Name: !Sub ${AWS::StackName}:AutoScalingRoleArn
