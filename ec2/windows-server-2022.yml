@@ -1,0 +1,143 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Deploys an EC2 instance with S3 and SSM permissions
+
+Parameters:
+  pAmiId:
+    Type: AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>
+    Description: Mapping to retrieve the latest Windows Server 2022 AMI.
+    Default: /aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base
+    AllowedValues:
+      - /aws/service/ami-windows-latest/Windows_Server-2022-English-Full-Base
+      - /aws/service/ami-windows-latest/Windows_Server-2022-English-Core-Base
+
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Id of the VPC to deploy the instance to.
+  
+  pEc2InstancePrivateSubnet:
+    Type: AWS::EC2::Subnet::Id
+    Description: VPC private subnet ID for instance deployment
+
+  pEc2InstanceType:
+    Type: String
+    Description: Instance type for the EC2 instance
+    Default: c7i-flex.2xlarge
+
+  pRootVolumeSizeGiB:
+    Type: Number
+    Default: 100
+    Description: Root EBS volume size (GiB)
+
+  pRootVolumeIops:
+    Type: Number
+    Default: 3000
+    Description: gp3 IOPS for root volume
+
+  pRootVolumeKmsKeyId:
+    Type: String
+    Default: ''
+    Description: (Optional) KMS Key ID or full ARN to encrypt root EBS volume. Uses Default encryption if not specified.
+
+Conditions:
+  CondUseRootKms: !Not [ !Equals [ !Ref pRootVolumeKmsKeyId, '' ] ]
+
+Resources:
+  # IAM Role for EC2 Instance with SSM Permissions
+  EC2InstanceRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: ec2.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: SSMAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              # Allows access to SSM
+              - Effect: Allow
+                Action:
+                  - ssm:DescribeInstanceInformation
+                  - ssm:GetCommandInvocation
+                  - ssm:ListCommandInvocations
+                  - ssm:SendCommand
+                  - ssm:StartSession
+                  - ec2messages:GetMessages
+                  - ec2messages:AcknowledgeMessage
+                  - ec2messages:SendReply
+                  - ec2messages:DeleteMessage
+                Resource: "*"
+      ManagedPolicyArns:
+        - arn:aws:iam::aws:policy/AmazonSSMManagedInstanceCore
+
+  # Instance Profile for EC2 Instance
+  EC2InstanceProfile:
+    Type: AWS::IAM::InstanceProfile
+    Properties:
+      Roles:
+        - Ref: EC2InstanceRole
+
+  # Security Group for EC2 Instance
+  EC2SecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Allow SSH and HTTP access
+      VpcId: !Ref pVpcId
+      SecurityGroupIngress:
+        # - IpProtocol: tcp
+        #   FromPort: 22
+        #   ToPort: 22
+        #   CidrIp: 0.0.0.0/0  # Only use this for testing. Restrict IPs in production.
+        # Allow SQL Server access
+        - IpProtocol: tcp
+          FromPort: 1433
+          ToPort: 1433
+          CidrIp: 0.0.0.0/0
+
+  # EC2 Instance
+  EC2Instance:
+    Type: AWS::EC2::Instance
+    Properties:
+      InstanceType: !Ref pEc2InstanceType
+      IamInstanceProfile: !Ref EC2InstanceProfile
+      ImageId: !Ref pAmiId
+      SecurityGroupIds:
+        - !GetAtt EC2SecurityGroup.GroupId
+      SubnetId: !Ref pEc2InstancePrivateSubnet
+      Tags:
+        - Key: Name
+          Value: Windows Server 2022
+      BlockDeviceMappings:
+        - DeviceName: /dev/sda1
+          Ebs:
+            VolumeType: gp3
+            VolumeSize: !Ref pRootVolumeSizeGiB
+            Iops: !Ref pRootVolumeIops
+            Encrypted: true
+            KmsKeyId: !If [ CondUseRootKms, !Ref pRootVolumeKmsKeyId, !Ref AWS::NoValue ]
+            DeleteOnTermination: true
+      # UserData: 
+      #   Fn::Base64: !Sub |
+      #     <powershell>
+      #     # Install CloudFormation helper scripts (cfn-init, cfn-signal)
+      #     $msiUrl = "https://s3.amazonaws.com/cloudformation-examples/aws-cfn-bootstrap-win64-latest.msi"
+      #     $msiPath = "$env:TEMP\aws-cfn-bootstrap.msi"
+      #     Invoke-WebRequest -Uri $msiUrl -OutFile $msiPath
+      #     Start-Process msiexec.exe -ArgumentList "/i `"$msiPath`" /qn" -Wait
+
+      #     # Signal CloudFormation that initialization completed successfully
+      #     & "C:\\Program Files\\Amazon\\cfn-bootstrap\\cfn-signal.exe" --stack ${AWS::StackName} --resource EC2Instance --region ${AWS::Region} -e 0
+      #     </powershell>
+
+    # CreationPolicy:
+    #   ResourceSignal:
+    #     Timeout: PT3H # Timeout of 3 hours
+
+Outputs:
+  InstanceId:
+    Description: The EC2 instance ID
+    Value: !Ref EC2Instance
