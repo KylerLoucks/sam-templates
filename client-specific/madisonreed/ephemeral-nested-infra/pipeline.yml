@@ -48,36 +48,59 @@ Parameters:
     Description: Base image used by CodeBuild
     Default: aws/codebuild/standard:7.0
 
-  # BUILDSPECPATHS
-  pLabelPRBuildSpecPath:
-    Type: String
-    Description: Path and name for the Buildspec in repo
-    Default: buildspec.yml
+  # TODO: pass these params to deploy
+  # # Stateful Services
+  # pMongoEcrImageUri:
+  #   Type: String
+  #   Description: URI of the ECR image used for Mongo Task Definition.
+  #   Default: public.ecr.aws/docker/library/mongo:7.0
+  #   Default: ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/mongo:7.0
 
+  # pMysqlEcrImageUri:
+  #   Type: String
+  #   Description: URI of the ECR image used for MySQL Task Definition.
+  #   Default: public.ecr.aws/docker/library/mysql:8.0
+
+  # pRedisEcrImageUri:
+  #   Type: String
+  #   Description: URI of the ECR image used for Redis Task Definition.
+  #   Default: public.ecr.aws/docker/library/redis:7.0.15
+
+  # BUILDSPECPATHS
   pPilkoBuildSpecPath:
     Type: String
     Description: Path and name for the Buildspec in repo
-    Default: buildspec.yml
+    Default: ephemeralenv/buildspec-pilko.yml
 
-  pWebsiteBuildSpecPath:
+  pLabelPRBuildSpecPath:
     Type: String
     Description: Path and name for the Buildspec in repo
-    Default: buildspec.yml
-
-  pTophatBuildSpecPath:
-    Type: String
-    Description: Path and name for the Buildspec in repo
-    Default: buildspec.yml
+    Default: ephemeralenv/buildspec-labels.yml
 
   pApiServerBuildSpecPath:
     Type: String
     Description: Path and name for the Buildspec in repo
-    Default: buildspec.yml
+    Default: ephemeralenv/buildspec-apiserver.yml
+
+  pTophatBuildSpecPath:
+    Type: String
+    Description: Path and name for the Buildspec in repo
+    Default: ephemeralenv/buildspec-tophat.yml
+
+  pWebsiteBuildSpecPath:
+    Type: String
+    Description: Path and name for the Buildspec in repo
+    Default: ephemeralenv/buildspec-website.yml
+
+  pColoristBuildSpecPath:
+    Type: String
+    Description: Path and name for the Buildspec in repo
+    Default: ephemeralenv/buildspec-colorist.yml
 
   pDeployBuildSpecPath:
     Type: String
     Description: Path and name for the Buildspec in repo
-    Default: buildspec.yml
+    Default: ephemeralenv/buildspec-deploy.yml
 
   pDeployLambdasBuildSpecPath:
     Type: String
@@ -88,6 +111,18 @@ Parameters:
     Type: String
     Description: Route53 Hosted Zone Name
     Default: dev.mdsnrdfd.com
+
+  # VPC params required for internal CodeBuild placement
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: ID of the Virtual Private Network (VPC)
+    Default: vpc-09ef4a53e9290ca17
+  pPrivateSubnetId1:
+    Type: String
+    Default: subnet-01086857935bfcf34
+  pPrivateSubnetId2:
+    Type: String
+    Default: subnet-056e57e04fea05dd5
 
 Metadata:
   AWS::CloudFormation::Interface:
@@ -126,14 +161,6 @@ Metadata:
           - pCodeBuildImage
 
 Resources:
-
-
-  ecrWebsiteRepo:
-    Type: AWS::ECR::Repository
-    Properties:
-      RepositoryName: !Sub website-${pAppName}
-      EmptyOnDelete: true
-
   ecrApiServerRepo:
     Type: AWS::ECR::Repository
     Properties:
@@ -146,6 +173,18 @@ Resources:
       RepositoryName: !Sub tophat-${pAppName}
       EmptyOnDelete: true
 
+  ecrWebsiteRepo:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub website-${pAppName}
+      EmptyOnDelete: true
+
+  ecrColoristRepo:
+    Type: AWS::ECR::Repository
+    Properties:
+      RepositoryName: !Sub colorist-${pAppName}
+      EmptyOnDelete: true
+
   lambdaFunctionsRepo:
     Type: AWS::ECR::Repository
     Properties:
@@ -153,7 +192,6 @@ Resources:
       EmptyOnDelete: true
 
   # IAM Role - CodeBuild
-
   codeBuildServiceRole:
     Type: AWS::IAM::Role
     Properties:
@@ -229,11 +267,12 @@ Resources:
                   - ecr:PutImage
                   - ecr:GetDownloadUrlForLayer
                 Resource:
-                  - !GetAtt ecrWebsiteRepo.Arn
-                  - !GetAtt ecrApiServerRepo.Arn
-                  - !GetAtt ecrTophatRepo.Arn
                   - !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/mysql-ephemeral
                   - !Sub arn:aws:ecr:${AWS::Region}:${AWS::AccountId}:repository/mongo-ephemeral
+                  - !GetAtt ecrApiServerRepo.Arn
+                  - !GetAtt ecrTophatRepo.Arn
+                  - !GetAtt ecrWebsiteRepo.Arn
+                  - !GetAtt ecrColoristRepo.Arn
                   - !GetAtt lambdaFunctionsRepo.Arn
         - PolicyName: BASE-ECR
           PolicyDocument: 
@@ -297,21 +336,81 @@ Resources:
                 Sid: AllowResourceCreation
                 Effect: Allow
                 Action:
-                  - route53:*
-                  - ecs:*
-                  - ec2:*
-                  - elasticloadbalancing:*
-                  - apigateway:*
-                  - logs:*
-                  - cloudwatch:*
-                  - lambda:*
-                  - events:*
-                  - servicediscovery:*
                   - acm:*
+                  - apigateway:*
                   - application-autoscaling:*
                   - cloudfront:*
+                  - cloudwatch:*
+                  - ec2:*
+                  - ecs:*
+                  - elasticloadbalancing:*
+                  - events:*
+                  - lambda:*
+                  - logs:*
+                  - route53:*
+                  - scheduler:*
+                  - servicediscovery:*
                 Resource: "*"
+        # Required permissions to place CodeBuild in the VPC
+        - PolicyName: CodeBuildSecurityGroupAttachment
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - ec2:CreateNetworkInterface
+                  - ec2:DescribeDhcpOptions
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DeleteNetworkInterface
+                  - ec2:DescribeSubnets
+                  - ec2:DescribeSecurityGroups
+                  - ec2:DescribeVpcs
+                  - ec2:CreateNetworkInterfacePermission
+                Resource: 
+                  - "*"
 
+  codeBuildSecurityGroup:
+    Type: AWS::EC2::SecurityGroup
+    Properties:
+      GroupDescription: Internal VPC CodeBuild Security Group
+      VpcId: !Ref pVpcId
+
+  codeBuildPilko:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${pAppName}-pilko
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: Lint and approve PR with mr-github-bot
+      Environment:
+        ComputeType: !Ref pCodeBuildComputeType
+        Image: !Ref pCodeBuildImage
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: ACCOUNT_ID  
+            Value: !Ref AWS::AccountId
+            Type: PLAINTEXT
+
+          - Name: APP_NAME 
+            Value: !Ref pAppName 
+            Type: PLAINTEXT
+
+      ServiceRole: !GetAtt codeBuildServiceRole.Arn
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Ref pPilkoBuildSpecPath
+      TimeoutInMinutes: 60
+      Cache:
+        Type: LOCAL
+        Modes:
+          - LOCAL_SOURCE_CACHE # Caches .git metadata so subsequent runs only pull change in commits
+
+  codeBuildPilkoLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/codebuild/${codeBuildPilko}"
+      RetentionInDays: 7
 
   codeBuildLabelPR:
     Type: AWS::CodeBuild::Project
@@ -338,7 +437,6 @@ Resources:
             Value: /GITHUB/ACCESS_TOKEN
             Type: PARAMETER_STORE
 
-
       ServiceRole: !GetAtt codeBuildServiceRole.Arn
       Source:
         Type: CODEPIPELINE
@@ -355,14 +453,13 @@ Resources:
       LogGroupName: !Sub "/aws/codebuild/${codeBuildLabelPR}"
       RetentionInDays: 7
 
-
-  codeBuildPilko:
+  codeBuildApiServer:
     Type: AWS::CodeBuild::Project
     Properties:
-      Name: !Sub ${pAppName}-pilko
+      Name: !Sub ${pAppName}-apiserver
       Artifacts:
         Type: CODEPIPELINE
-      Description: Lint and approve PR with mr-github-bot
+      Description: Build ECR image for API Server ECS service
       Environment:
         ComputeType: !Ref pCodeBuildComputeType
         Image: !Ref pCodeBuildImage
@@ -373,73 +470,44 @@ Resources:
             Value: !Ref AWS::AccountId
             Type: PLAINTEXT
 
+          - Name: BASE_IMAGE_REPO_NAME  
+            Value: base-image
+            Type: PLAINTEXT
+
+          - Name: BASE_IMAGE_TAG
+            Value: latest
+            Type: PLAINTEXT 
+
           - Name: APP_NAME 
             Value: !Ref pAppName 
             Type: PLAINTEXT
 
-
+          - Name: REPOSITORY_URI
+            Value: !GetAtt ecrApiServerRepo.RepositoryUri
+      # VPC required to access internal VPC resources
+      VpcConfig:
+        VpcId: !Ref pVpcId
+        Subnets: 
+          - !Ref pPrivateSubnetId1
+          - !Ref pPrivateSubnetId2
+        SecurityGroupIds:
+          - !GetAtt codeBuildSecurityGroup.GroupId
       ServiceRole: !GetAtt codeBuildServiceRole.Arn
       Source:
         Type: CODEPIPELINE
-        BuildSpec: !Ref pPilkoBuildSpecPath
+        BuildSpec: !Ref pApiServerBuildSpecPath
       TimeoutInMinutes: 60
       Cache:
         Type: LOCAL
         Modes:
+          - LOCAL_CUSTOM_CACHE
           - LOCAL_SOURCE_CACHE # Caches .git metadata so subsequent runs only pull change in commits
+          - LOCAL_DOCKER_LAYER_CACHE
 
-  codeBuildPilkoLogGroup:
+  codeBuildApiServerLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub "/aws/codebuild/${codeBuildPilko}"
-      RetentionInDays: 7
-
-  codeBuildDeploy:
-    Type: AWS::CodeBuild::Project
-    Properties:
-      Name: !Sub ${pAppName}-deploy
-      Artifacts:
-        Type: CODEPIPELINE
-      Description: Deploy/Update Ephemeral environment
-      Environment:
-        ComputeType: !Ref pCodeBuildComputeType
-        Image: !Ref pCodeBuildImage
-        Type: LINUX_CONTAINER
-        PrivilegedMode: true
-        EnvironmentVariables:
-          - Name: ACCOUNT_ID  
-            Value: !Ref AWS::AccountId
-            Type: PLAINTEXT
-
-          - Name: APP_NAME 
-            Value: !Ref pAppName 
-            Type: PLAINTEXT
-
-          - Name: SSH_KEY_FOR_SUBMODULE
-            Value: /GITHUB/SSH_KEY
-            Type: PARAMETER_STORE
-
-          - Name: WEBSITE_REPOSITORY_URI
-            Value: !GetAtt ecrWebsiteRepo.RepositoryUri
-          - Name: TOPHAT_REPOSITORY_URI
-            Value: !GetAtt ecrTophatRepo.RepositoryUri
-          - Name: APISERVER_REPOSITORY_URI
-            Value: !GetAtt ecrApiServerRepo.RepositoryUri
-
-      ServiceRole: !GetAtt codeBuildServiceRole.Arn
-      Source:
-        Type: CODEPIPELINE
-        BuildSpec: !Ref pDeployBuildSpecPath
-      TimeoutInMinutes: 180
-      Cache:
-        Type: LOCAL
-        Modes:
-          - LOCAL_SOURCE_CACHE # Caches .git metadata so subsequent runs only pull change in commits
-
-  codeBuildDeployLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub "/aws/codebuild/${codeBuildDeploy}"
+      LogGroupName: !Sub "/aws/codebuild/${codeBuildApiServer}"
       RetentionInDays: 7
 
   codeBuildTophat:
@@ -473,7 +541,14 @@ Resources:
 
           - Name: REPOSITORY_URI
             Value: !GetAtt ecrTophatRepo.RepositoryUri
-
+      # VPC required to access internal VPC resources
+      VpcConfig:
+        VpcId: !Ref pVpcId
+        Subnets: 
+          - !Ref pPrivateSubnetId1
+          - !Ref pPrivateSubnetId2
+        SecurityGroupIds:
+          - !GetAtt codeBuildSecurityGroup.GroupId
       ServiceRole: !GetAtt codeBuildServiceRole.Arn
       Source:
         Type: CODEPIPELINE
@@ -523,7 +598,14 @@ Resources:
 
           - Name: REPOSITORY_URI
             Value: !GetAtt ecrWebsiteRepo.RepositoryUri
-
+      # VPC required to access internal VPC resources
+      VpcConfig:
+        VpcId: !Ref pVpcId
+        Subnets: 
+          - !Ref pPrivateSubnetId1
+          - !Ref pPrivateSubnetId2
+        SecurityGroupIds:
+          - !GetAtt codeBuildSecurityGroup.GroupId
       ServiceRole: !GetAtt codeBuildServiceRole.Arn
       Source:
         Type: CODEPIPELINE
@@ -542,13 +624,70 @@ Resources:
       LogGroupName: !Sub "/aws/codebuild/${codeBuildWebsite}"
       RetentionInDays: 7
 
-  codeBuildApiServer:
+  codeBuildColorist:
     Type: AWS::CodeBuild::Project
     Properties:
-      Name: !Sub ${pAppName}-apiserver
+      Name: !Sub ${pAppName}-colorist
       Artifacts:
         Type: CODEPIPELINE
-      Description: Build ECR image for API Server ECS service
+      Description: Build ECR image for Colorist ECS service
+      Environment:
+        ComputeType: !Ref pCodeBuildComputeType
+        Image: !Ref pCodeBuildImage
+        Type: LINUX_CONTAINER
+        PrivilegedMode: true
+        EnvironmentVariables:
+          - Name: ACCOUNT_ID
+            Value: !Ref AWS::AccountId
+            Type: PLAINTEXT
+
+          - Name: BASE_IMAGE_REPO_NAME
+            Value: base-image
+            Type: PLAINTEXT
+
+          - Name: BASE_IMAGE_TAG
+            Value: latest
+            Type: PLAINTEXT
+
+          - Name: APP_NAME
+            Value: !Ref pAppName
+            Type: PLAINTEXT
+
+          - Name: REPOSITORY_URI
+            Value: !GetAtt ecrColoristRepo.RepositoryUri
+      # VPC required to access internal VPC resources
+      VpcConfig:
+        VpcId: !Ref pVpcId
+        Subnets:
+          - !Ref pPrivateSubnetId1
+          - !Ref pPrivateSubnetId2
+        SecurityGroupIds:
+          - !GetAtt codeBuildSecurityGroup.GroupId
+      ServiceRole: !GetAtt codeBuildServiceRole.Arn
+      Source:
+        Type: CODEPIPELINE
+        BuildSpec: !Ref pColoristBuildSpecPath
+      TimeoutInMinutes: 60
+      Cache:
+        Type: LOCAL
+        Modes:
+          - LOCAL_CUSTOM_CACHE
+          - LOCAL_SOURCE_CACHE # Caches .git metadata so subsequent runs only pull change in commits
+          - LOCAL_DOCKER_LAYER_CACHE
+
+  codeBuildColoristLogGroup:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub "/aws/codebuild/${codeBuildColorist}"
+      RetentionInDays: 7
+
+  codeBuildDeploy:
+    Type: AWS::CodeBuild::Project
+    Properties:
+      Name: !Sub ${pAppName}-deploy
+      Artifacts:
+        Type: CODEPIPELINE
+      Description: Deploy/Update Ephemeral environment
       Environment:
         ComputeType: !Ref pCodeBuildComputeType
         Image: !Ref pCodeBuildImage
@@ -559,37 +698,58 @@ Resources:
             Value: !Ref AWS::AccountId
             Type: PLAINTEXT
 
-          - Name: BASE_IMAGE_REPO_NAME  
-            Value: base-image
-            Type: PLAINTEXT
-
-          - Name: BASE_IMAGE_TAG
-            Value: latest
-            Type: PLAINTEXT 
-
           - Name: APP_NAME 
             Value: !Ref pAppName 
             Type: PLAINTEXT
 
-          - Name: REPOSITORY_URI
+          - Name: SSH_KEY_FOR_SUBMODULE
+            Value: /GITHUB/SSH_KEY
+            Type: PARAMETER_STORE
+
+          # # TODO: pass these params to deploy
+          # - Name: MYSQL_IMAGE_URI
+          #   Value: !Ref pMysqlEcrImageUri
+
+          # - Name: MONGO_IMAGE_URI
+          #   Value: !Ref pMongoEcrImageUri
+
+          # - Name: REDIS_IMAGE_URI
+          #   Vale: !Ref pRedisEcrImageUri
+
+          - Name: APISERVER_REPOSITORY_URI
             Value: !GetAtt ecrApiServerRepo.RepositoryUri
 
+          - Name: TOPHAT_REPOSITORY_URI
+            Value: !GetAtt ecrTophatRepo.RepositoryUri
+
+          - Name: WEBSITE_REPOSITORY_URI
+            Value: !GetAtt ecrWebsiteRepo.RepositoryUri
+
+          - Name: COLORIST_REPOSITORY_URI
+            Value: !GetAtt ecrColoristRepo.RepositoryUri
+
+      # VPC required to access internal VPC resources
+      VpcConfig:
+        VpcId: !Ref pVpcId
+        Subnets: 
+          - !Ref pPrivateSubnetId1
+          - !Ref pPrivateSubnetId2
+        SecurityGroupIds:
+          - !GetAtt codeBuildSecurityGroup.GroupId
       ServiceRole: !GetAtt codeBuildServiceRole.Arn
       Source:
         Type: CODEPIPELINE
-        BuildSpec: !Ref pApiServerBuildSpecPath
-      TimeoutInMinutes: 60
+        BuildSpec: !Ref pDeployBuildSpecPath
+      TimeoutInMinutes: 180
       Cache:
         Type: LOCAL
         Modes:
-          - LOCAL_CUSTOM_CACHE
           - LOCAL_SOURCE_CACHE # Caches .git metadata so subsequent runs only pull change in commits
-          - LOCAL_DOCKER_LAYER_CACHE
 
-  codeBuildApiServerLogGroup:
+  codeBuildDeployLogGroup:
     Type: AWS::Logs::LogGroup
     Properties:
-      LogGroupName: !Sub "/aws/codebuild/${codeBuildApiServer}"
+      LogGroupName: !Sub "/aws/codebuild/${codeBuildDeploy}"
       RetentionInDays: 7
 
   codeBuildLambdas:
@@ -598,9 +758,9 @@ Resources:
       Name: !Sub ${pAppName}-deploy-lambdas
       Artifacts:
         Type: CODEPIPELINE
-      Description: Deploy/Update Lambdas
+      Description: Deploy/Update Colorist
       Environment:
-        ComputeType: BUILD_GENERAL1_MEDIUM
+        ComputeType: !Ref pCodeBuildComputeType
         Image: !Ref pCodeBuildImage
         Type: LINUX_CONTAINER
         PrivilegedMode: true
@@ -609,7 +769,7 @@ Resources:
             Value: !Ref AWS::AccountId
             Type: PLAINTEXT
 
-          # All these envs are required to allow connectivity from Lambdas
+          # All these envs are required to allow connectivity from Colorist
           - Name: REDIS_HOST
             Value: !Sub redis-ecs.${pAppName}.cloudmap.internal
           - Name: MONGO_HOST
@@ -632,7 +792,7 @@ Resources:
             Value: !Sub ${pAppName}.coloradvisor.${pHostedZoneName}/coloradvisor/
 
           # Gulp Lambda config
-          - Name: GULP_LAMBDA_API_ID # Empty API GW (Should be removed at some point)
+          - Name: GULP_LAMBDA_API_ID # Empty API GW (REMOVE!)
             Value: asct374564
           - Name: GULP_LAMBDA_IAM_ROLE_ARN # Lambda Execution Role ARN
             Value: !Sub arn:aws:iam::${AWS::AccountId}:role/ConsumerLambdaRole
@@ -640,7 +800,14 @@ Resources:
             Value: sg-08d325adcfc900ceb 
           - Name: GULP_LAMBDA_SUBNET_ID # Private1a Subnet
             Value: subnet-01086857935bfcf34
-
+      # VPC required to access internal VPC resources
+      VpcConfig:
+        VpcId: !Ref pVpcId
+        Subnets: 
+          - !Ref pPrivateSubnetId1
+          - !Ref pPrivateSubnetId2
+        SecurityGroupIds:
+          - !GetAtt codeBuildSecurityGroup.GroupId
       ServiceRole: !GetAtt codeBuildServiceRole.Arn
       Source:
         Type: CODEPIPELINE
@@ -652,10 +819,8 @@ Resources:
     Properties:
       LogGroupName: !Sub "/aws/codebuild/${codeBuildLambdas}"
       RetentionInDays: 7
-      
-      
-  # IAM Role - CodePipeline    
 
+  # IAM Role - CodePipeline
   codePipelineServiceRole:
     Type: AWS::IAM::Role
     Properties:
@@ -693,11 +858,12 @@ Resources:
                   - codebuild:BatchGetBuildBatches
                   - codebuild:StartBuildBatch
                 Resource: 
-                  - !GetAtt codeBuildLabelPR.Arn
                   - !GetAtt codeBuildPilko.Arn
-                  - !GetAtt codeBuildWebsite.Arn
-                  - !GetAtt codeBuildTophat.Arn
+                  - !GetAtt codeBuildLabelPR.Arn
                   - !GetAtt codeBuildApiServer.Arn
+                  - !GetAtt codeBuildTophat.Arn
+                  - !GetAtt codeBuildWebsite.Arn
+                  - !GetAtt codeBuildColorist.Arn
                   - !GetAtt codeBuildDeploy.Arn
                   - !GetAtt codeBuildLambdas.Arn
               - Effect: Allow
@@ -724,9 +890,7 @@ Resources:
                   - iam:PassRole
                 Resource: 
                   - "*"
-          
 
-      
  # CodePipeline
 
   artifactBucket:
@@ -782,6 +946,7 @@ Resources:
                   - "s3:GetObject"
                   - "s3:DeleteObject"
                   - "s3:DeleteObjectVersion"
+                  - "s3:PutBucketPolicy"
                 Resource:
                   - !Sub "arn:aws:s3:::${artifactBucket}"
                   - !Sub "arn:aws:s3:::${artifactBucket}/*"
@@ -812,23 +977,38 @@ Resources:
             logger.info("Received event: %s" % json.dumps(event))
             bucket = s3.Bucket(event['ResourceProperties']['Bucket'])
 
-            result = cfnresponse.SUCCESS
-
             try:
-              if event['RequestType'] == 'Create' or event['RequestType'] == 'Update':
-                result = cfnresponse.SUCCESS
-              elif event['RequestType'] == 'Delete':
-                result = delete_objects(bucket)
-            except ClientError as e:
-              logger.error('Error: %s', e)
-              result = cfnresponse.FAILED
+                # No work on Create/Update
+                if event['RequestType'] == 'Delete':
+                    delete_objects(bucket)
+                # If we get here, everything succeeded
+                cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+            except Exception as e:
+                # Log full stack and notify CloudFormation of failure
+                logger.exception("Cleanup failed")
+                cfnresponse.send(event, context, cfnresponse.FAILED, {})
 
-            cfnresponse.send(event, context, result, {})
+          def delete_objects(bucket):   
+            name = bucket.name
+            # 1) Attach Deny policy to block new uploads
+            deny_policy = {
+              "Version": "2012-10-17",
+              "Statement": [{
+                "Effect": "Deny",
+                "Principal": "*",
+                "Action": "s3:PutObject",
+                "Resource": f"arn:aws:s3:::{name}/*"
+              }]
+            }
+            bucket.Policy().put(Policy=json.dumps(deny_policy))
 
-          def delete_objects(bucket):        
+            # 2) Delete all objects in the bucket
             bucket.object_versions.delete()
             bucket.objects.all().delete()
             return cfnresponse.SUCCESS
+      Tags:
+        - Key: resource:createdBy
+          Value: Cloudformation
             
   cleanupLambdaLogGroup:
     Type: AWS::Logs::LogGroup
@@ -839,18 +1019,23 @@ Resources:
   codePipeline:
     Type: AWS::CodePipeline::Pipeline
     Properties:
+      PipelineType: V2
+      RestartExecutionOnUpdate: false
+
+      Name: !Sub ${pAppName}-pipeline
+      RoleArn: !GetAtt codePipelineServiceRole.Arn
+
       ArtifactStore:
         Location: !Ref artifactBucket
         Type: S3
-      Name: !Sub ${pAppName}-pipeline
-      RoleArn: !GetAtt codePipelineServiceRole.Arn
-      PipelineType: V2
-      RestartExecutionOnUpdate: false
+
       Variables:
         - Name: PR_ID
           Description: Pull Request ID (e.g. 123456)
+
         - Name: PR_EVENT
           Description: 'Type of PR event. Valid values: [opened, synchronize, reopened, closed]'
+          
       Stages:
         - Name: Source
           Actions:
@@ -869,9 +1054,10 @@ Resources:
                 OutputArtifactFormat: CODEBUILD_CLONE_REF # Code Build Git Full Clone
               OutputArtifacts:
                 - Name: SourceArtifact
-        - Name: Lint
+
+        - Name: Build
           Actions:
-            # - Name: PilkoLint
+            # - Name: CheckLint   # TODO: disabled why?
             #   ActionTypeId:
             #     Category: Build
             #     Owner: AWS
@@ -886,7 +1072,8 @@ Resources:
             #   OutputArtifacts:
             #     - Name: BuildArtifactPilko
             #   RunOrder: 1
-            - Name: MergeConflicts
+
+            - Name: CheckConflicts
               ActionTypeId:
                 Category: Build
                 Owner: AWS
@@ -901,8 +1088,7 @@ Resources:
               OutputArtifacts:
                 - Name: BuildArtifactLabelPR
               RunOrder: 1
-        - Name: Build
-          Actions:
+
             - Name: ManualApproval
               ActionTypeId:
                 Category: Approval
@@ -912,21 +1098,6 @@ Resources:
               Configuration:
                 CustomData: "Approve ephemeral deployment. Pull Request#: #{variables.PR_ID}"
                 ExternalEntityLink: !Sub "https://github.com/${pRepoOwner}/${pRepoName}/commit/#{SourceVariables.CommitId}"
-              RunOrder: 1
-
-            - Name: BuildTophat
-              ActionTypeId:
-                Category: Build
-                Owner: AWS
-                Provider: CodeBuild
-                Version: 1
-              Configuration:
-                ProjectName: !Ref codeBuildTophat
-                EnvironmentVariables: '[{"name": "PULL_REQUEST_ID", "value": "#{variables.PR_ID}"}, {"name": "PR_EVENT", "value": "#{variables.PR_EVENT}"}]'
-              InputArtifacts:
-                - Name: SourceArtifact
-              OutputArtifacts:
-                - Name: BuildArtifactTophat
               RunOrder: 2
 
             - Name: BuildApiServer
@@ -942,7 +1113,22 @@ Resources:
                 - Name: SourceArtifact
               OutputArtifacts:
                 - Name: BuildArtifactApiServer
-              RunOrder: 2
+              RunOrder: 3
+
+            - Name: BuildTophat
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              Configuration:
+                ProjectName: !Ref codeBuildTophat
+                EnvironmentVariables: '[{"name": "PULL_REQUEST_ID", "value": "#{variables.PR_ID}"}, {"name": "PR_EVENT", "value": "#{variables.PR_EVENT}"}]'
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildArtifactTophat
+              RunOrder: 3
 
             - Name: BuildWebsite
               ActionTypeId:
@@ -957,9 +1143,26 @@ Resources:
                 - Name: SourceArtifact
               OutputArtifacts:
                 - Name: BuildArtifactWebsite
-              RunOrder: 2
+              RunOrder: 3
 
-            - Name: DeployECS
+            - Name: BuildColorist
+              ActionTypeId:
+                Category: Build
+                Owner: AWS
+                Provider: CodeBuild
+                Version: 1
+              Configuration:
+                ProjectName: !Ref codeBuildColorist
+                EnvironmentVariables: '[{"name": "PULL_REQUEST_ID", "value": "#{variables.PR_ID}"}, {"name": "PR_EVENT", "value": "#{variables.PR_EVENT}"}]'
+              InputArtifacts:
+                - Name: SourceArtifact
+              OutputArtifacts:
+                - Name: BuildArtifactColorist
+              RunOrder: 3
+
+        - Name: Deploy
+          Actions:
+            - Name: DeployServices
               ActionTypeId:
                 Category: Build
                 Owner: AWS
@@ -972,16 +1175,14 @@ Resources:
                 - Name: SourceArtifact
               OutputArtifacts:
                 - Name: BuildArtifact
-              RunOrder: 3
-        - Name: DeployLambdas
-          Actions:
+              RunOrder: 1
+
             - Name: DeployLambdas
               ActionTypeId:
                 Category: Build
                 Owner: AWS
                 Provider: CodeBuild
                 Version: 1
-              RunOrder: 1
               Configuration:
                 ProjectName: !Ref codeBuildLambdas
                 EnvironmentVariables: '[{"name": "PULL_REQUEST_ID", "value": "#{variables.PR_ID}"}, {"name": "PR_EVENT", "value": "#{variables.PR_EVENT}"}]'
@@ -989,9 +1190,9 @@ Resources:
                 - Name: SourceArtifact
               OutputArtifacts:
                 - Name: BuildArtifactLambdas
+              RunOrder: 2
 
 Outputs:
-
   Version:
     Description: Template Version
     Value: ephemeral-pipeline-1.0
