@@ -33,6 +33,11 @@ Parameters:
     Default: 3000
     Description: gp3 IOPS for root volume
 
+  pKeyName:
+    Type: AWS::EC2::KeyPair::KeyName
+    Default: ''
+    Description: Key pair name for the EC2 instance
+
   pRootVolumeKmsKeyId:
     Type: String
     Default: ''
@@ -85,7 +90,7 @@ Resources:
   EC2SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow SSH and HTTP access
+      GroupDescription: Allow RDP and HTTP access
       VpcId: !Ref pVpcId
       SecurityGroupIngress:
         # - IpProtocol: tcp
@@ -108,6 +113,7 @@ Resources:
       SecurityGroupIds:
         - !GetAtt EC2SecurityGroup.GroupId
       SubnetId: !Ref pEc2InstancePrivateSubnet
+      KeyName: !Ref pKeyName
       Tags:
         - Key: Name
           Value: Windows Server 2022
