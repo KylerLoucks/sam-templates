@@ -1,0 +1,31 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: Org-wide SOC2 AWS Config Conformance Pack
+
+
+Parameters:
+  pTemplateS3Uri:
+    Type: String
+    Description: S3 URI of the template to deploy
+    Default: s3://my-artifacts-bucket/conformance-packs/soc2-aws-config-conformance-pack.yml
+
+Resources:
+  OrgSoc2Pack:
+    Type: AWS::Config::OrganizationConformancePack
+    Properties:
+      OrganizationConformancePackName: org-soc2-aws-config-pack
+      TemplateS3Uri: !Ref pTemplateS3Uri
+      ConformancePackInputParameters:
+        - ParameterName: AccessKeysRotatedParamMaxAccessKeyAge
+          ParameterValue: '90'
+        - ParameterName: ElbCustomSecurityPolicySslCheckParamSslProtocolsAndCiphers
+          ParameterValue: 'Protocol-TLSv1.2'
+        - ParameterName: ElbPredefinedSecurityPolicySslCheckParamPredefinedPolicyName
+          ParameterValue: 'ELBSecurityPolicy-TLS-1-2-2017-01'
+        - ParameterName: CloudwatchAlarmActionCheckParamAlarmActionRequired
+          ParameterValue: 'true'
+        - ParameterName: CloudwatchAlarmActionCheckParamInsufficientDataActionRequired
+          ParameterValue: 'true'
+        - ParameterName: CloudwatchAlarmActionCheckParamOkActionRequired
+          ParameterValue: 'false'
+        - ParameterName: IamUserUnusedCredentialsCheckParamMaxCredentialUsageAge
+          ParameterValue: '90'

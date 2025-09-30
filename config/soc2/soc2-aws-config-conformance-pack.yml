@@ -1245,16 +1245,8 @@ Resources:
     Type: AWS::Config::ConfigRule
   WafClassicLoggingEnabled:
     Controls:
-    - CC7.3
-    Properties:
-      ConfigRuleName: waf-classic-logging-enabled
-      Source:
-        Owner: AWS
-        SourceIdentifier: WAF_CLASSIC_LOGGING_ENABLED
-    Type: AWS::Config::ConfigRule
-  WafClassicLoggingEnabled:
-    Controls:
     - CC7.2
+    - CC7.3
     - A1.2
     Properties:
       ConfigRuleName: waf-classic-logging-enabled
