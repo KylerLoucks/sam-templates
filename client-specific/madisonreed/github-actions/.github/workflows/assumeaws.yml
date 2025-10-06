@@ -18,7 +18,7 @@ on:
 jobs: 
   deploy: 
     # Only trigger workflow when target branch matches criteria
-    if: startsWith(github.head_ref, 'c303')
+    if: startsWith(github.event.pull_request.head.ref, 'c303')
     runs-on: ubuntu-latest 
     #These permissions are needed to interact with GitHub's OIDC Token endpoint. 
     permissions: 
@@ -26,6 +26,14 @@ jobs:
       contents: read
 
     steps:
+
+      - name: Debug context
+        run: |
+          echo "action=${{ github.event.action }}"
+          echo "head.ref=${{ github.event.pull_request.head.ref }}"
+          echo "github.head_ref=${{ github.head_ref }}"
+          echo "pr.number=${{ github.event.pull_request.number }}"
+
       - name: Checkout code 
         uses: actions/checkout@v3 
 
@@ -39,9 +47,11 @@ jobs:
         uses: actions/setup-python@v3
         with:
           python-version: '3.10'
-
+      
+      # ---------- DEPLOY PATH (skip on closed) ----------
       # Used for conditionally deploying the Pipeline stack only if the stack doesn't already exist.
       - name: Check Pipeline Stack Exists
+        if: github.event.action != 'closed'
         id: check_stack
         run: |
           if aws cloudformation describe-stacks --stack-name pr${{github.event.pull_request.number}}-pipeline; then
@@ -53,12 +63,12 @@ jobs:
           fi
           
       - name: Install AWS SAM CLI
-        if: steps.check_stack.outputs.stack_exists == 'false'
+        if: ${{ github.event.action != 'closed' && steps.check_stack.outputs.stack_exists == 'false' }}
         run: |
           pip install aws-sam-cli
 
       - name: Deploy Pipeline Stack
-        if: steps.check_stack.outputs.stack_exists == 'false'
+        if: ${{ github.event.action != 'closed' && steps.check_stack.outputs.stack_exists == 'false' }}
         run: |
           sam --version
           ls -la
@@ -70,12 +80,12 @@ jobs:
             pAppName=pr${{github.event.pull_request.number}} \
             pTriggerBranch=${GITHUB_HEAD_REF} \
             pCodestarConnectionArn=arn:aws:codestar-connections:us-east-1:174743933558:connection/d27c0b2b-88c2-45ac-b8f4-89b0e04af6fd \
-            pWebsiteBuildSpecPath=ephemeralenv/buildspec-website.yml \
-            pTophatBuildSpecPath=ephemeralenv/buildspec-tophat.yml \
             pApiServerBuildSpecPath=ephemeralenv/buildspec-apiserver.yml \
+            pTophatBuildSpecPath=ephemeralenv/buildspec-tophat.yml \
+            pWebsiteBuildSpecPath=ephemeralenv/buildspec-website.yml \
+            pColoristBuildSpecPath=ephemeralenv/buildspec-colorist.yml \
             pDeployBuildSpecPath=ephemeralenv/buildspec-deploy.yml \
-            pPilkoBuildSpecPath=ephemeralenv/buildspec-pilko.yml \
-            pLabelPRBuildSpecPath=ephemeralenv/buildspec-labels.yml \
+            pDeployLambdasBuildSpecPath=buildspec-buildlambdafunctionsv3.yml \
           --stack-name pr${{github.event.pull_request.number}}-pipeline \
           --tags CleanupDate=$(date -u -d "+10 days" '+%Y-%m-%dT%H:%M:%SZ') \
           --no-confirm-changeset \
@@ -95,6 +105,15 @@ jobs:
         if: github.event.action == 'closed'
         run: |
           echo "PR was closed, cleaning up resources..."
+          
+          # Delete stacks that depend on the stateful services first
           aws cloudformation delete-stack --stack-name pr${{github.event.pull_request.number}}-ephemeral --output text
           aws cloudformation delete-stack --stack-name pr${{github.event.pull_request.number}}-pipeline --output text
           aws cloudformation delete-stack --stack-name pr${{github.event.pull_request.number}}-coloradvisor --output text
+          
+          # Wait for the ephemeral stack to be fully deleted before deleting stateful stack
+          echo "Waiting for ephemeral stack to be fully deleted..."
+          aws cloudformation wait stack-delete-complete --stack-name pr${{github.event.pull_request.number}}-ephemeral
+          
+          # Now safe to delete the stateful stack
+          aws cloudformation delete-stack --stack-name pr${{github.event.pull_request.number}}-stateful --output text

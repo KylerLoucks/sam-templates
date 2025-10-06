@@ -48,35 +48,23 @@ Parameters:
     Description: Base image used by CodeBuild
     Default: aws/codebuild/standard:7.0
 
-  # TODO: pass these params to deploy
-  # # Stateful Services
-  # pMongoEcrImageUri:
-  #   Type: String
-  #   Description: URI of the ECR image used for Mongo Task Definition.
-  #   Default: public.ecr.aws/docker/library/mongo:7.0
-  #   Default: ${AWS::AccountId}.dkr.ecr.${AWS::Region}.amazonaws.com/mongo:7.0
-
-  # pMysqlEcrImageUri:
-  #   Type: String
-  #   Description: URI of the ECR image used for MySQL Task Definition.
-  #   Default: public.ecr.aws/docker/library/mysql:8.0
-
-  # pRedisEcrImageUri:
-  #   Type: String
-  #   Description: URI of the ECR image used for Redis Task Definition.
-  #   Default: public.ecr.aws/docker/library/redis:7.0.15
-
-  # BUILDSPECPATHS
-  pPilkoBuildSpecPath:
+  # Stateful Services
+  pMongoEcrImageUri:
     Type: String
-    Description: Path and name for the Buildspec in repo
-    Default: ephemeralenv/buildspec-pilko.yml
+    Description: URI of the ECR image used for Mongo Task Definition.
+    Default: 174743933558.dkr.ecr.us-east-1.amazonaws.com/mongo:7.0
 
-  pLabelPRBuildSpecPath:
+  pMysqlEcrImageUri:
     Type: String
-    Description: Path and name for the Buildspec in repo
-    Default: ephemeralenv/buildspec-labels.yml
+    Description: URI of the ECR image used for MySQL Task Definition.
+    Default: 174743933558.dkr.ecr.us-east-1.amazonaws.com/mysql:8.0
 
+  pRedisEcrImageUri:
+    Type: String
+    Description: URI of the ECR image used for Redis Task Definition.
+    Default: 174743933558.dkr.ecr.us-east-1.amazonaws.com/redis:7.0.15
+
+  # Buildspec Paths
   pApiServerBuildSpecPath:
     Type: String
     Description: Path and name for the Buildspec in repo
@@ -375,84 +363,6 @@ Resources:
       GroupDescription: Internal VPC CodeBuild Security Group
       VpcId: !Ref pVpcId
 
-  codeBuildPilko:
-    Type: AWS::CodeBuild::Project
-    Properties:
-      Name: !Sub ${pAppName}-pilko
-      Artifacts:
-        Type: CODEPIPELINE
-      Description: Lint and approve PR with mr-github-bot
-      Environment:
-        ComputeType: !Ref pCodeBuildComputeType
-        Image: !Ref pCodeBuildImage
-        Type: LINUX_CONTAINER
-        PrivilegedMode: true
-        EnvironmentVariables:
-          - Name: ACCOUNT_ID  
-            Value: !Ref AWS::AccountId
-            Type: PLAINTEXT
-
-          - Name: APP_NAME 
-            Value: !Ref pAppName 
-            Type: PLAINTEXT
-
-      ServiceRole: !GetAtt codeBuildServiceRole.Arn
-      Source:
-        Type: CODEPIPELINE
-        BuildSpec: !Ref pPilkoBuildSpecPath
-      TimeoutInMinutes: 60
-      Cache:
-        Type: LOCAL
-        Modes:
-          - LOCAL_SOURCE_CACHE # Caches .git metadata so subsequent runs only pull change in commits
-
-  codeBuildPilkoLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub "/aws/codebuild/${codeBuildPilko}"
-      RetentionInDays: 7
-
-  codeBuildLabelPR:
-    Type: AWS::CodeBuild::Project
-    Properties:
-      Name: !Sub ${pAppName}-label-pr
-      Artifacts:
-        Type: CODEPIPELINE
-      Description: Add Labels to PRs via Github API
-      Environment:
-        ComputeType: !Ref pCodeBuildComputeType
-        Image: !Ref pCodeBuildImage
-        Type: LINUX_CONTAINER
-        PrivilegedMode: true
-        EnvironmentVariables:
-          - Name: ACCOUNT_ID  
-            Value: !Ref AWS::AccountId
-            Type: PLAINTEXT
-
-          - Name: APP_NAME 
-            Value: !Ref pAppName 
-            Type: PLAINTEXT
-
-          - Name: GITHUB_TOKEN
-            Value: /GITHUB/ACCESS_TOKEN
-            Type: PARAMETER_STORE
-
-      ServiceRole: !GetAtt codeBuildServiceRole.Arn
-      Source:
-        Type: CODEPIPELINE
-        BuildSpec: !Ref pLabelPRBuildSpecPath
-      TimeoutInMinutes: 60
-      Cache:
-        Type: LOCAL
-        Modes:
-          - LOCAL_SOURCE_CACHE # Caches .git metadata so subsequent runs only pull change in commits
-
-  codeBuildLabelPRLogGroup:
-    Type: AWS::Logs::LogGroup
-    Properties:
-      LogGroupName: !Sub "/aws/codebuild/${codeBuildLabelPR}"
-      RetentionInDays: 7
-
   codeBuildApiServer:
     Type: AWS::CodeBuild::Project
     Properties:
@@ -706,15 +616,17 @@ Resources:
             Value: /GITHUB/SSH_KEY
             Type: PARAMETER_STORE
 
-          # # TODO: pass these params to deploy
-          # - Name: MYSQL_IMAGE_URI
-          #   Value: !Ref pMysqlEcrImageUri
+          - Name: MYSQL_IMAGE_URI
+            Value: !Ref pMysqlEcrImageUri
+            Type: PLAINTEXT
 
-          # - Name: MONGO_IMAGE_URI
-          #   Value: !Ref pMongoEcrImageUri
+          - Name: MONGO_IMAGE_URI
+            Value: !Ref pMongoEcrImageUri
+            Type: PLAINTEXT
 
-          # - Name: REDIS_IMAGE_URI
-          #   Vale: !Ref pRedisEcrImageUri
+          - Name: REDIS_IMAGE_URI
+            Value: !Ref pRedisEcrImageUri
+            Type: PLAINTEXT
 
           - Name: APISERVER_REPOSITORY_URI
             Value: !GetAtt ecrApiServerRepo.RepositoryUri
@@ -769,6 +681,11 @@ Resources:
             Value: !Ref AWS::AccountId
             Type: PLAINTEXT
 
+          # This is needed by anything using lambdas
+          - Name: EPHEMERAL_ID 
+            Value: !Ref pAppName 
+            Type: PLAINTEXT
+
           # All these envs are required to allow connectivity from Colorist
           - Name: REDIS_HOST
             Value: !Sub redis-ecs.${pAppName}.cloudmap.internal
@@ -780,10 +697,6 @@ Resources:
             Value: root
           - Name: MYSQL_USER
             Value: root
-
-          - Name: EPHEMERAL_ID 
-            Value: !Ref pAppName 
-            Type: PLAINTEXT
 
           - Name: DOMAIN_NAME
             Value: !Sub ${pAppName}.${pHostedZoneName}
@@ -858,8 +771,6 @@ Resources:
                   - codebuild:BatchGetBuildBatches
                   - codebuild:StartBuildBatch
                 Resource: 
-                  - !GetAtt codeBuildPilko.Arn
-                  - !GetAtt codeBuildLabelPR.Arn
                   - !GetAtt codeBuildApiServer.Arn
                   - !GetAtt codeBuildTophat.Arn
                   - !GetAtt codeBuildWebsite.Arn
@@ -990,7 +901,7 @@ Resources:
 
           def delete_objects(bucket):   
             name = bucket.name
-            # 1) Attach Deny policy to block new uploads
+            # 1: Attach Deny policy to block new uploads
             deny_policy = {
               "Version": "2012-10-17",
               "Statement": [{
@@ -1002,7 +913,7 @@ Resources:
             }
             bucket.Policy().put(Policy=json.dumps(deny_policy))
 
-            # 2) Delete all objects in the bucket
+            # 2: Delete all objects in the bucket
             bucket.object_versions.delete()
             bucket.objects.all().delete()
             return cfnresponse.SUCCESS
@@ -1031,9 +942,11 @@ Resources:
 
       Variables:
         - Name: PR_ID
+          DefaultValue: !Select [1, !Split ["pr", !Sub "${pAppName}"]]
           Description: Pull Request ID (e.g. 123456)
 
         - Name: PR_EVENT
+          DefaultValue: 'synchronize'
           Description: 'Type of PR event. Valid values: [opened, synchronize, reopened, closed]'
           
       Stages:
@@ -1057,48 +970,7 @@ Resources:
 
         - Name: Build
           Actions:
-            # - Name: CheckLint   # TODO: disabled why?
-            #   ActionTypeId:
-            #     Category: Build
-            #     Owner: AWS
-            #     Provider: CodeBuild
-            #     Version: 1
-            #   Configuration:
-            #     ProjectName: !Ref codeBuildPilko
-            #     # Override existing or add additional env vars to the buildproject
-            #     EnvironmentVariables: '[{"name": "PULL_REQUEST_ID", "value": "#{variables.PR_ID}"}, {"name": "PR_EVENT", "value": "#{variables.PR_EVENT}"}]'
-            #   InputArtifacts:
-            #     - Name: SourceArtifact
-            #   OutputArtifacts:
-            #     - Name: BuildArtifactPilko
-            #   RunOrder: 1
-
-            - Name: CheckConflicts
-              ActionTypeId:
-                Category: Build
-                Owner: AWS
-                Provider: CodeBuild
-                Version: 1
-              Configuration:
-                ProjectName: !Ref codeBuildLabelPR
-                # Override existing or add additional env vars to the buildproject
-                EnvironmentVariables: '[{"name": "PULL_REQUEST_ID", "value": "#{variables.PR_ID}"}, {"name": "PR_EVENT", "value": "#{variables.PR_EVENT}"}]'
-              InputArtifacts:
-                - Name: SourceArtifact
-              OutputArtifacts:
-                - Name: BuildArtifactLabelPR
-              RunOrder: 1
-
-            - Name: ManualApproval
-              ActionTypeId:
-                Category: Approval
-                Owner: AWS
-                Provider: Manual
-                Version: 1
-              Configuration:
-                CustomData: "Approve ephemeral deployment. Pull Request#: #{variables.PR_ID}"
-                ExternalEntityLink: !Sub "https://github.com/${pRepoOwner}/${pRepoName}/commit/#{SourceVariables.CommitId}"
-              RunOrder: 2
+            # TODO: BuildNodeModules
 
             - Name: BuildApiServer
               ActionTypeId:
@@ -1191,6 +1063,129 @@ Resources:
               OutputArtifacts:
                 - Name: BuildArtifactLambdas
               RunOrder: 2
+
+  # Custom cleanup to stop in-progress pipeline executions and CodeBuild builds on stack delete
+  CleanupExecutionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      Path: /
+      AssumeRolePolicyDocument:
+        Version: 2012-10-17
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: Logs
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogGroup
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                Resource: '*'
+        - PolicyName: StopPipelineAndBuilds
+          PolicyDocument:
+            Version: 2012-10-17
+            Statement:
+              - Effect: Allow
+                Action:
+                  - codepipeline:ListPipelineExecutions
+                  - codepipeline:StopPipelineExecution
+                Resource: '*'
+              - Effect: Allow
+                Action:
+                  - codebuild:ListBuildsForProject
+                  - codebuild:StopBuild
+                Resource: '*'
+
+  CleanupExecutionsFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Description: Stops in-progress CodePipeline executions and CodeBuild builds before deletion
+      Handler: index.handler
+      Runtime: python3.9
+      Role: !GetAtt CleanupExecutionsRole.Arn
+      Timeout: 300
+      Code:
+        ZipFile: |
+          import json
+          import time
+          import boto3
+          import logging
+          import cfnresponse
+
+          logger = logging.getLogger()
+          logger.setLevel(logging.INFO)
+
+          codepipeline = boto3.client('codepipeline')
+          codebuild = boto3.client('codebuild')
+
+          def stop_pipeline_executions(pipeline_name: str):
+            try:
+              resp = codepipeline.list_pipeline_executions(pipelineName=pipeline_name, maxResults=25)
+              for summary in resp.get('pipelineExecutionSummaries', []):
+                if summary.get('status') == 'InProgress':
+                  exec_id = summary.get('pipelineExecutionId')
+                  logger.info(f"Stopping pipeline execution {exec_id}")
+                  codepipeline.stop_pipeline_execution(pipelineName=pipeline_name, pipelineExecutionId=exec_id, abandon=True)
+            except Exception:
+              logger.exception("Failed stopping pipeline executions")
+
+          def stop_codebuild_builds(project_names):
+            for name in project_names:
+              try:
+                ids_resp = codebuild.list_builds_for_project(projectName=name)
+                for build_id in ids_resp.get('ids', []):
+                  try:
+                    logger.info(f"Stopping CodeBuild build {build_id}")
+                    codebuild.stop_build(id=build_id)
+                  except Exception:
+                    logger.exception(f"Failed stopping build {build_id}")
+              except Exception:
+                logger.exception(f"Failed listing builds for project {name}")
+
+            # Small wait for ENIs to detach
+            time.sleep(30)
+
+          def handler(event, context):
+            logger.info(f"Received event: {json.dumps(event)}")
+            req_type = event.get('RequestType')
+            props = event.get('ResourceProperties', {})
+            try:
+              if req_type == 'Delete':
+                pipeline_name = props.get('PipelineName')
+                project_names = props.get('ProjectNames', [])
+                stop_pipeline_executions(pipeline_name)
+                stop_codebuild_builds(project_names)
+              cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
+            except Exception:
+              logger.exception("CleanupExecutionsFunction failed")
+              cfnresponse.send(event, context, cfnresponse.FAILED, {})
+
+  StopPipelineAndBuilds:
+    Type: Custom::StopPipelineAndBuilds
+    DependsOn:
+      - codePipeline
+      - codeBuildApiServer
+      - codeBuildTophat
+      - codeBuildWebsite
+      - codeBuildColorist
+      - codeBuildDeploy
+      - codeBuildLambdas
+    Properties:
+      ServiceToken: !GetAtt CleanupExecutionsFunction.Arn
+      PipelineName: !Sub ${pAppName}-pipeline
+      ProjectNames:
+        - !Sub ${pAppName}-apiserver
+        - !Sub ${pAppName}-tophat
+        - !Sub ${pAppName}-website
+        - !Sub ${pAppName}-colorist
+        - !Sub ${pAppName}-deploy
+        - !Sub ${pAppName}-deploy-lambdas
 
 Outputs:
   Version:
