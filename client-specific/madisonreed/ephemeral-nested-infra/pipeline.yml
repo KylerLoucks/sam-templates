@@ -867,7 +867,7 @@ Resources:
     Properties:
       Description: Deletes objects from buckets provisioned by CloudFormation
       Handler: index.handler
-      Runtime: python3.9
+      Runtime: python3.11
       Role: !GetAtt LambdaRole.Arn
       Timeout: 120
       Code:
@@ -1101,13 +1101,19 @@ Resources:
                   - codebuild:ListBuildsForProject
                   - codebuild:StopBuild
                 Resource: '*'
+              - Effect: Allow
+                Action:
+                  - ec2:DescribeNetworkInterfaces
+                  - ec2:DetachNetworkInterface
+                  - ec2:DeleteNetworkInterface
+                Resource: '*'
 
   CleanupExecutionsFunction:
     Type: AWS::Lambda::Function
     Properties:
       Description: Stops in-progress CodePipeline executions and CodeBuild builds before deletion
       Handler: index.handler
-      Runtime: python3.9
+      Runtime: python3.11
       Role: !GetAtt CleanupExecutionsRole.Arn
       Timeout: 300
       Code:
@@ -1123,6 +1129,7 @@ Resources:
 
           codepipeline = boto3.client('codepipeline')
           codebuild = boto3.client('codebuild')
+          ec2 = boto3.client('ec2')
 
           def stop_pipeline_executions(pipeline_name: str):
             try:
@@ -1151,6 +1158,53 @@ Resources:
             # Small wait for ENIs to detach
             time.sleep(30)
 
+          def cleanup_network_interfaces(security_group_id: str):
+            start = time.time()
+            timeout_seconds = 300
+            poll_seconds = 10
+            while True:
+              try:
+                resp = ec2.describe_network_interfaces(
+                  Filters=[{'Name': 'group-id', 'Values': [security_group_id]}]
+                )
+                enis = resp.get('NetworkInterfaces', [])
+              except Exception:
+                logger.exception(f"Failed describing ENIs for SG {security_group_id}")
+                enis = []
+
+              if not enis:
+                logger.info("No ENIs found for security group; ENI cleanup complete")
+                return
+
+              # First, detach any attached ENIs
+              for eni in enis:
+                attachment = eni.get('Attachment')
+                eni_id = eni.get('NetworkInterfaceId')
+                if attachment and attachment.get('Status') == 'attached':
+                  attachment_id = attachment.get('AttachmentId')
+                  try:
+                    logger.info(f"Detaching ENI {eni_id} attachment {attachment_id}")
+                    ec2.detach_network_interface(AttachmentId=attachment_id, Force=True)
+                  except Exception:
+                    logger.exception(f"Failed detaching ENI {eni_id}")
+
+              # Then, delete any available ENIs
+              for eni in enis:
+                eni_id = eni.get('NetworkInterfaceId')
+                status = eni.get('Status')
+                if status == 'available':
+                  try:
+                    logger.info(f"Deleting available ENI {eni_id}")
+                    ec2.delete_network_interface(NetworkInterfaceId=eni_id)
+                  except Exception:
+                    logger.exception(f"Failed deleting ENI {eni_id}")
+
+              if time.time() - start >= timeout_seconds:
+                logger.warning("Timed out waiting for ENIs to detach/delete; proceeding anyway")
+                return
+
+              time.sleep(poll_seconds)
+
           def handler(event, context):
             logger.info(f"Received event: {json.dumps(event)}")
             req_type = event.get('RequestType')
@@ -1159,8 +1213,11 @@ Resources:
               if req_type == 'Delete':
                 pipeline_name = props.get('PipelineName')
                 project_names = props.get('ProjectNames', [])
+                security_group_id = props.get('SecurityGroupId')
                 stop_pipeline_executions(pipeline_name)
                 stop_codebuild_builds(project_names)
+                if security_group_id:
+                  cleanup_network_interfaces(security_group_id)
               cfnresponse.send(event, context, cfnresponse.SUCCESS, {})
             except Exception:
               logger.exception("CleanupExecutionsFunction failed")
@@ -1168,24 +1225,17 @@ Resources:
 
   StopPipelineAndBuilds:
     Type: Custom::StopPipelineAndBuilds
-    DependsOn:
-      - codePipeline
-      - codeBuildApiServer
-      - codeBuildTophat
-      - codeBuildWebsite
-      - codeBuildColorist
-      - codeBuildDeploy
-      - codeBuildLambdas
     Properties:
       ServiceToken: !GetAtt CleanupExecutionsFunction.Arn
-      PipelineName: !Sub ${pAppName}-pipeline
+      PipelineName: !Ref codePipeline
+      SecurityGroupId: !GetAtt codeBuildSecurityGroup.GroupId
       ProjectNames:
-        - !Sub ${pAppName}-apiserver
-        - !Sub ${pAppName}-tophat
-        - !Sub ${pAppName}-website
-        - !Sub ${pAppName}-colorist
-        - !Sub ${pAppName}-deploy
-        - !Sub ${pAppName}-deploy-lambdas
+        - !Ref codeBuildApiServer
+        - !Ref codeBuildTophat
+        - !Ref codeBuildWebsite
+        - !Ref codeBuildColorist
+        - !Ref codeBuildDeploy
+        - !Ref codeBuildLambdas
 
 Outputs:
   Version:
