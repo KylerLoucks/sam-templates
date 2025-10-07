@@ -116,6 +116,7 @@ Resources:
           Description: 'Allow SQL Server access from all sources'
 
   # For each CIDR block in the list, create a security group ingress rule
+  # Helpful docs: https://docs.aws.amazon.com/AWSCloudFormation/latest/TemplateReference/intrinsic-function-reference-foreach-example-resource.html#intrinsic-function-reference-foreach-example-non-alphanumeric
   Fn::ForEach::RdpCidrBlockRules:
     - CIDR # Identifier for the loop
     - !Ref pRdpCidrBlocks
