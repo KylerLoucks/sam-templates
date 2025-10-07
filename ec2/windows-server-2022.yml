@@ -1,4 +1,5 @@
 AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::LanguageExtensions
 Description: Deploys an EC2 instance with S3 and SSM permissions
 
 Parameters:
@@ -43,8 +44,22 @@ Parameters:
     Default: ''
     Description: (Optional) KMS Key ID or full ARN to encrypt root EBS volume. Uses Default encryption if not specified.
 
+  pEnableRdp:
+    Type: String
+    Default: false
+    AllowedValues: 
+     - true
+     - false
+    Description: (Optional) Enable RDP access to the EC2 instance. You can use fleet manager console to connect to the instance without the need for an RDP client.
+
+  pRdpCidrBlocks:
+    Type: CommaDelimitedList
+    Default: ''
+    Description: List of CIDR blocks allowed for RDP access (port 3389)
+
 Conditions:
   CondUseRootKms: !Not [ !Equals [ !Ref pRootVolumeKmsKeyId, '' ] ]
+  CondEnableRdp: !Equals [ !Ref pEnableRdp, 'true' ]
 
 Resources:
   # IAM Role for EC2 Instance with SSM Permissions
@@ -90,18 +105,29 @@ Resources:
   EC2SecurityGroup:
     Type: AWS::EC2::SecurityGroup
     Properties:
-      GroupDescription: Allow RDP and HTTP access
+      GroupDescription: Allow RDP and SQL Server access
       VpcId: !Ref pVpcId
       SecurityGroupIngress:
-        # - IpProtocol: tcp
-        #   FromPort: 22
-        #   ToPort: 22
-        #   CidrIp: 0.0.0.0/0  # Only use this for testing. Restrict IPs in production.
-        # Allow SQL Server access
+        # SQL Server access rule
         - IpProtocol: tcp
           FromPort: 1433
           ToPort: 1433
           CidrIp: 0.0.0.0/0
+          Description: 'Allow SQL Server access from all sources'
+
+  # For each CIDR block in the list, create a security group ingress rule
+  Fn::ForEach::RdpCidrBlockRules:
+    - CIDR # Identifier for the loop
+    - !Ref pRdpCidrBlocks
+    - 'Rdp&{CIDR}': # Output identifier for the loop
+        Type: AWS::EC2::SecurityGroupIngress
+        Properties:
+          GroupId: !GetAtt EC2SecurityGroup.GroupId
+          IpProtocol: tcp
+          FromPort: 3389
+          ToPort: 3389
+          CidrIp: !Sub ${CIDR}
+          Description: !Sub 'Allow RDP access from ${CIDR}'
 
   # EC2 Instance
   EC2Instance:
