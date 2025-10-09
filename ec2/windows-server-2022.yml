@@ -170,7 +170,24 @@ Resources:
     #   ResourceSignal:
     #     Timeout: PT3H # Timeout of 3 hours
 
+  # EIP
+
+  ec2Eip:
+    Type: AWS::EC2::EIP
+    Properties:
+      Domain: vpc
+
+  ec2EipAssoc:
+    Type: AWS::EC2::EIPAssociation
+    Properties:
+      InstanceId: !Ref EC2Instance
+      AllocationId: !GetAtt ec2Eip.AllocationId
+
+
 Outputs:
   InstanceId:
     Description: The EC2 instance ID
     Value: !Ref EC2Instance
+  EC2InstanceUrl:
+    Description: The EC2 instance URL
+    Value: !Sub https://${ec2Eip}
