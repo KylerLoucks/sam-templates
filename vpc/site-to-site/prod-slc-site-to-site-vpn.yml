@@ -1,0 +1,306 @@
+AWSTemplateFormatVersion: 2010-09-09
+Description: Template creates a site-to-site VPN tunnel using a Virtual Private Gateway with static routes or BGP.
+
+Parameters:
+
+  pBgpAsn:
+    Type: String
+    Description: Verify if it is the same as on-prem for dynamic routes
+    Default: 65000
+
+  pCgwIp:
+    Type: String
+    Description: On-prem Firewall public IP/WAN IP
+    Default: 38.142.233.98
+
+  pVpnName:
+    Type: String
+    Description: Used to name all resources including CGW, VGW, etc.
+    Default: AWS-to-SLC
+
+  pVpcId:
+    Type: AWS::EC2::VPC::Id
+    Description: Local VPC ID to establish the tunnel for
+    Default: vpc-03af5e8f4ae2bda5e
+
+  pVpcStackName:
+    Type: String
+    Description: Route Table and NACL info imported from the stack
+    Default: vpc-production
+
+  pDestinationSubnet01:
+    Type: String
+    Description: Static IP 01 on-prem to publish to the VPN tunnel
+    Default: 10.100.105.0/24
+
+  pNaclRuleNumber:
+    Type: Number
+    Default: 1101
+    Description: Rule number to aleviate overlap with other peering connections 
+    AllowedValues:
+        - 300
+        - 400
+        - 500
+        - 600
+        - 700
+        - 800
+        - 900
+        - 1101
+  
+  pStaticRoute:
+    Type: String
+    Description: Static or Dynamic (GBP) routes?
+    Default: static
+    AllowedValues:
+        - static
+        - dynamic
+
+  pPropRoutes:
+    Type: String
+    Description: True will automatically create routes in ALL VPC route tables for the the VPN tunnel
+    Default: true
+    AllowedValues:
+        - true
+        - false
+  
+  pVpnConnectPrivSubnets:
+    Type: String
+    Default: true
+    Description: True will create NACL entries for both Private Subnets
+    AllowedValues:
+      - true
+      - false
+    
+  pVpnConnectPrivDataSubnets:
+    Type: String
+    Default: true
+    Description: True will create NACL entries for both Private Data Subnets
+    AllowedValues:
+      - true
+      - false
+
+  pEnvironmentTag:
+    Type: String
+    Description: Environment type for default resource tagging.
+    Default: production
+    AllowedValues:
+      - development
+      - staging
+      - qa
+      - dr
+      - sandbox
+      - production
+
+Metadata:
+  AWS::CloudFormation::Interface:
+    ParameterLabels:
+      pBgpAsn:
+        default: Border Gateway Protocol ASN
+      pCgwIp:
+        default: Customer Gateway IP
+      pVpnName:
+        default: Friendly VPN Name
+      pVpcId:
+        default: VPC ID - Local
+      pVpcStackName:
+        default: VPC CloudFormation Stack Name
+      pDestinationSubnet01:
+        default: On-Prem Internal CIDR
+      pNaclRuleNumber:
+        default: NACL Rule Number
+      pStaticRoute:
+        default: Static or Dynamic Route?
+      pPropRoutes:
+        default: Propogate Routes?
+      pVpnConnectPrivSubnets:
+        default: VPN Connect Private Subnets?
+      pVpnConnectPrivDataSubnets:
+        default: VPN Connect Private Data Subnets?
+      pEnvironmentTag:
+        default: Environment Tag
+
+    ParameterGroups:
+      - Label:
+          default: VPN Settings
+        Parameters:
+            - pBgpAsn
+            - pCgwIp
+            - pVpnName
+            - pVpcId
+            - pStaticRoute
+      - Label:
+          default: VPN Route/NACL Settings
+        Parameters:
+            - pVpcStackName
+            - pDestinationSubnet01
+            - pPropRoutes
+            - pVpnConnectPrivSubnets
+            - pVpnConnectPrivDataSubnets
+            - pNaclRuleNumber
+      - Label:
+          default: Tagging
+        Parameters:
+          - pEnvironmentTag
+
+Conditions:
+
+  CondStatic: !Equals [static, !Ref pStaticRoute]
+  CondPropogateRoutes: !Equals [true, !Ref pPropRoutes]
+  CondConnectPrivSubnets: !And [!Equals [true, !Ref pVpnConnectPrivSubnets], !Equals [static, !Ref pStaticRoute]]
+  CondConnectPrivDataSubnets: !And [!Equals [true, !Ref pVpnConnectPrivDataSubnets], !Equals [static, !Ref pStaticRoute]]
+
+Resources:
+
+  cgw01:
+    Type: AWS::EC2::CustomerGateway
+    Properties: 
+      BgpAsn: !Ref pBgpAsn
+      IpAddress: !Ref pCgwIp
+      Tags: 
+        - Key: Name
+          Value: !Sub ${pVpnName}-cgw01
+        - Key: environment
+          Value: !Ref pEnvironmentTag
+        - Key: controlled-by
+          Value: !Sub cloudformation-${AWS::StackName}
+      Type: ipsec.1
+
+  
+  # vgw01:
+  #   Type: AWS::EC2::VPNGateway
+  #   Properties:
+  #     Tags: 
+  #       - Key: Name
+  #         Value: !Sub ${pVpnName}-vgw01
+  #       - Key: environment
+  #         Value: !Ref pEnvironmentTag
+  #       - Key: controlled-by
+  #         Value: !Sub cloudformation-${AWS::StackName}
+  #     Type: ipsec.1
+
+  
+  # vgw01Attach:
+  #   Type: AWS::EC2::VPCGatewayAttachment
+  #   Properties:
+  #     VpcId: !Ref pVpcId
+  #     VpnGatewayId: vgw-0eaf696643fff6007
+  
+  
+  vgw01RoutePropogation:
+    Type: AWS::EC2::VPNGatewayRoutePropagation
+    # DependsOn: vgw01Attach
+    Condition: CondPropogateRoutes
+    Properties: 
+      RouteTableIds: 
+        - Fn::ImportValue: !Sub ${pVpcStackName}-route-table-pubSubnet-01
+        - Fn::ImportValue: !Sub ${pVpcStackName}-route-table-pubSubnet-02
+        - Fn::ImportValue: !Sub ${pVpcStackName}-route-table-privSubnet-01
+        - Fn::ImportValue: !Sub ${pVpcStackName}-route-table-privSubnet-02
+        - Fn::ImportValue: !Sub ${pVpcStackName}-route-table-privDataSubnet-01
+        - Fn::ImportValue: !Sub ${pVpcStackName}-route-table-privDataSubnet-02
+      VpnGatewayId: vgw-0eaf696643fff6007
+
+  
+  siteToSiteVpn:
+    Type: AWS::EC2::VPNConnection
+    Properties:
+      CustomerGatewayId: !Ref cgw01
+      StaticRoutesOnly: !If [CondStatic, true , false ]
+      Tags:
+        - Key: Name
+          Value: !Sub ${pVpnName}
+        - Key: environment
+          Value: !Ref pEnvironmentTag
+        - Key: controlled-by
+          Value: !Sub cloudformation-${AWS::StackName}
+      Type: ipsec.1
+      VpnGatewayId: vgw-0eaf696643fff6007
+  
+  
+  staticRoute01:
+    Type: AWS::EC2::VPNConnectionRoute
+    Condition: CondStatic
+    Properties: 
+      DestinationCidrBlock: !Ref pDestinationSubnet01
+      VpnConnectionId: !Ref siteToSiteVpn
+  
+  
+  # NACL Rules
+
+  naclPubSubnetAz01Ingress01:
+    Type: AWS::EC2::NetworkAclEntry
+    Condition: CondConnectPrivSubnets
+    Properties:
+      CidrBlock: !Ref pDestinationSubnet01
+      Egress: false
+      NetworkAclId:
+        Fn::ImportValue: !Sub ${pVpcStackName}-nacl-pubSubnet-01
+      Protocol: -1
+      RuleAction: allow
+      RuleNumber: !Ref pNaclRuleNumber
+
+  naclPubSubnetAz02Ingress01:
+    Type: AWS::EC2::NetworkAclEntry
+    Condition: CondConnectPrivSubnets
+    Properties:
+      CidrBlock: !Ref pDestinationSubnet01
+      Egress: false
+      NetworkAclId:
+        Fn::ImportValue: !Sub ${pVpcStackName}-nacl-pubSubnet-02
+      Protocol: -1
+      RuleAction: allow
+      RuleNumber: !Ref pNaclRuleNumber
+
+  naclPrivSubnetAz01Ingress01:
+    Type: AWS::EC2::NetworkAclEntry
+    Condition: CondConnectPrivSubnets
+    Properties:
+      CidrBlock: !Ref pDestinationSubnet01
+      Egress: false
+      NetworkAclId:
+        Fn::ImportValue: !Sub ${pVpcStackName}-nacl-privSubnet-01
+      Protocol: -1
+      RuleAction: allow
+      RuleNumber: !Ref pNaclRuleNumber
+
+  naclPrivSubnetAz02Ingress01:
+    Type: AWS::EC2::NetworkAclEntry
+    Condition: CondConnectPrivSubnets
+    Properties:
+      CidrBlock: !Ref pDestinationSubnet01
+      Egress: false
+      NetworkAclId:
+        Fn::ImportValue: !Sub ${pVpcStackName}-nacl-privSubnet-02
+      Protocol: -1
+      RuleAction: allow
+      RuleNumber: !Ref pNaclRuleNumber
+
+  naclPrivDataSubnetAz01Ingress01:
+    Type: AWS::EC2::NetworkAclEntry
+    Condition: CondConnectPrivDataSubnets
+    Properties:
+      CidrBlock: !Ref pDestinationSubnet01
+      Egress: false
+      NetworkAclId:
+        Fn::ImportValue: !Sub ${pVpcStackName}-nacl-privDataSubnet-01
+      Protocol: -1
+      RuleAction: allow
+      RuleNumber: !Ref pNaclRuleNumber
+  
+  naclPrivDataSubnetAz01Ingress02:
+    Type: AWS::EC2::NetworkAclEntry
+    Condition: CondConnectPrivDataSubnets
+    Properties:
+      CidrBlock: !Ref pDestinationSubnet01
+      Egress: false
+      NetworkAclId:
+        Fn::ImportValue: !Sub ${pVpcStackName}-nacl-privDataSubnet-02
+      Protocol: -1
+      RuleAction: allow
+      RuleNumber: !Ref pNaclRuleNumber
+
+Outputs:
+
+  TemplateVersion:
+    Value: site-to-site-vpn-0.2
+    Description: Template Version
