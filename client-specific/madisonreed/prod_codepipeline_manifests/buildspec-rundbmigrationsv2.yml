@@ -1,0 +1,49 @@
+version: 0.2
+
+# CodePipeline Parameters required:
+# - CONFIG_DECRYPT_KEY ???? (Stored in Param store)
+# - MIGRATION_ENV (ex: aws_new_staging)
+# - POST_MIGRATION (ex: true | false )
+env:
+  git-credential-helper: yes
+
+phases:
+  install:
+    runtime-versions:
+      nodejs: 18
+  pre_build:
+    commands:
+      - echo "Setting up environment variables..."
+      - GLOBAL_TZ='PDT\|PST'
+      - NODE_PATH=$(pwd)/mr_modules
+      - NODE_ENV=ecs
+  build:
+    commands:
+      - echo Build started on $(date)
+      - echo node $(node -v) \(npm $(npm -v)\)
+      - bin/prod-node-modules.sh -t build
+      - bin/generateSecureConfig.js -e $NODE_ENV --microservice || true
+      - npm ci
+
+      - NODE_CONFIG_PATH=$NODE_PATH/config
+      - DB_MIGRATE_BIN_PATH=${pwd}/node_modules/db-migrate/bin
+      - MIGRATIONS_PATH=${pwd}/db/migrations
+      - POST_MIGRATION_FLAG=$(test "$POST_MIGRATION" == "true" && echo "-p" || echo "")
+      - node -v
+      - env
+      - echo "Environment variables set."
+
+      - echo "Running db migrations..."
+      - |
+        if [ ! -z "$POST_MIGRATION_FLAG" ]; then
+          echo "Running post-migration script..."
+          bin/mrmigrate-all.sh -e $MIGRATION_ENV $POST_MIGRATION_FLAG
+        else
+          echo "Post-migration flag not set"
+          bin/mrmigrate-all.sh -e $MIGRATION_ENV -m ecs
+        fi
+  post_build:
+    commands:
+      - echo "Migration process completed."
+
+

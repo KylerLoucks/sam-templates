@@ -1,0 +1,75 @@
+version: 0.2
+ 
+phases:
+  install:
+    runtime-versions:
+      nodejs: 18
+  pre_build:
+    commands:
+      - GLOBAL_TZ='PDT\|PST'
+      - echo Logging in to Amazon ECR...
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - IMAGE_TAG=${COMMIT_HASH:=latest}
+      - REPOSITORY_URI=$ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPO_NAME
+      - NODE_PATH=$(pwd)/mr_modules
+      - NODE_ENV=ecs
+      - npm install -g npm@^10.7.0
+  build:
+    commands:
+      - echo Build started on $(date)
+      - echo node $(node -v) \(npm $(npm -v)\)
+      - bin/prod-node-modules.sh -t build
+      - bin/generateSecureConfig.js -e $NODE_ENV --microservice || true # TODO: no fail for now
+      - bin/downloadGeoIpDBFromS3.sh # needed for tophat?
+      - bin/generateCodebaseJson # needed for tophat?
+      # - npm run gulp-build-raven # needed for tophat? only raven?
+      - echo Building the Docker images...
+      - |
+        docker build -f docker/tophat/Dockerfile -t $REPOSITORY_URI:latest . \
+          --build-arg AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION \
+          --build-arg ACCOUNT_ID=$ACCOUNT_ID \
+          --build-arg BASE_IMAGE_REPO_NAME=$BASE_IMAGE_REPO_NAME \
+          --build-arg BASE_IMAGE_TAG=$BASE_IMAGE_TAG \
+          --build-arg NODE_ENV=$NODE_ENV \
+      - docker tag $REPOSITORY_URI:latest $REPOSITORY_URI:$IMAGE_TAG
+  post_build:
+    commands:
+      - echo Build completed on $(date)
+      - echo Pushing the Docker image...
+      - docker push $REPOSITORY_URI:latest
+      - docker push $REPOSITORY_URI:$IMAGE_TAG
+      - echo Writing image definitions file...
+      - >
+        aws ecs describe-task-definition --task-definition tophat |
+          jq '.taskDefinition' | 
+          jq 'del(.taskDefinitionArn,.revision,.registeredAt,.registeredBy,.requiresAttributes)' |
+          jq '.containerDefinitions[0].image = "'"$REPOSITORY_URI:$IMAGE_TAG"'"' |
+          jq '.executionRoleArn = "'"$TASK_EXEC_ROLE_ARN"'"' |
+          jq '.taskRoleArn = "'"$TASK_ROLE_ARN"'"' > tophat-definition.json
+      - cat tophat-definition.json
+      - >
+        aws ecs describe-task-definition --task-definition raven |
+          jq '.taskDefinition' | 
+          jq 'del(.taskDefinitionArn,.revision,.registeredAt,.registeredBy,.requiresAttributes)' |
+          jq '.containerDefinitions[0].image = "'"$REPOSITORY_URI:$IMAGE_TAG"'"' |
+          jq '.executionRoleArn = "'"$TASK_EXEC_ROLE_ARN_RAVEN"'"' |
+          jq '.taskRoleArn = "'"$TASK_ROLE_ARN_RAVEN"'"' > raven-definition.json
+      - cat raven-definition.json
+      - >
+        aws ecs describe-task-definition --task-definition socketio |
+          jq '.taskDefinition' | 
+          jq 'del(.taskDefinitionArn,.revision,.registeredAt,.registeredBy,.requiresAttributes)' |
+          jq '.containerDefinitions[0].image = "'"$REPOSITORY_URI:$IMAGE_TAG"'"' |
+          jq '.executionRoleArn = "'"$TASK_EXEC_ROLE_ARN_SOCKETIO"'"' |
+          jq '.taskRoleArn = "'"$TASK_ROLE_ARN_SOCKETIO"'"' > socketio-definition.json
+      - cat socketio-definition.json
+artifacts:
+  files: 
+    - tophat-definition.json
+    - socketio-definition.json
+    - raven-definition.json
+    - tophat-appspec.yaml
+    - socketio-appspec.yaml
+    - raven-appspec.yaml
+  discard-paths: true

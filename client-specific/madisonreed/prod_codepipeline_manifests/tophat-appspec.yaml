@@ -1,0 +1,15 @@
+# 1. The <TASK_DEFINITON> placeholder is automatically replaced when using `CodeDeployToECS` 'deploy' stage action.
+# Behind the scenes, CodeDeploy creates a new TaskDefinition revision with the values defined in `taskdef.json`.
+# CodeDeploy then looks for a <TASK_DEFINITION> placeholder and replaces it with the TaskDef revision it made.
+
+# 2. You can generate the taskdef.json file through the CLI (ecs describe-task-definition API) or in the console via:
+# ECS -> Task definitions -> <YOUR-TASK-DEF> -> 'Create new revision with JSON'
+version: 0.0
+Resources:
+  - TargetService:
+      Type: AWS::ECS::Service
+      Properties:
+        TaskDefinition: "<TASK_DEFINITION>"
+        LoadBalancerInfo:
+          ContainerName: tophat
+          ContainerPort: 80

@@ -1,0 +1,70 @@
+version: 0.2
+ 
+phases:
+  install:
+    runtime-versions:
+      nodejs: 18
+  pre_build:
+    commands:
+      - GLOBAL_TZ='PDT\|PST'
+      - echo Logging in to Amazon ECR...
+      - aws ecr get-login-password --region $AWS_DEFAULT_REGION | docker login --username AWS --password-stdin $ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com
+      - COMMIT_HASH=$(echo $CODEBUILD_RESOLVED_SOURCE_VERSION | cut -c 1-7)
+      - IMAGE_TAG=${COMMIT_HASH:=latest}
+      - REPOSITORY_URI=$ACCOUNT_ID.dkr.ecr.$AWS_DEFAULT_REGION.amazonaws.com/$ECR_REPO_NAME
+      # TODO: openssl-legacy-provider is insecure! using this option until colorist is updated.
+      - NODE_OPTIONS=--openssl-legacy-provider
+      - NODE_PATH=$(pwd)/mr_modules
+      - NODE_ENV=ecs
+      - npm install -g npm@^10.7.0
+  build:
+    commands:
+      - echo Build started on $(date)
+      - echo node $(node -v) \(npm $(npm -v)\)
+      - bin/prod-node-modules.sh -t build
+      - bin/generateSecureConfig.js -e $NODE_ENV --microservice
+      - bin/generateCodebaseJson # required for colorist
+      - cd raven
+      - npm ci && npm run build
+      - cd ..
+      - echo Building the Docker images...
+      - env
+      - |
+        docker build -f docker/colorist/Dockerfile -t $REPOSITORY_URI:latest . \
+          --build-arg AWS_DEFAULT_REGION=$AWS_DEFAULT_REGION \
+          --build-arg ACCOUNT_ID=$ACCOUNT_ID \
+          --build-arg BASE_IMAGE_REPO_NAME=$BASE_IMAGE_REPO_NAME \
+          --build-arg BASE_IMAGE_TAG=$BASE_IMAGE_TAG \
+          --build-arg NODE_ENV=$NODE_ENV \
+      - docker tag $REPOSITORY_URI:latest $REPOSITORY_URI:$IMAGE_TAG
+  post_build:
+    commands:
+      - echo Build completed on $(date)
+      - echo Pushing the Docker image...
+      - docker push $REPOSITORY_URI:latest
+      - docker push $REPOSITORY_URI:$IMAGE_TAG
+      - echo Writing image definitions file...
+      - >
+        aws ecs describe-task-definition --task-definition colorist |
+          jq '.taskDefinition' | 
+          jq 'del(.taskDefinitionArn,.revision,.registeredAt,.registeredBy,.requiresAttributes)' |
+          jq '.containerDefinitions[0].image = "'"$REPOSITORY_URI:$IMAGE_TAG"'"' |
+          jq '.executionRoleArn = "'"$TASK_EXEC_ROLE_ARN"'"' |
+          jq '.taskRoleArn = "'"$TASK_ROLE_ARN"'"' > colorist-definition.json
+      - cat colorist-definition.json
+
+      - >
+        aws ecs describe-task-definition --task-definition foss |
+          jq '.taskDefinition' | 
+          jq 'del(.taskDefinitionArn,.revision,.registeredAt,.registeredBy,.requiresAttributes)' |
+          jq '.containerDefinitions[0].image = "'"$REPOSITORY_URI:$IMAGE_TAG"'"' |
+          jq '.executionRoleArn = "'"$TASK_EXEC_ROLE_ARN"'"' |
+          jq '.taskRoleArn = "'"$TASK_ROLE_ARN"'"' > foss-definition.json
+      - cat foss-definition.json
+artifacts:
+  files: 
+    - colorist-definition.json
+    - colorist-appspec.yaml
+    - foss-appspec.yaml
+    - foss-definition.json
+  discard-paths: true
